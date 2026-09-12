@@ -1,0 +1,282 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ActiveStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum ProductionOrderStatus {
+  DRAFT
+  RELEASED
+  IN_PRODUCTION
+  COMPLETED
+  CANCELLED
+}
+
+enum ProductionPlanStatus {
+  DRAFT
+  PROPOSED
+  ACCEPTED
+  ARCHIVED
+}
+
+enum PlanLineStatus {
+  UNSCHEDULED
+  PARTIALLY_SCHEDULED
+  FULLY_SCHEDULED
+}
+
+enum ScheduleEntryStatus {
+  DRAFT
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+  CANCELLED
+}
+
+model Customer {
+  id           String       @id @default(uuid())
+  externalRef  String?
+  code         String       @unique
+  name         String
+  contactNotes String?
+  active       ActiveStatus @default(ACTIVE)
+  orders       ProductionOrder[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Product {
+  id                 String              @id @default(uuid())
+  externalRef         String?
+  sku                String              @unique
+  name               String
+  uom                String
+  productType        String
+  active             ActiveStatus        @default(ACTIVE)
+  productionOrders   ProductionOrder[]
+  planLines          PlanLine[]
+  operationTemplates OperationTemplate[]
+  scheduleEntries    ScheduleEntry[]
+  batches            Batch[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+}
+
+model ProductionOrder {
+  id              String                @id @default(uuid())
+  externalRef      String?
+  orderNo          String                @unique
+  customerId       String?
+  productId        String
+  quantity         Decimal
+  dueDate          DateTime
+  priority         Priority              @default(NORMAL)
+  status           ProductionOrderStatus @default(DRAFT)
+  customer         Customer?             @relation(fields: [customerId], references: [id])
+  product          Product               @relation(fields: [productId], references: [id])
+  scheduleEntries  ScheduleEntry[]
+  batches          Batch[]
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+}
+
+model ProductionPlan {
+  id             String               @id @default(uuid())
+  externalRef     String?
+  planName        String
+  dateRangeStart  DateTime
+  dateRangeEnd    DateTime
+  status          ProductionPlanStatus @default(DRAFT)
+  ownerName       String?
+  planLines       PlanLine[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+model PlanLine {
+  uom                 String?
+  activityType        String?
+  unitWeightMg        Decimal? @db.Decimal(24, 9)
+  batchSizeKg         Decimal? @db.Decimal(24, 9)
+  teamId              String?
+  team                ProjectTeam? @relation(fields: [teamId], references: [id])
+  id                  String         @id @default(uuid())
+  externalRef          String?
+  planId              String
+  productionOrderId   String?
+  productId           String
+  quantity            Decimal
+  plannedDate         DateTime
+  priority            Priority       @default(NORMAL)
+  status              PlanLineStatus @default(UNSCHEDULED)
+  orderReference      String?
+  notes               String?
+  plan                ProductionPlan @relation(fields: [planId], references: [id])
+  product             Product        @relation(fields: [productId], references: [id])
+  scheduleEntries     ScheduleEntry[]
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+}
+
+model WorkCentre {
+  id                 String              @id @default(uuid())
+  externalRef         String?
+  code               String              @unique
+  name               String
+  description        String?
+  active             ActiveStatus        @default(ACTIVE)
+  machines           Machine[]
+  operationTemplates OperationTemplate[]
+  scheduleEntries    ScheduleEntry[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+}
+
+model Machine {
+  capacity        Decimal? @db.Decimal(24, 9)
+  capacityUom     String?
+  id              String          @id @default(uuid())
+  externalRef      String?
+  code            String          @unique
+  name            String
+  workCentreId    String
+  capacityNotes   String?
+  active          ActiveStatus    @default(ACTIVE)
+  workCentre      WorkCentre      @relation(fields: [workCentreId], references: [id])
+  scheduleEntries ScheduleEntry[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model Employee {
+  id        String       @id @default(uuid())
+  externalRef String?
+  name      String
+  role      String
+  active    ActiveStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model OperationTemplate {
+  id                  String     @id @default(uuid())
+  productId           String
+  sequenceNo          Int
+  operationName       String
+  defaultWorkCentreId String
+  estDurationMin      Int
+  product             Product    @relation(fields: [productId], references: [id])
+  defaultWorkCentre   WorkCentre @relation(fields: [defaultWorkCentreId], references: [id])
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+}
+
+model ScheduleEntry {
+  teamId            String?
+  team              ProjectTeam? @relation(fields: [teamId], references: [id])
+  id                String              @id @default(uuid())
+  externalRef        String?
+  planLineId         String?
+  productionOrderId  String?
+  productId          String
+  workCentreId       String
+  machineId          String?
+  startAt            DateTime
+  endAt              DateTime
+  status             ScheduleEntryStatus @default(DRAFT)
+  reasonCode         String?
+  notes              String?
+  changedBy          String?
+  planLine           PlanLine?           @relation(fields: [planLineId], references: [id])
+  productionOrder    ProductionOrder?    @relation(fields: [productionOrderId], references: [id])
+  product            Product             @relation(fields: [productId], references: [id])
+  workCentre         WorkCentre          @relation(fields: [workCentreId], references: [id])
+  machine            Machine?            @relation(fields: [machineId], references: [id])
+  changeLogs         ScheduleChangeLog[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([machineId, startAt, endAt])
+  @@index([teamId, startAt])
+}
+
+model Department {
+  id     String @id @default(uuid())
+  name   String
+  active ActiveStatus @default(ACTIVE)
+  teams  ProjectTeam[]
+}
+
+model MeasurementUnit {
+  id     String @id @default(uuid())
+  name   String @unique
+  active ActiveStatus @default(ACTIVE)
+}
+
+model ActivityType {
+  id     String @id @default(uuid())
+  name   String @unique
+  active ActiveStatus @default(ACTIVE)
+}
+
+model ProjectTeam {
+  id           String @id @default(uuid())
+  departmentId String
+  name         String
+  active       ActiveStatus @default(ACTIVE)
+  department   Department @relation(fields: [departmentId], references: [id])
+  planLines    PlanLine[]
+  scheduleEntries ScheduleEntry[]
+  @@unique([departmentId, name])
+}
+
+model Batch {
+  id                String                 @id @default(uuid())
+  externalRef        String?
+  batchNo            String                 @unique
+  productId          String
+  productionOrderId  String?
+  status             String
+  product            Product                @relation(fields: [productId], references: [id])
+  productionOrder    ProductionOrder?       @relation(fields: [productionOrderId], references: [id])
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+}
+
+model Material {
+  id        String       @id @default(uuid())
+  externalRef String?
+  code      String       @unique
+  name      String
+  uom       String
+  active    ActiveStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model ScheduleChangeLog {
+  id              String        @id @default(uuid())
+  scheduleEntryId String
+  changedBy       String
+  changeType      String
+  beforeJson      Json?
+  afterJson       Json?
+  changedAt       DateTime      @default(now())
+  scheduleEntry   ScheduleEntry @relation(fields: [scheduleEntryId], references: [id])
+}
