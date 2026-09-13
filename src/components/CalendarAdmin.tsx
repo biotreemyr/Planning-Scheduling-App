@@ -13,7 +13,8 @@ const sections: { key: Section; label: string; singular: string }[] = [
   { key: "people", label: "People & access", singular: "person" }, { key: "machines", label: "Machines", singular: "machine" }
 ];
 
-export function CalendarAdmin({ directory: d, onSave, machines, workCentres, onMachine, onDeleteMachine }: {
+export function CalendarAdmin({ directory: d, onSave, machines, workCentres, onMachine, onDeleteMachine, onOpenCalendar }: {
+  onOpenCalendar: (unitId: string) => void;
   directory: CalendarDirectory; onSave: (directory: CalendarDirectory) => string[];
   machines: Machine[]; workCentres: WorkCentre[]; onMachine: (machine: Machine) => string[];
   onDeleteMachine: (id: string) => string[];
@@ -58,7 +59,7 @@ export function CalendarAdmin({ directory: d, onSave, machines, workCentres, onM
     </section>
     <section className="admin-saved-area"><h2>Existing {selectedSection.label.toLowerCase()} <span className="badge neutral">{rows.length}</span></h2>
       {pendingDelete ? <div className="admin-delete-confirm" role="alert"><p>Delete <strong>{pendingDelete.name}</strong>?{section === "units" || section === "processes" ? " Unused calendar links and access assignments will also be removed." : ""}</p><button type="button" className="calendar-button" onClick={remove}>Confirm delete</button><button type="button" className="calendar-button" onClick={() => { setPendingDelete(null); setNotice(""); }}>Cancel</button>{notice ? <p className="admin-delete-error">{notice}</p> : null}</div> : null}
-      <AdminRows rows={rows.map((item) => ({ ...item, detail: summary(item.id) }))} detailLabel={section === "units" ? "Processes" : section === "processes" ? "Units" : "Details"} onEdit={(id) => { setEditing(id); setPendingDelete(null); setNotice(""); }} onDelete={(id) => { setPendingDelete({ id, name: rows.find((item) => item.id === id)!.name }); setNotice(""); }} />
+      <AdminRows onOpenCalendar={section === "units" ? onOpenCalendar : undefined} rows={rows.map((item) => ({ ...item, detail: summary(item.id) }))} detailLabel={section === "units" ? "Processes" : section === "processes" ? "Units" : "Details"} onEdit={(id) => { setEditing(id); setPendingDelete(null); setNotice(""); }} onDelete={(id) => { setPendingDelete({ id, name: rows.find((item) => item.id === id)!.name }); setNotice(""); }} />
     </section>
   </section>;
 }

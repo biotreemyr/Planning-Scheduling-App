@@ -590,14 +590,15 @@ function TeamWorkspace() {
   const [directory, setDirectory] = useState(emptyDirectory);
   const [memberId, setMemberId] = useState("admin");
   const member = directory.people.find((item) => item.id === memberId)!;
-  const [calendarSelection, setCalendarSelection] = useState("");
+  const [unitSelection, setUnitSelection] = useState("");
+  const availableUnits = directory.units.filter((item) => member.role === "admin" || member.unitIds.includes(item.id));
+  const unit = availableUnits.find((item) => item.id === unitSelection) ?? availableUnits[0];
   const allowedCalendars = accessibleCalendars(member, directory);
-  const calendar = allowedCalendars.find((item) => item.id === calendarSelection) ?? allowedCalendars[0];
+  const calendar = allowedCalendars.find((item) => item.unitId === unit?.id);
   const calendarId = calendar?.id ?? "";
   const [processSelection, setProcessSelection] = useState<string[] | null>(null);
-  const unitCalendars = allowedCalendars.filter((item) => item.unitId === calendar?.unitId);
-  const visibleCalendars = selectedUnitCalendars(member, directory, calendar?.unitId ?? "", processSelection);
-  const unit = directory.units.find((item) => item.id === calendar?.unitId);
+  const unitCalendars = allowedCalendars.filter((item) => item.unitId === unit?.id);
+  const visibleCalendars = selectedUnitCalendars(member, directory, unit?.id ?? "", processSelection);
   const canPlan = member.role === "planner" && !!calendar;
   const canProduce = member.role === "production" && !!calendar;
   const canManage = member.role === "admin";
@@ -715,7 +716,7 @@ function TeamWorkspace() {
     });
   }
   const filterControls = <div className="calendar-filters">
-    <label>Unit<select value={calendar?.unitId ?? ""} disabled={!calendar} onChange={(event) => { setCalendarSelection(allowedCalendars.find((item) => item.unitId === event.target.value)!.id); setProcessSelection(null); setSelectedActivity(null); }}>{!calendar ? <option value="">No unit assigned</option> : directory.units.filter((item) => allowedCalendars.some((entry) => entry.unitId === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+    <label>Unit<select value={unit?.id ?? ""} disabled={!unit} onChange={(event) => { setUnitSelection(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{!unit ? <option value="">No unit assigned</option> : availableUnits.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     <fieldset className="process-ticks"><legend>Processes</legend>
       <label><input type="checkbox" checked={unitCalendars.length > 0 && visibleCalendars.length === unitCalendars.length} onChange={(event) => { setProcessSelection(event.target.checked ? null : []); setSelectedActivity(null); }} />All</label>
       {unitCalendars.map((item) => <label key={item.id}><input type="checkbox" checked={visibleCalendars.some((entry) => entry.id === item.id)} onChange={(event) => { const ids = visibleCalendars.map((entry) => entry.id); setProcessSelection(event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id)); setSelectedActivity(null); }} />{item.name}</label>)}
@@ -726,8 +727,9 @@ function TeamWorkspace() {
     <div className="workstation-content">
       <header className="workstation-topbar"><span>Bio Tree / Production</span><label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label></header>
       {activeTab !== "planner" ? <div className="workspace-heading"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1></div> : null}
-      {!calendar && activeTab !== "master" ? <p>No calendar assigned. Contact your administrator.</p> : null}
-      {calendar && activeTab === "planner" ? <PlannerBoard processNames={processNames} key={`${calendarId}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} onSelect={setSelectedActivity} planLines={planLines} products={products}
+      {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
+      {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
+      {unit && activeTab === "planner" ? <PlannerBoard processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} onSelect={setSelectedActivity} planLines={planLines} products={products}
         onMoveLine={(id, date) => { if (canPlan && planLines.some((line) => line.id === id)) setData((current) => ({ ...current, lines: current.lines.map((line) => line.id === id && !line.completedAt ? { ...line, plannedDate: date } : line) })); }}
         onAddLine={(line) => { if (canPlan && visibleCalendars.some((item) => item.id === line.calendarId) && products.some((item) => item.id === line.productId && item.active === "Active") && Number.isFinite(line.quantity) && line.quantity > 0) setData((current) => ({ ...current, lines: [...current.lines, line] })); }} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} machines={activityMachines} entries={entries.filter((item) => item.planLineId === selectedLine.id)} canPlan={canPlan && !selectedLine.completedAt} canProduce={canProduce && !selectedLine.completedAt} onClose={() => setSelectedActivity(null)} onProduction={saveProduction}
@@ -736,7 +738,7 @@ function TeamWorkspace() {
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
         <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements"].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>
-        {adminSection === "Configuration" ? <CalendarAdmin directory={directory} onSave={saveDirectory} machines={machines} workCentres={workCentres} onMachine={saveMachine} onDeleteMachine={deleteMachine} /> : null}
+        {adminSection === "Configuration" ? <CalendarAdmin directory={directory} onSave={saveDirectory} machines={machines} workCentres={workCentres} onMachine={saveMachine} onDeleteMachine={deleteMachine} onOpenCalendar={(unitId) => { setUnitSelection(unitId); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
         {adminSection === "Measurements" ? <MeasurementAdmin usedUoms={[...products.map((item) => item.uom), ...data.lines.map((item) => item.uom ?? ""), ...data.transfers.map((item) => item.uom), ...machines.map((item) => item.capacityUom ?? "")]} usedActivities={data.lines.map((item) => item.activityType ?? "")} /> : null}
         {adminSection === "Products" ? <CatalogAdmin products={products} workCentres={workCentres} onProduct={(item) => {
           if (products.some((old) => old.id === item.id && old.uom !== item.uom) && (data.lines.some((line) => line.productId === item.id) || data.entries.some((entry) => entry.productId === item.id))) return ["This product has planning or production records. Keep its existing UOM."];
