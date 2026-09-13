@@ -25,13 +25,14 @@ import { CatalogAdmin } from "@/components/CatalogAdmin";
 import { validateDirectoryChange } from "@/lib/services/adminConfiguration";
 import { EndProduction, WipInbox } from "@/components/ProductionFlow";
 import { accessibleCalendars, selectedUnitCalendars, scopeCalendarRecords, type CalendarDirectory } from "@/lib/domain/calendarAccess";
-import { emptyDirectory } from "@/lib/domain/emptyWorkspace";
+import type { WorkspaceEnvelope } from "@/lib/domain/workspace";
+import { useWorkspacePersistence } from "@/components/WorkspacePersistence";
 import { validateCompletion, type CompletionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
 import { validateActual, type ProductionActual } from "@/lib/services/actuals";
 import { batchKilograms } from "@/lib/services/measurements";
-import { MeasurementProvider, MeasurementAdmin } from "@/components/MeasurementSettings";
+import { MeasurementProvider, MeasurementAdmin, useSettings } from "@/components/MeasurementSettings";
 import type {
   Employee,
   Machine,
@@ -582,13 +583,13 @@ function ReportsPanel({
   );
 }
 
-export default function SchedulerDemo() {
-  return <MeasurementProvider><TeamWorkspace /></MeasurementProvider>;
+export default function SchedulerDemo({ initial, writeToken }: { initial: WorkspaceEnvelope; writeToken: string }) {
+  return <MeasurementProvider initial={initial.snapshot.measurements}><TeamWorkspace initial={initial} writeToken={writeToken} /></MeasurementProvider>;
 }
 
-function TeamWorkspace() {
-  const [directory, setDirectory] = useState(emptyDirectory);
-  const [memberId, setMemberId] = useState("admin");
+function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; writeToken: string }) {
+  const [directory, setDirectory] = useState<CalendarDirectory>(initial.snapshot.directory);
+  const [memberId, setMemberId] = useState(initial.snapshot.directory.people.find((person) => person.role === "admin")!.id);
   const member = directory.people.find((item) => item.id === memberId)!;
   const [unitSelection, setUnitSelection] = useState("");
   const availableUnits = directory.units.filter((item) => member.role === "admin" || member.unitIds.includes(item.id));
@@ -605,13 +606,12 @@ function TeamWorkspace() {
   const [activeTab, setActiveTab] = useState<Tab>("master");
   const [adminSection, setAdminSection] = useState("Configuration");
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [workCentres, setWorkCentres] = useState<WorkCentre[]>([]);
-  const [machines, setMachines] = useState<Machine[]>([]);
-  const [data, setData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[] }>(() => ({
-    lines: [], entries: [],
-    actuals: [], transfers: []
-  }));
+  const [products, setProducts] = useState<Product[]>(initial.snapshot.products);
+  const [workCentres, setWorkCentres] = useState<WorkCentre[]>(initial.snapshot.workCentres);
+  const [machines, setMachines] = useState<Machine[]>(initial.snapshot.machines);
+  const [data, setData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[] }>(initial.snapshot.data);
+  const { uoms, activities } = useSettings();
+  const persistenceStatus = useWorkspacePersistence(initial, { schemaVersion: 1, directory, products, workCentres, machines, measurements: { uoms, activities }, data }, writeToken);
   const scope = <T extends { calendarId?: string },>(records: T[]) => visibleCalendars.flatMap((item) => scopeCalendarRecords(records, member, item, directory));
   const entries = scope(data.entries);
   const planLines = syncPlanLineStatuses(scope(data.lines), entries);
@@ -726,6 +726,7 @@ function TeamWorkspace() {
     <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} />
     <div className="workstation-content">
       <header className="workstation-topbar"><span>Bio Tree / Production</span><label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label></header>
+      {persistenceStatus}
       {activeTab !== "planner" ? <div className="workspace-heading"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1></div> : null}
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}

@@ -2,6 +2,27 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Versioned pilot aggregate. Existing relational models remain migration scaffolding.
+// A single compare-and-swap transaction saves configuration and production together.
+model SchedulerWorkspace {
+  id        String   @id
+  revision  Int      @default(0)
+  snapshot  Json
+  lastMutationId String?
+  updatedAt DateTime @updatedAt
+  history   SchedulerWorkspaceRevision[]
+}
+
+model SchedulerWorkspaceRevision {
+  id          String   @id @default(uuid())
+  workspaceId String
+  revision    Int
+  snapshot    Json
+  savedAt     DateTime @default(now())
+  workspace   SchedulerWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  @@unique([workspaceId, revision])
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")

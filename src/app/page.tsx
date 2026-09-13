@@ -4,14 +4,23 @@ import SchedulerDemo from "@/components/SchedulerDemo";
 import { AccessError, requirePermission } from "@/lib/auth/guards";
 import { getAuthMode, getSignInUrl } from "@/lib/auth/config";
 import { permissions } from "@/lib/auth/permissions";
+import { headers } from "next/headers";
+import { localPersistenceAllowed } from "@/lib/persistence/access";
+import { db, writeToken } from "@/lib/persistence/database";
+import { workspaceRepository } from "@/lib/persistence/repository";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   try {
-    if (getAuthMode() === "demo") return <SchedulerDemo />;
+    if (getAuthMode() === "demo") {
+      if (!localPersistenceAllowed((await headers()).get("host"), process.env)) return <AccessMessage title="Local pilot only" message="Open this workspace on localhost. Verified dashboard login is required for shared deployment." />;
+      if (!process.env.DATABASE_URL) return <AccessMessage title="Database setup required" message="Configure PostgreSQL and apply database migrations before using the workspace." />;
+      const initial = await workspaceRepository(db).load();
+      return <SchedulerDemo initial={initial} writeToken={writeToken()} />;
+    }
   } catch {
-    return <AccessMessage title="Scheduler unavailable" message="Please contact your Bio Tree administrator." />;
+    return <AccessMessage title="Scheduler unavailable" message="The database or authentication configuration is unavailable. No data has been reset. Contact your administrator." />;
   }
   let signInUrl: string | null = null;
   try {

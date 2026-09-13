@@ -38,7 +38,7 @@ Admin now uses one compact add/edit-above-list layout for units, processes, peop
 
 Deleting unused units/processes cleans dependent calendar and access links in the proposed directory before validation. Machines and planning/production/WIP history still block deletion atomically. In-use measurement names and calculation units cannot be renamed or deleted; they can be made inactive. Product UOM changes are blocked when planning/production history exists.
 
-All directory changes, records and transfers remain in memory and reset on reload. Demo persona selection is for preview only, not authentication or a security boundary. The existing live Core page remains fail-closed and never exposes this demo for a verified live session.
+The localhost pilot now persists directory changes, records and transfers in PostgreSQL using a versioned atomic workspace snapshot. See DATABASE_SETUP.md for setup, backup/recovery and deployment safeguards. Demo persona selection remains for local preview only, not authentication or a security boundary. The existing live Core page remains fail-closed and never exposes this local workspace for a verified live session.
 
 Before production: migrate legacy lines/bookings to explicit calendar IDs; persist unit/process/team memberships and planner grants; bind people to verified Core user IDs; enforce the same calendar policy server-side for reads, writes and exports; reserve machines transactionally across calendars; complete/transfer in a database transaction with a unique source activity completion; audit configuration and yield changes. WIP receipt and planning must be idempotent in the database, not only in client state. An outbox/event channel will be needed for cross-session notifications.
 

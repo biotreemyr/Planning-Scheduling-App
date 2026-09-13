@@ -232,3 +232,5 @@
 .workstation .admin-table-bounded th { position: sticky; top: 0; z-index: 1; background: #eaf0ed; }
 .workstation .admin-table-bounded th:nth-child(2) { width: 45%; }
 .workstation .admin-table-bounded:focus-visible { outline: 2px solid #28634e; outline-offset: 2px; }
+.persistence-status { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 0; color: #38634d; font-size: 13px; }
+.persistence-error { color: #9f3030; border-bottom: 1px solid #d3aaaa; }

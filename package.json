@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
+    "prebuild": "prisma generate",
     "start": "next start",
     "lint": "tsc --noEmit",
     "test": "vitest run",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:backup": "node --env-file=.env scripts/backup.mjs",
+    "db:restore": "node --env-file=.env scripts/restore.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,7 +24,8 @@
     "prisma": "^6.16.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",

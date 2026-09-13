@@ -1,5 +1,8 @@
 # Fresh-entry beta check
 
+Historical pre-persistence check. PostgreSQL was connected on 2026-09-13; see
+DATABASE_SETUP.md for the current persistence and recovery checks.
+
 Date: 2026-09-12
 
 The app now opens in Admin with no products, work centres, machines, units,

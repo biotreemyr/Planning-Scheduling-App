@@ -2,15 +2,15 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { AdminRows } from "./AdminRows";
 import { batchKilograms } from "@/lib/services/measurements";
+import { measurementDefaults } from "@/lib/domain/workspace";
 type Option = { name: string; active: boolean };
-const defaults = { uoms: ["boxes", "bottles", "tablets", "capsules", "sachets", "carton", "kg", "g", "mg"], activities: ["Dispensing", "Bottling", "Tableting", "Packing", "Blending", "Fermentation", "Drying"] };
 type Settings = { uoms: Option[]; activities: Option[]; setUoms: (items: Option[]) => void; setActivities: (items: Option[]) => void };
 const Context = createContext<Settings | null>(null);
-function useSettings() { const value = useContext(Context); if (!value) throw new Error("Missing measurement settings"); return value; }
+export function useSettings() { const value = useContext(Context); if (!value) throw new Error("Missing measurement settings"); return value; }
 export function useUoms() { return useSettings().uoms; }
-export function MeasurementProvider({ children }: { children: ReactNode }) {
-  const [uoms, setUoms] = useState(defaults.uoms.map((name) => ({ name, active: true })));
-  const [activities, setActivities] = useState(defaults.activities.map((name) => ({ name, active: true })));
+export function MeasurementProvider({ children, initial = measurementDefaults }: { children: ReactNode; initial?: { uoms: Option[]; activities: Option[] } }) {
+  const [uoms, setUoms] = useState(initial.uoms);
+  const [activities, setActivities] = useState(initial.activities);
   return <Context.Provider value={{ uoms, setUoms, activities, setActivities }}>{children}</Context.Provider>;
 }
 export function MeasurementFields() {
