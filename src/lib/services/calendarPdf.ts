@@ -85,7 +85,7 @@ export function buildListPdf(input: ListPrintInput) {
   header();
   for (const day of dates) {
     const cells = listPrintCells(day, input.lines, columns).map((lines) => lines.flatMap((line) => {
-      const activity = printedListActivity(line, input.products);
+      const activity = printedListActivity(line, input.products, input.orders);
       // Measure at the same font and size used to draw, or text spills into the next column.
       const name = doc.setFont("helvetica", "bold").setFontSize(7.5).splitTextToSize(clean(activity.productName), width - 3) as string[];
       const detail = doc.setFont("helvetica", "normal").setFontSize(7).splitTextToSize(clean(activity.detail), width - 3) as string[];

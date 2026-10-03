@@ -4,9 +4,10 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, P
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { localDateKey } from "@/lib/services/calendarPrint";
-import { orderInMonth, orderProcessRows, orderProgress, validateOrder, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
+import { nextOrderNumber, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
 import { useUoms } from "./MeasurementSettings";
+import { OrderBadge } from "./OrderBadge";
 
 const displayDate = (value: string) => value.split("-").reverse().join("-");
 const statuses: OrderStatus[] = ["Not scheduled", "Scheduled", "In production", "Completed"];
@@ -28,12 +29,12 @@ export function OrdersPanel({ orders, lines, products, directory, visibleCalenda
     {editable ? <form key={version} className="workspace-panel orders-form" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
-      const order: PurchaseOrder = { id: `order-${crypto.randomUUID()}`, customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), productId,
+      const order: PurchaseOrder = { id: `order-${crypto.randomUUID()}`, number: nextOrderNumber(orders), customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), productId,
         quantity: Number(data.get("quantity")), uom: uom || productUom, expectedDates: {}, createdAt: new Date().toISOString(), createdBy: userName };
       const result = validateOrder(order, orders, products);
       if (!result.length) result.push(...onSave(order));
       setErrors(result);
-      if (!result.length) { setNotice(`${order.poNumber} added for ${order.customerName}.`); setProductId(""); setUom(""); setVersion((value) => value + 1); }
+      if (!result.length) { setNotice(`Order ${order.number} (${order.poNumber}) added for ${order.customerName}.`); setProductId(""); setUom(""); setVersion((value) => value + 1); }
     }}>
       <h2>New order</h2>
       <label>Customer name<input name="customer" required maxLength={120} list="order-customers" placeholder="Type or choose a customer" /></label>
@@ -51,7 +52,7 @@ export function OrdersPanel({ orders, lines, products, directory, visibleCalenda
   </section>;
 }
 
-type Row = { order: PurchaseOrder; rows: OrderProcessRow[]; product?: Product; progress: OrderProgress };
+type Row = { order: PurchaseOrder; number: number; rows: OrderProcessRow[]; product?: Product; progress: OrderProgress };
 type Column = {
   key: string; label: string; numeric?: boolean; required?: boolean;
   sort: (row: Row) => string | number; cell: (row: Row) => ReactNode;
@@ -65,7 +66,7 @@ function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, e
 }) {
   const today = localDateKey(new Date());
   const [filters, setFilters] = useState<Record<string, string>>({});
-  const [sort, setSort] = useState<{ key: string; ascending: boolean }>({ key: "customer", ascending: true });
+  const [sort, setSort] = useState<{ key: string; ascending: boolean }>({ key: "number", ascending: true });
   const [month, setMonth] = useState("");
   const [basis, setBasis] = useState<MonthBasis>("scheduled");
   const [hidden, setHidden] = useState<string[]>([]);
@@ -78,6 +79,7 @@ function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, e
     try { localStorage.setItem(COLUMN_STORAGE, JSON.stringify(next)); } catch { /* not persisted */ }
   }
   const columns: Column[] = [
+    { key: "number", label: "#", required: true, sort: (row) => row.number, cell: (row) => <span className="order-number-cell" style={{ "--order-color": orderColor(row.number) } as React.CSSProperties}><OrderBadge number={row.number} poNumber={row.order.poNumber} /></span> },
     { key: "customer", label: "Customer", sort: (row) => row.order.customerName ?? "", cell: (row) => row.order.customerName || <span className="route-muted">Not set</span>, filter: { kind: "text", text: (row) => row.order.customerName ?? "" } },
     { key: "po", label: "PO number", required: true, sort: (row) => row.order.poNumber, cell: (row) => <strong>{row.order.poNumber}</strong>, filter: { kind: "text", text: (row) => row.order.poNumber } },
     { key: "product", label: "Product", sort: (row) => row.product?.name ?? "", cell: (row) => row.product?.name ?? "Unknown product", filter: { kind: "text", text: (row) => `${row.product?.name ?? ""} ${row.product?.sku ?? ""}` } },
@@ -93,9 +95,10 @@ function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, e
     { key: "status", label: "Status", sort: (row) => statuses.indexOf(row.progress.status), cell: (row) => <span className={`badge ${statusBadge[row.progress.status]}`}>{row.progress.status}</span>, filter: { kind: "select", options: statuses, value: (row) => row.progress.status } }
   ];
   const shown = columns.filter((column) => column.required || !hidden.includes(column.key));
+  const numbers = orderNumbers(orders);
   const all: Row[] = orders.map((order) => {
     const rows = orderProcessRows(order, lines, directory).filter((row) => visibleCalendarIds.includes(row.calendar.id));
-    return { order, rows, product: products.find((item) => item.id === order.productId), progress: orderProgress(order, rows, today, lines) };
+    return { order, number: numbers.get(order.id)!, rows, product: products.find((item) => item.id === order.productId), progress: orderProgress(order, rows, today, lines) };
   });
   const sorter = columns.find((column) => column.key === sort.key) ?? columns[0];
   const table = all.filter((row) => orderInMonth(row.order, row.rows, row.progress, month, basis) && columns.every((column) => {
@@ -132,14 +135,14 @@ function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, e
             {shown.map((column) => {
               const active = sort.key === column.key;
               const Icon = !active ? ArrowUpDown : sort.ascending ? ArrowUp : ArrowDown;
-              return <th scope="col" key={column.key} className={column.numeric ? "numeric" : undefined} aria-sort={active ? sort.ascending ? "ascending" : "descending" : "none"}>
+              return <th scope="col" key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined} aria-sort={active ? sort.ascending ? "ascending" : "descending" : "none"}>
                 <button type="button" className="table-sort" onClick={() => setSort({ key: column.key, ascending: active ? !sort.ascending : true })}>{column.label}<Icon size={13} /></button>
               </th>;
             })}
           </tr>
           <tr className="orders-filter-row">
             <th scope="col"><span className="admin-sr-only">Filters</span></th>
-            {shown.map((column) => <th scope="col" key={column.key}>
+            {shown.map((column) => <th scope="col" key={column.key} data-col={column.key}>
               {column.filter?.kind === "text" ? <input type="search" aria-label={`Search ${column.label}`} placeholder="Search" value={filters[column.key] ?? ""} list={column.key === "customer" ? "order-filter-customers" : undefined} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })} /> : null}
               {column.filter?.kind === "select" ? <select aria-label={`Filter ${column.label}`} value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })}><option value="">All</option>{column.filter.options.map((option) => <option key={option}>{option}</option>)}</select> : null}
             </th>)}
@@ -150,9 +153,9 @@ function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, e
           {table.map((row) => {
             const open = expanded === row.order.id;
             return <Fragment key={row.order.id}>
-              <tr className={open ? "order-row open" : "order-row"} onClick={() => setExpanded(open ? null : row.order.id)}>
+              <tr className={open ? "order-row open" : "order-row"} style={{ "--order-color": orderColor(row.number) } as React.CSSProperties} onClick={() => setExpanded(open ? null : row.order.id)}>
                 <td><button type="button" className="icon-button order-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} ${row.order.poNumber} details`} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : row.order.id); }}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button></td>
-                {shown.map((column) => <td key={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(row)}</td>)}
+                {shown.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(row)}</td>)}
               </tr>
               {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail order={row.order} rows={row.rows} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
             </Fragment>;

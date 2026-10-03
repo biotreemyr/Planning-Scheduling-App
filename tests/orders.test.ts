@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { batchRoute, orderInMonth, orderProcessRows, orderProgress, validateOrder } from "../src/lib/services/orders";
+import { ORDER_COLORS, batchRoute, nextOrderNumber, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder } from "../src/lib/services/orders";
 
 const state = addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state!;
 const order = state.data.orders.find((item) => item.poNumber === "PO-2609-118")!;
@@ -78,5 +78,29 @@ describe("order month filter", () => {
     expect(orderInMonth(order, rows, {}, "2026-11", "expected")).toBe(false);
     expect(orderInMonth({ ...order, createdAt: new Date(2026, 8, 15, 9).toISOString() }, rows, {}, "2026-09", "created")).toBe(true);
     expect(orderInMonth(order, rows, {}, "", "created")).toBe(true);
+  });
+});
+
+describe("order numbers and colours", () => {
+  it("numbers sample orders in entry order and repeats eight colours", () => {
+    const numbers = orderNumbers(state.data.orders);
+    expect(state.data.orders.map((order) => numbers.get(order.id))).toEqual(state.data.orders.map((_, index) => index + 1));
+    expect(nextOrderNumber(state.data.orders)).toBe(state.data.orders.length + 1);
+    expect(orderColor(1)).toBe(ORDER_COLORS[0]);
+    expect(orderColor(9)).toBe(orderColor(1));
+    expect(orderColor(16)).toBe(ORDER_COLORS[7]);
+    expect(new Set(ORDER_COLORS).size).toBe(8);
+  });
+  it("numbers older orders after the highest stored number without shifting existing ones", () => {
+    const base = state.data.orders[0];
+    const orders = [{ ...base, id: "a", number: 4, createdAt: "2026-09-02T00:00:00Z" }, { ...base, id: "b", number: undefined, createdAt: "2026-09-03T00:00:00Z" }, { ...base, id: "c", number: undefined, createdAt: "2026-09-01T00:00:00Z" }];
+    expect([...orderNumbers(orders).entries()]).toEqual(expect.arrayContaining([["a", 4], ["c", 5], ["b", 6]]));
+  });
+  it("rejects a reused order number", () => {
+    const order = state.data.orders[0];
+    expect(validateOrder({ ...order, id: "new", poNumber: "PO-NEW" }, state.data.orders, state.products)).toEqual(["This order number is already in use."]);
+    const duplicate = structuredClone(state);
+    duplicate.data.orders[1].number = duplicate.data.orders[0].number;
+    expect(() => parseWorkspace(duplicate)).toThrow();
   });
 });

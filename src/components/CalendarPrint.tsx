@@ -15,7 +15,7 @@ export function CalendarPrint({ title, date, view, lines, products, processNames
   </section>, document.body);
 }
 
-export function ListPrint({ title, date, lines, products, columns }: ListPrintInput) {
+export function ListPrint({ title, date, lines, products, columns, orders }: ListPrintInput) {
   if (typeof document === "undefined") return null;
   const shown = columns.length ? columns : [{ id: "", name: "No processes to show" }];
   return createPortal(<section className="calendar-print-sheet print-list" aria-hidden="true">
@@ -25,7 +25,7 @@ export function ListPrint({ title, date, lines, products, columns }: ListPrintIn
       <tbody>{monthDates(date).map((day) => <tr key={day} className={[0, 6].includes(new Date(`${day}T12:00`).getDay()) ? "print-weekend" : undefined}>
         <th>{new Date(`${day}T12:00`).toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short" })}</th>
         {listPrintCells(day, lines, shown).map((cell, index) => <td key={shown[index].id}>{cell.map((line) => {
-          const activity = printedListActivity(line, products);
+          const activity = printedListActivity(line, products, orders);
           return <article key={line.id}><strong>{activity.productName}</strong><p>{activity.detail}</p></article>;
         })}</td>)}
       </tr>)}</tbody>

@@ -44,7 +44,7 @@ export const workspaceSchema = z.object({
     transfers: z.array(z.object({ id, sourceLineId: id, sourceCalendarId: id, calendarId: id, productId: id, quantity: number.positive(), uom: name,
       orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional() })),
     // Added after the first pilot release; older snapshots load with no orders.
-    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
+    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), number: number.int().positive().optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([])
   })
 }).strict();
@@ -92,6 +92,8 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
   });
   require(new Set(data.orders.map((item) => item.poNumber.trim().toLowerCase())).size === data.orders.length, "Duplicate PO number");
   data.orders.forEach((order) => require(has(state.products, order.productId), "Invalid order product"));
+  const numbered = data.orders.filter((order) => order.number !== undefined);
+  require(new Set(numbered.map((order) => order.number)).size === numbered.length, "Duplicate order number");
   require(new Set(data.actuals.map((item) => item.planLineId)).size === data.actuals.length, "Duplicate actual result");
   data.actuals.forEach((actual) => require(data.lines.some((line) => line.id === actual.planLineId && line.calendarId === actual.calendarId) && (!actual.hasDeviation || !!actual.deviation.trim()), "Invalid actual result"));
   require(new Set(data.transfers.map((item) => item.sourceLineId)).size === data.transfers.length, "Duplicate WIP handoff");

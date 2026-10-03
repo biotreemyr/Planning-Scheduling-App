@@ -6,7 +6,8 @@ import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { canMovePlan, monthDates } from "@/lib/services/planningMonth";
-import type { PurchaseOrder } from "@/lib/services/orders";
+import { orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
+import { OrderBadge, PriorityMark } from "./OrderBadge";
 
 type Target = { date: string; calendarId: string };
 type Drag = { id: string; calendarId: string; label: string; pointerId: number; startX: number; startY: number; x: number; y: number; started: boolean };
@@ -19,6 +20,7 @@ export function PlanningList({ date, lines, products, orders = [], calendars, ca
   onMove: (id: string, date: string) => string; onSelect: (id: string) => void; onCreate: (date: string, calendarId: string) => void;
 }) {
   const dates = monthDates(date);
+  const numbers = orderNumbers(orders);
   const today = localDateKey(new Date());
   // Keyboard moves and pointer drags share the highlighted target; target is null over a cell that cannot accept the drop.
   const [moving, setMoving] = useState<{ id: string; target: Target | null } | null>(null);
@@ -136,8 +138,11 @@ export function PlanningList({ date, lines, products, orders = [], calendars, ca
                     const product = products.find((item) => item.id === line.productId);
                     const name = product?.name ?? "Unknown product";
                     const movable = canMovePlan(line, canPlan);
-                    const detail = [orders.find((order) => order.id === line.productionOrderId)?.poNumber, line.orderReference, `${line.quantity.toLocaleString()} ${line.uom ?? product?.uom ?? ""}`.trim()].filter(Boolean).join(" · ");
-                    return <div key={line.id} data-movable={movable || undefined} className={`plan-grid-item priority-${line.priority.toLowerCase()}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
+                    const order = orders.find((item) => item.id === line.productionOrderId);
+                    const number = order ? numbers.get(order.id) : undefined;
+                    const detail = [order?.poNumber, line.orderReference, `${line.quantity.toLocaleString()} ${line.uom ?? product?.uom ?? ""}`.trim()].filter(Boolean).join(" · ");
+                    return <div key={line.id} data-movable={movable || undefined} className={`plan-grid-item${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
+                      style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
                       onPointerDown={(event) => pointerDown(event, line, name)} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={cancelDrag}>
                       {movable ? <button type="button" className="icon-button plan-list-grip" title={`Move ${name}`} aria-label={`Move ${name}`} aria-describedby="list-move-help"
                         onKeyDown={(event) => {
@@ -147,7 +152,7 @@ export function PlanningList({ date, lines, products, orders = [], calendars, ca
                           else if (event.key === "Escape") setMoving(null);
                         }}><GripVertical size={14} /></button> : null}
                       <button className="plan-list-product" type="button" title={`${line.completedAt ? "Completed: " : ""}${name}\n${detail}`} onClick={() => { if (!suppressClick.current) onSelect(line.id); }}>
-                        <strong>{line.completedAt ? <CheckCircle2 size={12} aria-label="Completed" /> : null}{name}</strong>
+                        <strong><OrderBadge number={number} poNumber={order?.poNumber} /><PriorityMark priority={line.priority} />{line.completedAt ? <CheckCircle2 size={12} aria-label="Completed" /> : null}{name}</strong>
                         <small>{detail}</small>
                       </button>
                     </div>;
@@ -160,7 +165,7 @@ export function PlanningList({ date, lines, products, orders = [], calendars, ca
         })}</tbody>
       </table>
     </div>
-    {ghost && dragging ? <div className={`plan-grid-ghost priority-${dragging.priority.toLowerCase()}${moving?.target ? "" : " invalid"}`} style={{ left: ghost.x + 14, top: ghost.y + 10 }} aria-hidden="true">
+    {ghost && dragging ? <div className={`plan-grid-ghost${moving?.target ? "" : " invalid"}`} style={{ left: ghost.x + 14, top: ghost.y + 10, ...(dragging.productionOrderId && numbers.get(dragging.productionOrderId) ? { "--order-color": orderColor(numbers.get(dragging.productionOrderId)!) } : {}) } as React.CSSProperties} aria-hidden="true">
       <strong>{ghost.label}</strong>
       <small>{moving?.target ? label(moving.target.date, { weekday: "short", day: "2-digit", month: "short" }) : "Drop in the same process column"}</small>
     </div> : null}

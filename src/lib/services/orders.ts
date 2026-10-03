@@ -6,13 +6,16 @@ export type PurchaseOrder = {
   id: string; poNumber: string; productId: string; quantity: number; uom: string;
   // Optional only so orders saved before the field existed still load.
   customerName?: string;
+  // Running number given when the order is entered; it picks the order's colour and never changes.
+  number?: number;
   // Expected completion date keyed by the unit-process calendar the work runs in.
   expectedDates: Record<string, string>;
   notes?: string; createdAt: string; createdBy: string;
 };
 
-export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName">, orders: PurchaseOrder[], products: Product[]) {
+export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName" | "number">, orders: PurchaseOrder[], products: Product[]) {
   const errors: string[] = [];
+  if (order.number !== undefined && orders.some((item) => item.id !== order.id && item.number === order.number)) errors.push("This order number is already in use.");
   if (!order.customerName?.trim()) errors.push("Enter the customer name.");
   const po = order.poNumber.trim();
   if (!po) errors.push("Enter a PO number.");
@@ -21,6 +24,22 @@ export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "pr
   if (!Number.isFinite(order.quantity) || order.quantity <= 0) errors.push("Quantity must be greater than zero.");
   return errors;
 }
+
+// Eight tab colours, repeated in order: #1 and #9 share green, #2 and #10 blue, and so on.
+// Neighbouring hues are kept far apart; #8 is light grey, so "no PO" uses a dashed outline instead of grey.
+export const ORDER_COLORS = ["#2b8a3e", "#1971c2", "#e8590c", "#7048e8", "#15aabf", "#d6336c", "#fab005", "#ced4da"] as const;
+export const orderColor = (number: number) => ORDER_COLORS[(Math.max(1, Math.trunc(number)) - 1) % ORDER_COLORS.length];
+
+// Each order's running number. Orders saved before numbering existed are numbered after the
+// highest stored number, oldest first, so existing numbers never shift.
+export function orderNumbers(orders: PurchaseOrder[]) {
+  const numbers = new Map<string, number>();
+  let next = Math.max(0, ...orders.map((order) => order.number ?? 0));
+  for (const order of orders) if (order.number) numbers.set(order.id, order.number);
+  for (const order of [...orders].filter((item) => !item.number).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.poNumber.localeCompare(b.poNumber))) numbers.set(order.id, ++next);
+  return numbers;
+}
+export const nextOrderNumber = (orders: PurchaseOrder[]) => Math.max(0, ...orderNumbers(orders).values()) + 1;
 
 export type OrderProcessRow = {
   calendar: UnitCalendar; processName: string; unitName: string;

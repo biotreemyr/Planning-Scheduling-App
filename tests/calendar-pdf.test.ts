@@ -33,7 +33,10 @@ describe("calendar PDF", () => {
       { ...seedData.planLines[1], calendarId: "pack", plannedDate: "2026-09-30" },
       { ...seedData.planLines[2], calendarId: "other", plannedDate: "2026-09-15" }
     ];
-    const content = buildListPdf({ title: "Manufacturing", date: "2026-09-14", lines, products: seedData.products, columns }).output();
+    const orders = [{ id: "order-1", number: 7, poNumber: "PWL 005144", productId: seedData.products[0].id, quantity: 1200, uom: "kg", expectedDates: {}, createdAt: "2026-09-01T00:00:00Z", createdBy: "Test" }];
+    lines[1] = { ...lines[1], productionOrderId: "order-1" };
+    const content = buildListPdf({ title: "Manufacturing", date: "2026-09-14", lines, products: seedData.products, columns, orders }).output();
+    expect(content).toContain("#7 PWL 005144");
     for (const text of ["Unit: Manufacturing", "PRODUCTION LIST | 2026-09", "Dispensing", "Packing", "Batch 3 · 1,200 kg", "Mon 14 Sept", "Wed 30 Sept"]) expect(content).toContain(text);
     expect(content).not.toContain("Enzyme Blend");
   });

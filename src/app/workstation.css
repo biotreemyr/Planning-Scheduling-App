@@ -216,20 +216,18 @@
 .workstation .plan-grid-weekend th, .workstation .plan-grid-weekend td { background: #f5f6f4; }
 .workstation .plan-grid-today th { box-shadow: inset 4px 0 0 var(--green); font-weight: 700; }
 .workstation .plan-grid-cell { display: flex; flex-direction: column; gap: 3px; min-height: 36px; padding: 3px; }
-.workstation .plan-grid-item { display: flex; align-items: stretch; border-left: 4px solid var(--blue); background: var(--blue-soft); }
-.workstation .plan-grid-item.priority-low { border-left-color: var(--muted); background: var(--gray-soft); }
-.workstation .plan-grid-item.priority-high { border-left-color: var(--amber); background: var(--amber-soft); }
-.workstation .plan-grid-item.priority-urgent { border-left-color: var(--red); background: var(--red-soft); }
-.workstation .plan-grid-item.completed { border-left-color: var(--green); background: var(--green-soft); }
+/* The left tab is the order's colour; activities with no order get a grey tab. */
+.workstation .plan-grid-item { display: flex; align-items: stretch; border-left: 5px solid var(--order-color); background: color-mix(in srgb, var(--order-color) 10%, white); }
+/* No PO: no tab colour, a dashed outline instead (light grey is order colour 8). */
+.workstation .plan-grid-item.no-order { border-left-color: transparent; background: #fff; outline: 1px dashed #adb5bd; outline-offset: -1px; }
+.workstation .plan-grid-item.completed { background: var(--gray-soft); }
+.workstation .plan-grid-item.completed .plan-list-product strong { color: #4f5a60; }
 .workstation .plan-grid-item[data-movable], .workstation .plan-grid-item[data-movable] .plan-list-product { cursor: grab; user-select: none; -webkit-user-select: none; }
 .workstation .plan-grid-item.is-dragging { opacity: 0.4; }
 .workstation .plan-grid-dragging, .workstation .plan-grid-dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 .workstation .plan-grid td.plan-grid-droppable { background-image: linear-gradient(#28634e0d, #28634e0d); }
 .workstation .plan-grid-hint, .plan-grid-hint { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
-.plan-grid-ghost { position: fixed; z-index: 1000; pointer-events: none; max-width: 260px; padding: 6px 10px; border-left: 4px solid var(--blue); background: var(--panel); box-shadow: 0 8px 24px #14241f33; font-size: 13px; }
-.plan-grid-ghost.priority-low { border-left-color: var(--muted); }
-.plan-grid-ghost.priority-high { border-left-color: var(--amber); }
-.plan-grid-ghost.priority-urgent { border-left-color: var(--red); }
+.plan-grid-ghost { position: fixed; z-index: 1000; pointer-events: none; max-width: 260px; padding: 6px 10px; border-left: 5px solid var(--order-color, #fff); background: var(--panel); box-shadow: 0 8px 24px #14241f33; font-size: 13px; }
 .plan-grid-ghost.invalid { border-left-color: var(--red); opacity: 0.85; }
 .plan-grid-ghost strong, .plan-grid-ghost small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plan-grid-ghost small { color: var(--muted); margin-top: 2px; }
@@ -269,7 +267,6 @@
 .orders-form .primary-button { white-space: nowrap; }
 .orders-help { font-size: 13px; color: var(--muted); }
 .orders-table tbody th { background: transparent; }
-.orders-table td:nth-child(2) { min-width: 150px; }
 @media (max-width: 1100px) { .orders-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .orders-list .panel-title h2 { display: flex; align-items: center; gap: 10px; }
 .orders-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; margin-bottom: 12px; }
@@ -292,6 +289,9 @@
 .orders-table .table-sort { display: inline-flex; align-items: center; gap: 4px; min-height: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .orders-table th.numeric .table-sort { flex-direction: row-reverse; }
 .order-toggle-column { width: 40px; }
+/* The order's colour runs down the left edge of its row. */
+.orders-table .order-row > td:first-child { box-shadow: inset 5px 0 0 var(--order-color, transparent); }
+.order-number-cell .order-badge { margin-right: 0; min-width: 24px; height: 20px; font-size: 12px; }
 .orders-table { width: 100%; min-width: 860px; border-collapse: separate; border-spacing: 0; font-size: 14px; }
 .orders-table th, .orders-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
 .orders-table thead th { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; background: var(--panel-soft); }
@@ -334,3 +334,19 @@
   .production-route { overflow-x: auto; }
   .production-route select { min-width: 140px; }
 }
+
+/* Running order number: black box, white figures. */
+.order-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 16px; padding: 0 4px; margin-right: 5px; border-radius: 3px; background: #111; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; vertical-align: 1px; }
+.priority-mark { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 16px; margin-right: 4px; border-radius: 3px; color: #fff; font-size: 11px; font-weight: 800; vertical-align: 1px; }
+.priority-mark.high { background: var(--amber); }
+.priority-mark.urgent { background: var(--red); }
+.order-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.order-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.order-legend-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 2px; }
+.order-legend-swatch.no-order { background: #fff; outline: 1px dashed #868e96; outline-offset: -1px; }
+.calendar-plan-event.no-order { outline: 1px dashed #adb5bd; outline-offset: 1px; }
+.calendar-plan-event .order-badge, .calendar-plan-event .priority-mark { flex-shrink: 0; }
+.orders-table [data-col="number"] { width: 44px; padding-left: 4px; padding-right: 4px; text-align: center; }
+.orders-table [data-col="po"] { white-space: nowrap; }
+.orders-table [data-col="status"] { white-space: nowrap; }
+.orders-table [data-col="customer"] { min-width: 140px; }

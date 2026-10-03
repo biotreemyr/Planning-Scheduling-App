@@ -12,10 +12,12 @@ import type { PlanLine, Product, Machine, ScheduleEntry } from "@/lib/domain/typ
 import { StatusBadge } from "./StatusBadge";
 import { MeasurementFields } from "./MeasurementSettings";
 import { readMeasurement } from "@/lib/services/measurements";
-import type { PurchaseOrder } from "@/lib/services/orders";
+import { ORDER_COLORS, orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
 
 type View = "month" | "week" | "day";
-const colors = { Low: "#667078", Normal: "#28679e", High: "#9b6517", Urgent: "#b13a32" };
+const NO_ORDER = "#ffffff";
+// A light fill of the order colour behind the event text.
+const tint = (hex: string, amount = 0.12) => { const [r, g, b] = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16)); return `rgb(${[r, g, b].map((value) => Math.round(255 - (255 - value) * amount)).join(", ")})`; };
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 
 type NewActivity = Pick<PlanLine, "calendarId" | "productId" | "plannedDate" | "quantity" | "priority" | "notes" | "orderReference" | "uom" | "activityType" | "unitWeightMg" | "batchSizeKg" | "productionOrderId">;
@@ -82,7 +84,12 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
         useDetailPopup: false, useFormPopup: false, gridSelection: { enableClick: true, enableDblClick: true },
         month: { startDayOfWeek: 1 },
         week: { startDayOfWeek: 1, taskView: false, eventView: ["allday"] },
-        template: { allday: (event) => `<button type="button" class="calendar-plan-event" data-plan-id="${escapeHtml(event.id)}">${escapeHtml(event.title)}</button>` }
+        template: { allday: (event) => {
+          const { number, priority, completed } = (event.raw ?? {}) as { number?: number; priority?: string; completed?: boolean };
+          const badge = number ? `<span class="order-badge">${number}</span>` : "";
+          const mark = priority === "High" || priority === "Urgent" ? `<span class="priority-mark ${priority.toLowerCase()}" title="${priority} priority">!</span>` : "";
+          return `<button type="button" class="calendar-plan-event${number ? "" : " no-order"}" data-plan-id="${escapeHtml(event.id)}">${badge}${mark}${completed ? "✓ " : ""}${escapeHtml(event.title)}</button>`;
+        } }
       });
       instance.on("selectDateTime", (info: { start: Date }) => { openCreate(dateKey(info.start)); instance?.clearGridSelections(); });
       instance.on("beforeUpdateEvent", (info) => {
@@ -105,17 +112,21 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
     const instance = calendar.current;
     if (!ready || !instance) return;
     instance.clear();
+    const numbers = orderNumbers(orders);
     instance.createEvents(planLines.map((line) => {
       const item = products.find((entry) => entry.id === line.productId);
+      const number = line.productionOrderId ? numbers.get(line.productionOrderId) : undefined;
+      const color = number ? orderColor(number) : NO_ORDER;
       return {
         id: line.id, calendarId: "planning", category: "allday", isAllday: true,
-        title: `${line.completedAt ? "Completed: " : ""}${line.activityType ? `${line.activityType}: ` : ""}${item?.name ?? "Unknown product"} - ${line.quantity.toLocaleString()} ${line.uom ?? item?.uom ?? ""}`,
+        raw: { number, priority: line.priority, completed: !!line.completedAt },
+        title: `${line.activityType ? `${line.activityType}: ` : ""}${item?.name ?? "Unknown product"} - ${line.quantity.toLocaleString()} ${line.uom ?? item?.uom ?? ""}`,
         start: line.plannedDate, end: line.plannedDate, isReadOnly: !canPlan || !!line.completedAt,
-        color: colors[line.priority], borderColor: colors[line.priority], backgroundColor: "#f0f4f7"
+        color: "#1f2528", borderColor: color, backgroundColor: line.completedAt ? "#ecefed" : tint(color)
       };
     }));
     instance.setOptions({ isReadOnly: !canPlan });
-  }, [ready, planLines, products, canPlan]);
+  }, [ready, planLines, products, canPlan, orders]);
 
   useEffect(() => {
     const instance = calendar.current;
@@ -147,7 +158,7 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
           try {
             const { buildCalendarPdf, buildListPdf } = await import("@/lib/services/calendarPdf");
             const fileName = calendarTitle.replace(/[^a-z0-9-]+/gi, "-");
-            if (planningView === "list") buildListPdf({ title: calendarTitle, date, lines: allPrintLines, products, columns: calendars }).save(`${fileName}-list-${date.slice(0, 7)}.pdf`);
+            if (planningView === "list") buildListPdf({ title: calendarTitle, date, lines: allPrintLines, products, columns: calendars, orders }).save(`${fileName}-list-${date.slice(0, 7)}.pdf`);
             else buildCalendarPdf({ title: calendarTitle, date, view: displayView, lines: allPrintLines, products, processNames }).save(`${fileName}-${displayView}-${date}.pdf`);
             setNotice(`${planningView === "list" ? "List" : "Calendar"} PDF downloaded.`);
           } catch { setNotice("PDF could not be generated. Please try again."); }
@@ -203,14 +214,19 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
         <label>Planned date<input name="date" type="date" required defaultValue={draftDate} /></label>
         <MeasurementFields />
         <label>Priority<select name="priority" defaultValue="Normal">{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-        <label>PO number<select name="po" defaultValue=""><option value="">Not linked</option>{orders.map((item) => <option key={item.id} value={item.id}>{item.poNumber}{item.customerName ? ` · ${item.customerName}` : ""} · {products.find((product) => product.id === item.productId)?.name ?? "Unknown product"}</option>)}</select></label>
+        <label>PO number<select name="po" defaultValue=""><option value="">Not linked</option>{orders.map((item) => <option key={item.id} value={item.id}>{orderNumbers(orders).get(item.id)} · {item.poNumber}{item.customerName ? ` · ${item.customerName}` : ""} · {products.find((product) => product.id === item.productId)?.name ?? "Unknown product"}</option>)}</select></label>
         <label>Batch / order reference<input name="order" placeholder="e.g. Batch 4" /></label>
         <label>Remarks<textarea name="notes" /></label>
         <button className="primary-button" type="submit"><Plus size={17} />Add to plan</button>
       </form>
     </dialog>
-    {planningView === "calendar" ? <div className="calendar-legend">{Object.entries(colors).map(([priority, color]) => <span key={priority}><i style={{ background: color }} />{priority}</span>)}</div> : null}
-    {ready && planningView === "list" ? <ListPrint title={calendarTitle} date={date} lines={allPrintLines} products={products} columns={calendars} /> : null}
+    <div className="order-legend" aria-label="Legend">
+      <span><span className="order-badge">1</span>Order number · tab colour</span>
+      <span>{ORDER_COLORS.map((color, index) => <i key={color} className="order-legend-swatch" style={{ background: color }} title={`Orders ${index + 1}, ${index + 9}, ${index + 17}…`} />)} repeat every 8</span>
+      <span><span className="priority-mark high">!</span>High</span><span><span className="priority-mark urgent">!</span>Urgent</span>
+      <span><i className="order-legend-swatch no-order" />No PO linked</span><span>✓ Completed</span>
+    </div>
+    {ready && planningView === "list" ? <ListPrint title={calendarTitle} date={date} lines={allPrintLines} products={products} columns={calendars} orders={orders} /> : null}
     {ready && planningView === "calendar" ? <CalendarPrint title={calendarTitle} date={date} view={displayView} lines={allPrintLines} products={products} processNames={processNames} /> : null}
     {selected ? <section className="calendar-detail" aria-label="Plan line details">
       <button type="button" className="icon-button detail-close" aria-label="Close plan details" title="Close plan details" onClick={() => setSelectedId(null)}><X size={18} /></button>

@@ -244,7 +244,7 @@ export function addSampleData(state: Snapshot, today = new Date()): { state?: Sn
     const expectedDates: Record<string, string> = {};
     if (index % 2 === 0) for (const line of linked) if (!expectedDates[line.calendarId] || expectedDates[line.calendarId] < line.plannedDate) expectedDates[line.calendarId] = line.plannedDate;
     next.data.orders.push({
-      id: orderId(order.po), poNumber: order.po, customerName: order.customer, productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
+      id: orderId(order.po), poNumber: order.po, customerName: order.customer, number: index + 1, productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
       uom: product.uom, expectedDates, createdAt: stamp(dateKey(workday(monday, order.batches.length ? -15 : index - 12)), "09:00"), createdBy: "Sample data"
     });
   }
