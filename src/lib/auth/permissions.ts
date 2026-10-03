@@ -28,6 +28,8 @@ export type Permission = (typeof permissions)[keyof typeof permissions];
 export type BioTreeUser = {
   id: string;
   clerkUserId: string;
+  // Display name from Core, for showing who is signed in and for the audit log.
+  name?: string;
   active: boolean;
   apps: { appKey: string; active: boolean; assigned: boolean; permissions: string[]; teamIds?: string[] }[];
 };

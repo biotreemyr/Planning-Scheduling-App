@@ -3,7 +3,7 @@ import type { Route } from "next";
 import SchedulerDemo from "@/components/SchedulerDemo";
 import { AccessError, requireAnyPermission } from "@/lib/auth/guards";
 import { getAuthMode, getSignInUrl } from "@/lib/auth/config";
-import { boardPermissions } from "@/lib/auth/permissions";
+import { APP_KEY, boardPermissions, type BioTreeUser } from "@/lib/auth/permissions";
 import { headers } from "next/headers";
 import { localPersistenceAllowed } from "@/lib/persistence/access";
 import { db, writeToken } from "@/lib/persistence/database";
@@ -23,8 +23,9 @@ export default async function Home() {
     return <AccessMessage title="Scheduler unavailable" message="The database or authentication configuration is unavailable. No data has been reset. Contact your administrator." />;
   }
   let signInUrl: string | null = null;
+  let user: BioTreeUser | null = null;
   try {
-    await requireAnyPermission(boardPermissions);
+    user = await requireAnyPermission(boardPermissions);
   } catch (error) {
     if (error instanceof AccessError && error.code === "unauthenticated") {
       try { signInUrl = getSignInUrl(process.env, "/"); } catch { signInUrl = null; }
@@ -36,8 +37,16 @@ export default async function Home() {
     }
   }
   if (signInUrl) redirect(signInUrl as Route);
-  // Never expose the browser-only demo as a connected production workspace.
-  return <AccessMessage title="Scheduler connection pending" message="Your account has access. The scheduling workspace is not available yet." />;
+  if (!user) return <AccessMessage title="Access denied" message="Your Bio Tree account does not have access to this scheduler." />;
+  // The verified Core user replaces the demo's person picker; every save is rechecked on the server.
+  try {
+    if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
+    const initial = await workspaceRepository(db).load();
+    const identity = { id: user.id, name: user.name ?? "Bio Tree user", permissions: user.apps.find((app) => app.appKey === APP_KEY)?.permissions ?? [] };
+    return <SchedulerDemo initial={initial} writeToken={writeToken()} identity={identity} />;
+  } catch {
+    return <AccessMessage title="Scheduler unavailable" message="The scheduling database could not be reached. No data has been changed. Contact your administrator." />;
+  }
 }
 
 function AccessMessage({ title, message }: { title: string; message: string }) {

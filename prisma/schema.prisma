@@ -11,6 +11,22 @@ model SchedulerWorkspace {
   lastMutationId String?
   updatedAt DateTime @updatedAt
   history   SchedulerWorkspaceRevision[]
+  audit     SchedulerAuditEvent[]
+}
+
+// Who saved each revision and what kinds of change it contained, written in the
+// same transaction as the save. Actor identity comes from the server, never the browser.
+model SchedulerAuditEvent {
+  id           String   @id @default(uuid())
+  workspaceId  String
+  revision     Int
+  actorId      String?
+  actorClerkId String?
+  actorName    String
+  changes      Json
+  createdAt    DateTime @default(now())
+  workspace    SchedulerWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  @@index([workspaceId, createdAt])
 }
 
 model SchedulerWorkspaceRevision {

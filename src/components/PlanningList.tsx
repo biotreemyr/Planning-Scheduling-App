@@ -15,8 +15,8 @@ const DRAG_THRESHOLD = 5;
 const EDGE = 56;
 
 // Month grid: dates down the side, one column per process, like the planning spreadsheet.
-export function PlanningList({ date, lines, products, orders = [], calendars, canPlan, onMove, onSelect, onCreate }: {
-  date: string; lines: PlanLine[]; products: Product[]; orders?: PurchaseOrder[]; calendars: UnitCalendar[]; canPlan: boolean;
+export function PlanningList({ date, lines, products, orders = [], calendars, canPlan, canCreate = canPlan, onMove, onSelect, onCreate }: {
+  date: string; lines: PlanLine[]; products: Product[]; orders?: PurchaseOrder[]; calendars: UnitCalendar[]; canPlan: boolean; canCreate?: boolean;
   onMove: (id: string, date: string) => string; onSelect: (id: string) => void; onCreate: (date: string, calendarId: string) => void;
 }) {
   const dates = monthDates(date);
@@ -157,7 +157,7 @@ export function PlanningList({ date, lines, products, orders = [], calendars, ca
                       </button>
                     </div>;
                   })}
-                  {canPlan && calendar.id && !dragging ? <button className="icon-button plan-list-add" type="button" title={`Add ${calendar.name} activity on ${day}`} aria-label={`Add ${calendar.name} activity on ${day}`} onClick={() => onCreate(day, calendar.id)}><Plus size={14} /></button> : null}
+                  {canCreate && calendar.id && !dragging ? <button className="icon-button plan-list-add" type="button" title={`Add ${calendar.name} activity on ${day}`} aria-label={`Add ${calendar.name} activity on ${day}`} onClick={() => onCreate(day, calendar.id)}><Plus size={14} /></button> : null}
                 </div>
               </td>;
             })}

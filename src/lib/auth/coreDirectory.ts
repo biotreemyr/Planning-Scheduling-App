@@ -33,7 +33,7 @@ async function query<T extends Record<string, unknown>>(config: CoreDirectoryCon
   return result.rows;
 }
 
-type CoreUserRow = { id: string; clerk_user_id: string; core_role: string; is_active: boolean; employment_status: string };
+type CoreUserRow = { id: string; clerk_user_id: string; core_role: string; is_active: boolean; employment_status: string; display_name: string | null };
 
 /**
  * Core grants app access two ways: an active role assignment, and a direct
@@ -43,7 +43,8 @@ type CoreUserRow = { id: string; clerk_user_id: string; core_role: string; is_ac
  */
 async function resolveUser(config: CoreDirectoryConfig, clerkUserId: string): Promise<BioTreeUser | null> {
   const [account] = await query<CoreUserRow>(config,
-    `SELECT id, clerk_user_id, core_role, is_active, employment_status
+    `SELECT id, clerk_user_id, core_role, is_active, employment_status,
+            COALESCE(NULLIF(full_name, ''), NULLIF(username, ''), email) AS display_name
        FROM users WHERE clerk_user_id = $1 LIMIT 1`,
     [clerkUserId]);
   if (!account) return null;
@@ -54,7 +55,7 @@ async function resolveUser(config: CoreDirectoryConfig, clerkUserId: string): Pr
     [config.appKey]);
 
   if (!active || !appRow) {
-    return { id: account.id, clerkUserId: account.clerk_user_id, active, apps: [] };
+    return { id: account.id, clerkUserId: account.clerk_user_id, name: account.display_name ?? undefined, active, apps: [] };
   }
 
   const superAdmin = account.core_role === "super_admin";
@@ -80,6 +81,7 @@ async function resolveUser(config: CoreDirectoryConfig, clerkUserId: string): Pr
   return {
     id: account.id,
     clerkUserId: account.clerk_user_id,
+    name: account.display_name ?? undefined,
     active,
     // Core has no team model yet, so teamIds stays undefined and every
     // requireTeamPermission call fails closed. See TEAM_ACCESS.md.

@@ -23,7 +23,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
 type NewActivity = Pick<PlanLine, "calendarId" | "productId" | "plannedDate" | "quantity" | "priority" | "notes" | "orderReference" | "uom" | "activityType" | "unitWeightMg" | "batchSizeKg" | "productionOrderId">;
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
-export default function PlanningCalendar({ orders = [], processNames, planningView = "calendar", planLines, products, initialDate, onCreate, onMove, canPlan = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
+export default function PlanningCalendar({ orders = [], processNames, planningView = "calendar", planLines, products, initialDate, onCreate, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
   processNames: Record<string, string>;
   orders?: PurchaseOrder[];
   planningView?: "calendar" | "list";
@@ -33,10 +33,13 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
   onCreate: (activity: NewActivity) => void;
   onMove: (id: string, date: string) => string;
   canPlan?: boolean;
+  // Adding needs Core's planning.create; moving needs planning.edit. Defaults to canPlan.
+  canCreate?: boolean;
+  demo?: boolean;
   onSelect?: (id: string) => void;
 }) {
-  const callbacks = useRef({ onCreate, onMove, canPlan, onSelect });
-  callbacks.current = { onCreate, onMove, canPlan, onSelect };
+  const callbacks = useRef({ onCreate, onMove, canPlan, canCreate, onSelect });
+  callbacks.current = { onCreate, onMove, canPlan, canCreate, onSelect };
   const dialog = useRef<HTMLDialogElement>(null);
   const [draftDate, setDraftDate] = useState(initialDate);
   const [draftCalendar, setDraftCalendar] = useState("");
@@ -46,7 +49,7 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
   const [hover, setHover] = useState<{ id: string; left: number; top: number } | null>(null);
   const hoverLine = planLines.find((line) => line.id === hover?.id);
   function openCreate(value: string, calendarId = "") {
-    if (!callbacks.current.canPlan) return;
+    if (!callbacks.current.canCreate) return;
     setDraftCalendar(calendarId);
     setFormVersion((version) => version + 1);
     setHover(null);
@@ -80,7 +83,7 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
     import("@toast-ui/calendar").then(({ default: CalendarImpl }) => {
       if (disposed || !host.current) return;
       instance = new CalendarImpl(host.current, {
-        defaultView: "month", isReadOnly: !canPlan, usageStatistics: false,
+        defaultView: "month", isReadOnly: !canPlan && !canCreate, usageStatistics: false,
         useDetailPopup: false, useFormPopup: false, gridSelection: { enableClick: true, enableDblClick: true },
         month: { startDayOfWeek: 1 },
         week: { startDayOfWeek: 1, taskView: false, eventView: ["allday"] },
@@ -125,8 +128,8 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
         color: "#1f2528", borderColor: color, backgroundColor: line.completedAt ? "#ecefed" : tint(color)
       };
     }));
-    instance.setOptions({ isReadOnly: !canPlan });
-  }, [ready, planLines, products, canPlan, orders]);
+    instance.setOptions({ isReadOnly: !canPlan && !canCreate });
+  }, [ready, planLines, products, canPlan, canCreate, orders]);
 
   useEffect(() => {
     const instance = calendar.current;
@@ -170,7 +173,7 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
         <h3 aria-live="polite">{range}</h3>
       </div>
       <div className="calendar-navigation">
-        {canPlan ? <button className="primary-button" type="button" disabled={!ready || !products.length} onClick={() => openCreate(date)}><Plus size={17} />Add activity</button> : null}
+        {canCreate ? <button className="primary-button" type="button" disabled={!ready || !products.length} onClick={() => openCreate(date)}><Plus size={17} />Add activity</button> : null}
         <input aria-label="Calendar date" type="date" value={date} onChange={(event) => { if (event.target.value) setDate(event.target.value); }} />
         {planningView === "calendar" ? <div className="view-switch" aria-label="Calendar period">
           {(["month", "week", "day"] as const).map((item) => <button type="button" key={item} aria-pressed={view === item} onClick={() => setView(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
@@ -180,8 +183,8 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
     {failed ? <p role="alert">Calendar could not load. Refresh to retry.</p> : null}
     {!ready && !failed ? <p role="status">Loading calendar...</p> : null}
     {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
-    {!canPlan && planLines.some((line) => !line.completedAt) ? <p className="plan-grid-hint">Your role can view this plan but not move activities. Switch <strong>User</strong> to a planner or administrator to drag and drop.</p> : null}
-    {planningView === "list" ? <PlanningList key={date.slice(0, 7)} date={date} lines={planLines} products={products} orders={orders} calendars={calendars} canPlan={canPlan} onMove={onMove} onSelect={(id) => { if (onSelect) onSelect(id); else setSelectedId(id); }} onCreate={openCreate} /> : null}
+    {!canPlan && planLines.some((line) => !line.completedAt) ? <p className="plan-grid-hint">Your role can view this plan but not move activities.{demo ? <> Switch <strong>User</strong> to a planner or administrator to drag and drop.</> : " Ask your Bio Tree administrator for planning access if you need it."}</p> : null}
+    {planningView === "list" ? <PlanningList key={date.slice(0, 7)} date={date} lines={planLines} products={products} orders={orders} calendars={calendars} canPlan={canPlan} canCreate={canCreate} onMove={onMove} onSelect={(id) => { if (onSelect) onSelect(id); else setSelectedId(id); }} onCreate={openCreate} /> : null}
     <div hidden={planningView === "list"} className="calendar-scroll" onScroll={() => setHover(null)}><div ref={host} className="calendar-host" onMouseOver={(event) => { if (!event.buttons) preview(event.target as HTMLElement); }} onMouseDown={() => setHover(null)} onFocus={(event) => preview(event.target as HTMLElement)} onBlur={() => setHover(null)} onClick={(event) => {
       const target = event.target as HTMLElement;
       const id = target.closest<HTMLElement>("[data-plan-id]")?.dataset.planId;

@@ -6,8 +6,10 @@ import { priorities, scheduleStatuses } from "@/lib/domain/types";
 import { orderNumbers, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
 import { OrderBadge } from "./OrderBadge";
 
-export function ActivityWorkspace({ line, product, machines, entries, canPlan, canProduce, onClose, onPlan, onProduction, children, orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
+export function ActivityWorkspace({ line, product, machines, entries, canPlan, canProduce, onClose, onPlan, onProduction, children, statuses = scheduleStatuses, orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
   children?: ReactNode;
+  // Booking statuses this person may set; Confirmed and Cancelled need Core approve and cancel.
+  statuses?: readonly ScheduleEntry["status"][];
   orders?: PurchaseOrder[]; route?: RouteStep[]; routeMachines?: Machine[]; routeEntries?: ScheduleEntry[];
   canAssign?: boolean; onAssignMachine?: (lineIds: string[], machineId: string) => string[]; onOpenLine?: (id: string) => void;
   line: PlanLine; product?: Product; machines: Machine[]; entries: ScheduleEntry[];
@@ -30,8 +32,8 @@ export function ActivityWorkspace({ line, product, machines, entries, canPlan, c
     </form></section>
     <section><h3>Part 2 - Production</h3>
       {entries.length === 0 ? <p>No production details yet.</p> : null}
-      {entries.map((entry) => <ProductionForm key={entry.id} entry={entry} machines={machines} editable={canProduce} onSave={onProduction} />)}
-      {adding ? <ProductionForm entry={{ id: `sched-${crypto.randomUUID()}`, planLineId: line.id, productId: line.productId, productionOrderId: line.productionOrderId, workCentreId: "", startAt: `${line.plannedDate}T08:00`, endAt: `${line.plannedDate}T16:00`, status: "Draft" }} machines={machines} editable onSave={(entry) => { const errors = onProduction(entry); if (!errors.length) setAdding(false); return errors; }} /> : canProduce ? <button type="button" className="calendar-button" onClick={() => setAdding(true)}><Plus size={16} /> Add production details</button> : null}
+      {entries.map((entry) => <ProductionForm key={entry.id} entry={entry} machines={machines} statuses={statuses} editable={canProduce} onSave={onProduction} />)}
+      {adding ? <ProductionForm entry={{ id: `sched-${crypto.randomUUID()}`, planLineId: line.id, productId: line.productId, productionOrderId: line.productionOrderId, workCentreId: "", startAt: `${line.plannedDate}T08:00`, endAt: `${line.plannedDate}T16:00`, status: "Draft" }} machines={machines} statuses={statuses} editable onSave={(entry) => { const errors = onProduction(entry); if (!errors.length) setAdding(false); return errors; }} /> : canProduce ? <button type="button" className="calendar-button" onClick={() => setAdding(true)}><Plus size={16} /> Add production details</button> : null}
     </section>
     {children}
   </dialog>;
@@ -43,7 +45,7 @@ function localInput(value: string) {
   const pad = (part: number) => String(part).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
-function ProductionForm({ entry, machines, editable, onSave }: { entry: ScheduleEntry; machines: Machine[]; editable: boolean; onSave: (entry: ScheduleEntry) => string[] }) {
+function ProductionForm({ entry, machines, statuses, editable, onSave }: { entry: ScheduleEntry; machines: Machine[]; statuses: readonly ScheduleEntry["status"][]; editable: boolean; onSave: (entry: ScheduleEntry) => string[] }) {
   const [machineId, setMachineId] = useState(entry.machineId ?? "");
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
@@ -54,7 +56,7 @@ function ProductionForm({ entry, machines, editable, onSave }: { entry: Schedule
     <fieldset disabled={!editable}><label>Machine<select required value={machineId} onChange={(event) => setMachineId(event.target.value)}><option value="">Select machine</option>{machines.filter((item) => item.active === "Active" || item.id === entry.machineId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     <p>Configured capacity: {machine?.capacity !== undefined ? `${machine.capacity} ${machine.capacityUom ?? ""}` : machine?.capacityNotes ?? "Not configured"}</p>
     <p>Setup time: {machine?.setupMinutes ?? 0} minutes</p>
-    <label>Start<input name="start" type="datetime-local" required defaultValue={localInput(entry.startAt)} /></label><label>End<input name="end" type="datetime-local" required defaultValue={localInput(entry.endAt)} /></label><label>Status<select name="status" value={status} onChange={(event) => setStatus(event.target.value as ScheduleEntry["status"])}>{scheduleStatuses.map((value) => <option key={value}>{value}</option>)}</select></label><label>Production notes<textarea name="notes" defaultValue={entry.notes} /></label></fieldset>
+    <label>Start<input name="start" type="datetime-local" required defaultValue={localInput(entry.startAt)} /></label><label>End<input name="end" type="datetime-local" required defaultValue={localInput(entry.endAt)} /></label><label>Status<select name="status" value={status} onChange={(event) => setStatus(event.target.value as ScheduleEntry["status"])}>{scheduleStatuses.filter((value) => statuses.includes(value) || value === entry.status).map((value) => <option key={value}>{value}</option>)}</select></label><label>Production notes<textarea name="notes" defaultValue={entry.notes} /></label></fieldset>
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}{saved ? <p role="status">Production details saved.</p> : null}
     {editable ? <button className="primary-button" type="submit">Save production</button> : null}
   </form>;

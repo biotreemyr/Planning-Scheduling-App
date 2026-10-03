@@ -25,10 +25,11 @@ import { CalendarAdmin } from "@/components/CalendarAdmin";
 import { CatalogAdmin } from "@/components/CatalogAdmin";
 import { validateDirectoryChange } from "@/lib/services/adminConfiguration";
 import { EndProduction, WipInbox } from "@/components/ProductionFlow";
-import { accessibleCalendars, selectedUnitCalendars, scopeCalendarRecords, type CalendarDirectory } from "@/lib/domain/calendarAccess";
+import { accessibleCalendars, selectedUnitCalendars, scopeCalendarRecords, type CalendarDirectory, type CalendarPerson } from "@/lib/domain/calendarAccess";
 import type { WorkspaceEnvelope, WorkspaceSnapshot } from "@/lib/domain/workspace";
 import { SampleDataAdmin } from "@/components/SampleDataAdmin";
 import { useWorkspacePersistence } from "@/components/WorkspacePersistence";
+import { capabilitiesForDemoRole, capabilitiesFromPermissions } from "@/lib/auth/capabilities";
 import { OrdersPanel } from "@/components/OrdersPanel";
 import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
 import { validateCompletion, type CompletionInput, type WipTransfer } from "@/lib/services/productionFlow";
@@ -86,11 +87,13 @@ function labelFor<T extends { id: string; name: string }>(items: T[], id?: strin
 function AppHeader({
   activeTab,
   onTabChange,
-  conflictCount
+  conflictCount,
+  showReports
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
   conflictCount: number;
+  showReports: boolean;
 }) {
   return (
     <aside className="app-header">
@@ -99,7 +102,7 @@ function AppHeader({
         <p>Production workspace</p>
       </div>
       <nav className="tab-list" aria-label="Scheduler sections">
-        {tabs.map((tab) => {
+        {tabs.filter((tab) => showReports || tab.id !== "reports").map((tab) => {
           const Icon = tab.icon;
           return (
             <button
@@ -115,7 +118,7 @@ function AppHeader({
           );
         })}
       </nav>
-      <button type="button" onClick={() => onTabChange("reports")} className={conflictCount > 0 ? "alert-pill visible" : "alert-pill"}>
+      <button type="button" onClick={() => onTabChange(showReports ? "reports" : "planner")} className={conflictCount > 0 ? "alert-pill visible" : "alert-pill"}>
         <AlertTriangle size={16} />
         <span>{conflictCount} conflict{conflictCount === 1 ? "" : "s"}</span>
       </button>
@@ -137,6 +140,8 @@ function PlannerBoard({
   onAddLine,
   onMoveLine,
   canPlan,
+  canCreate,
+  demo,
   onSelect,
   planningView,
   onPlanningView
@@ -153,6 +158,8 @@ function PlannerBoard({
   onAddLine: (line: PlanLine) => void;
   onMoveLine: (id: string, date: string) => string;
   canPlan: boolean;
+  canCreate: boolean;
+  demo: boolean;
   onSelect: (id: string) => void;
   planningView: PlanningView;
   onPlanningView: (view: PlanningView) => void;
@@ -186,7 +193,7 @@ function PlannerBoard({
           <span className="result-count" aria-live="polite">{visibleLines.length} of {planLines.length} lines</span>
         </div>
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} initialDate={initialDate} onMove={onMoveLine} onCreate={(activity) => {
+        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} initialDate={initialDate} onMove={onMoveLine} onCreate={(activity) => {
           onAddLine({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" });
           setQuery(""); setPriorityFilter(""); setStatusFilter("");
         }} />
@@ -595,14 +602,22 @@ function ReportsPanel({
   );
 }
 
-export default function SchedulerDemo({ initial, writeToken }: { initial: WorkspaceEnvelope; writeToken: string }) {
-  return <MeasurementProvider initial={initial.snapshot.measurements}><TeamWorkspace initial={initial} writeToken={writeToken} /></MeasurementProvider>;
+// A person verified by Bio Tree Core. Their permissions come from Core; the server rechecks every save.
+export type CoreIdentity = { id: string; name: string; permissions: string[] };
+
+export default function SchedulerDemo({ initial, writeToken, identity }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity }) {
+  return <MeasurementProvider initial={initial.snapshot.measurements}><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} /></MeasurementProvider>;
 }
 
-function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; writeToken: string }) {
+function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity }) {
   const [directory, setDirectory] = useState<CalendarDirectory>(initial.snapshot.directory);
   const [memberId, setMemberId] = useState(initial.snapshot.directory.people.find((person) => person.role === "admin")!.id);
-  const member = directory.people.find((item) => item.id === memberId)!;
+  // In Core mode the signed-in user replaces the demo person picker. Core has no unit model
+  // yet, so they see every unit; what they may change comes only from their Core permissions.
+  const coreMember: CalendarPerson | null = identity ? { id: `core-${identity.id}`, name: identity.name, role: "admin", unitIds: directory.units.map((item) => item.id), teamIds: [], calendarIds: directory.calendars.map((item) => item.id), processIds: directory.processes.map((item) => item.id) } : null;
+  const member = coreMember ?? directory.people.find((item) => item.id === memberId)!;
+  const caps = identity ? capabilitiesFromPermissions(identity.permissions) : capabilitiesForDemoRole(member.role);
+  const statuses = scheduleStatuses.filter((status) => (status !== "Confirmed" || caps.approve) && (status !== "Cancelled" || caps.cancel));
   const [unitSelection, setUnitSelection] = useState("");
   const availableUnits = directory.units.filter((item) => member.role === "admin" || member.unitIds.includes(item.id));
   const allowedCalendars = accessibleCalendars(member, directory);
@@ -613,10 +628,13 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
   const unitCalendars = allowedCalendars.filter((item) => item.unitId === unit?.id);
   const visibleCalendars = selectedUnitCalendars(member, directory, unit?.id ?? "", processSelection);
   // Administrators can plan too, matching Core's Scheduler Admin role, which holds every scheduler permission.
-  const canPlan = (member.role === "planner" || member.role === "admin") && !!calendar;
-  const canProduce = member.role === "production" && !!calendar;
-  const canManage = member.role === "admin";
-  const [activeTab, setActiveTab] = useState<Tab>("master");
+  const canPlan = caps.editPlan && !!calendar;
+  const canCreate = caps.createPlan && !!calendar;
+  const canProduce = caps.produce && !!calendar;
+  const canManage = caps.manage;
+  const canAssign = caps.editPlan || caps.produce;
+  // Signed-in Core users start on the plan; the local demo starts on Admin to set up units.
+  const [activeTab, setActiveTab] = useState<Tab>(identity ? "planner" : "master");
   const [planningView, setPlanningView] = useState<PlanningView>("calendar");
   const [adminSection, setAdminSection] = useState("Configuration");
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
@@ -634,7 +652,7 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
   const allowedLines = syncPlanLineStatuses(allowedCalendars.flatMap((item) => scopeCalendarRecords(data.lines, member, item, directory)), data.entries);
   const selectedLine = allowedLines.find((line) => line.id === selectedActivity);
   const activityCalendar = allowedCalendars.find((item) => item.id === selectedLine?.calendarId);
-  const canEditOrders = member.role === "planner" || canManage;
+  const canEditOrders = caps.createPlan || caps.manage;
   const calendarMachines = machines.filter((machine) => machine.unitId === calendar?.unitId && visibleCalendars.some((item) => machine.processIds?.includes(item.processId)));
   const unitMachines = machines.filter((machine) => machine.unitId === activityCalendar?.unitId);
   const activityMachines = unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? ""));
@@ -669,7 +687,7 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
   }
   function completeProduction(input: CompletionInput) {
     if (!selectedLine) return ["Activity not available."];
-    const errors = validateCompletion(selectedLine, input, member, directory);
+    const errors = validateCompletion(selectedLine, input, identity ? { ...member, role: "production" } : member, directory, !identity);
     if (errors.length) return errors;
     const completedAt = new Date().toISOString();
     const line = selectedLine;
@@ -696,7 +714,7 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
   function saveDirectory(next: CalendarDirectory) {
     if (!canManage) return ["Administrator access is required."];
     const usedCalendarIds = [...data.lines.map((item) => item.calendarId), ...data.entries.map((item) => item.calendarId), ...data.actuals.map((item) => item.calendarId), ...data.transfers.flatMap((item) => [item.calendarId, item.sourceCalendarId])].filter((id): id is string => !!id);
-    const errors = validateDirectoryChange(directory, next, machines, usedCalendarIds, memberId);
+    const errors = validateDirectoryChange(directory, next, machines, usedCalendarIds, identity ? "" : memberId);
     if (errors.length) return errors;
     setDirectory(next);
     setSelectedActivity(null);
@@ -733,7 +751,7 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
   }
   // Set the machine for a batch step. Unbooked days get a draft booking for the working day.
   function assignMachine(lineIds: string[], machineId: string) {
-    if (member.role !== "planner" && member.role !== "production" && member.role !== "admin") return ["Planner or production access is required."];
+    if (!canAssign) return ["Planning or production access is required."];
     const targets = allowedLines.filter((line) => lineIds.includes(line.id) && !line.completedAt);
     if (!targets.length || targets.length !== lineIds.length) return ["These activities can no longer be changed."];
     let next = data.entries;
@@ -784,7 +802,7 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
     setData((current) => ({ ...current, transfers: current.transfers.map((item) => item.id === id && !item.receivedAt ? { ...item, receivedAt: new Date().toISOString(), receivedBy: member.name } : item) }));
   }
   function planWip(id: string, date: string) {
-    if (!canPlan || !scope(data.transfers).some((item) => item.id === id)) return;
+    if (!canCreate || !scope(data.transfers).some((item) => item.id === id)) return;
     if (validateActual({ actualQuantity: 0, productionDate: date, hasDeviation: false, deviation: "" }).length) return;
     setData((current) => {
       const transfer = current.transfers.find((item) => item.id === id);
@@ -802,18 +820,18 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
     </fieldset>
   </div>;
   return <main className="workstation">
-    <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} />
+    <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} />
     <div className="workstation-content">
-      <header className="workstation-topbar"><span>Bio Tree / Production</span><label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label></header>
+      <header className="workstation-topbar"><span>Bio Tree / Production</span>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
       {persistenceStatus}
       {activeTab !== "planner" ? <div className="workspace-heading"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1></div> : null}
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders}
         onMoveLine={moveLine}
-        onAddLine={(line) => { if (canPlan && visibleCalendars.some((item) => item.id === line.calendarId) && products.some((item) => item.id === line.productId && item.active === "Active") && Number.isFinite(line.quantity) && line.quantity > 0 && (!line.productionOrderId || data.orders.some((order) => order.id === line.productionOrderId))) setData((current) => ({ ...current, lines: [...current.lines, line] })); }} /> : null}
+        onAddLine={(line) => { if (canCreate && visibleCalendars.some((item) => item.id === line.calendarId) && products.some((item) => item.id === line.productId && item.active === "Active") && Number.isFinite(line.quantity) && line.quantity > 0 && (!line.productionOrderId || data.orders.some((order) => order.id === line.productionOrderId))) setData((current) => ({ ...current, lines: [...current.lines, line] })); }} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} machines={activityMachines} entries={entries.filter((item) => item.planLineId === selectedLine.id)} canPlan={canPlan && !selectedLine.completedAt} canProduce={canProduce && !selectedLine.completedAt} onClose={() => setSelectedActivity(null)} onProduction={saveProduction}
-        orders={data.orders} route={batchRoute(selectedLine, allowedLines, directory)} routeMachines={unitMachines} routeEntries={data.entries} canAssign={member.role === "planner" || member.role === "production" || member.role === "admin"} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
+        orders={data.orders} route={batchRoute(selectedLine, allowedLines, directory)} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} statuses={statuses} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
         onPlan={(line) => { if (canPlan && !selectedLine.completedAt && Number.isFinite(line.quantity) && line.quantity > 0 && (!line.productionOrderId || data.orders.some((order) => order.id === line.productionOrderId))) setData((current) => ({ ...current, lines: current.lines.map((item) => item.id === selectedLine.id ? { ...(({ productionOrderId: _, ...rest }) => rest)(item), ...(line.productionOrderId ? { productionOrderId: line.productionOrderId } : {}), quantity: line.quantity, plannedDate: line.plannedDate, priority: line.priority, notes: line.notes, batchSizeKg: batchKilograms(line.quantity, item.uom ?? products.find((product) => product.id === item.productId)?.uom ?? "", item.unitWeightMg) } : item) })); }}>
         <EndProduction line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} onComplete={completeProduction} />
       </ActivityWorkspace> : null}
@@ -835,12 +853,12 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
           }
           return [];
         }} /> : null}
-      </> : <section className="admin-access"><h2>Administrator access required</h2><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></section> : null}
+      </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
       {activeTab === "orders" ? <OrdersPanel orders={data.orders} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onDelete={deleteOrder} /> : null}
-      {activeTab === "reports" && calendar ? <>
+      {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />
-        <details className="wip-reports"><summary>Incoming WIP ({scope(data.transfers).filter((item) => !item.receivedAt).length})</summary><WipInbox transfers={scope(data.transfers)} products={products} directory={directory} canReceive={canProduce} canPlan={canPlan} onReceive={receiveWip} onPlan={planWip} /></details>
+        <details className="wip-reports"><summary>Incoming WIP ({scope(data.transfers).filter((item) => !item.receivedAt).length})</summary><WipInbox transfers={scope(data.transfers)} products={products} directory={directory} canReceive={canProduce} canPlan={canCreate} onReceive={receiveWip} onPlan={planWip} /></details>
         <ReportsPanel planLines={planLines} entries={entries} products={products} workCentres={workCentres} machines={calendarMachines} />
       </> : null}
     </div>

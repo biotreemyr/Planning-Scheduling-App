@@ -1,9 +1,10 @@
 # Bio Tree Core Connection
 
-Status: Core sign-in is connected. A Clerk session from Bio Tree Core is read on
-every request, and app access plus permissions are resolved from Core's database.
-The protected data workspace is still to come: an authorized user reaches an
-access-granted page, not the scheduling boards.
+Status: Core sign-in is connected and the scheduling workspace is served to
+signed-in Core users. A Clerk session from Bio Tree Core is read on every
+request, app access and permissions are resolved from Core's database, and every
+save is reviewed on the server against the saver's Core permissions and recorded
+in an audit table.
 
 ## Registration in Core
 
@@ -11,7 +12,7 @@ access-granted page, not the scheduling boards.
 | --- | --- |
 | App name | Production Scheduling |
 | App key | `scheduler` (stable) |
-| App URL | `http://192.168.1.20:8092` today; must become an HTTPS origin on Core's domain — see below |
+| App URL | `https://scheduler.biotreegroup.com.my` |
 | Icon | `scheduler` |
 | Status | `active` |
 | Tile description | Production plans, machine schedules, and work centre load |
@@ -80,7 +81,7 @@ Unauthenticated sessions redirect to Core's sign-in with a `redirect_url` back t
 this app, built from the configured `SCHEDULER_APP_URL` rather than the request
 Host header, so a forged host cannot turn Core's sign-in into an open redirect.
 Denied users see access denied; connection failures show unavailable. Authorized
-users see connection pending until the protected data workspace exists.
+users see the workspace (see Workspace in Core Mode).
 
 Local `next dev` still supports the browser-state demo with
 `SCHEDULER_AUTH_MODE="demo"`. Production defaults to Core and rejects explicit
@@ -105,24 +106,53 @@ Locally, a Clerk development session cookie is set on `localhost` and ignores th
 port, so Core on `:3000` and the scheduler on `:3001` share it. Open the app at
 `http://localhost:3001`, not `127.0.0.1`, or the cookie is missed.
 
+## Workspace in Core Mode
+
+The root page loads the PostgreSQL workspace for a user holding a board read and
+renders it with that user's Core identity. The demo person picker is replaced by
+"Signed in as <name>"; Core has no unit model yet, so every signed-in user sees
+every unit. What they may change comes only from Core permission keys
+(`src/lib/auth/capabilities.ts`):
+
+| Core key | In the workspace |
+| --- | --- |
+| `scheduler.planning.create` | Add activities and orders, plan received WIP |
+| `scheduler.planning.edit` | Move and edit activities, assign machines |
+| `scheduler.schedule.edit` | Record bookings, results and WIP handovers, assign machines |
+| `scheduler.schedule.approve` | Set a booking to Confirmed |
+| `scheduler.schedule.cancel` | Set a booking to Cancelled |
+| `scheduler.master_data.manage` | Admin: units, people, products, machines, measurements, sample data |
+| `scheduler.reports.view` | Reports tab |
+
+The browser saves the whole workspace, so `PUT /api/workspace` trusts nothing it
+says about itself. In Core mode it requires the verified Clerk/Core user, an
+`Origin` equal to `SCHEDULER_APP_URL`, and the page's write token. Inside the save
+transaction it compares the stored snapshot with the new one
+(`src/lib/auth/workspaceAccess.ts`) and refuses the whole save if any change
+needs a permission the user lacks. Each accepted save writes a
+`SchedulerAuditEvent` row with the Core user ID, Clerk ID, name, new revision and
+a summary of what changed.
+
+Loading sample data creates confirmed bookings, so it needs
+`scheduler.schedule.approve` as well as master data; in Core today only Super
+Admin holds approve.
+
+Core's **Production** role currently has only board reads, so production staff
+cannot record results until Core grants that role `scheduler.schedule.edit`.
+
 ## Work Remaining
 
-1. Serve this app from the Core domain over HTTPS, run the dashboard repo's
-   `0008_activate_scheduler_app.sql`, and move both sides to live Clerk keys
-   together — Core currently runs on test keys.
-2. Add persistent repositories and server actions/routes. Protect every read and
-   mutation with its mapped permission, validate inputs, and then perform work.
-   Creating a Confirmed/Cancelled entry requires both edit and approve/cancel;
-   edits that change status must also check the destination status permission.
-   Never trust the browser's selected permission or actor identity.
-3. Record app-specific mutations in a persistent audit log within the data
-   transaction, using the Core user ID and verified Clerk ID, action, entity ID,
-   timestamp, and before/after values. Browser `changedBy` and Employee.role are
-   not identity or access sources. Read reports separately under report permission.
-4. Replace SchedulerDemo with the protected data workspace; pass only needed
-   permission hints to controls and recheck access on every server request.
-5. Give Core a team model, or drop `requireTeamPermission` — it currently denies
+1. Move Core and this app to live Clerk keys together — Core currently runs on
+   test keys.
+2. Reads are not yet scoped: anyone with a board read receives the whole
+   workspace, including reports data, in the page. Scope by unit or team once
+   Core has a model for it, and serve reports only under `scheduler.reports.view`.
+3. Record names in plan and booking `changedBy` fields from the server rather than
+   the browser; the audit table is the trustworthy record meanwhile.
+4. Give Core a team model, or drop `requireTeamPermission` — it currently denies
    everyone because Core returns no team assignments.
+5. Grant Core's Production role `scheduler.schedule.edit` if production staff
+   should record results.
 6. Assign named users their scheduler roles in Core. Verify real sign-in,
    sign-out, direct URLs, inactive users, revocation, cross-app isolation,
    read-only users, tampered mutation requests, and Core outages end to end.
