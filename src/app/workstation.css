@@ -268,7 +268,7 @@
 .orders-form .quantity-fields { margin: 0; }
 .orders-form .primary-button { white-space: nowrap; }
 .orders-help { font-size: 13px; color: var(--muted); }
-.orders-table tbody th { background: transparent; }
+.orders-table > tbody > tr > th { background: transparent; }
 @media (max-width: 1100px) { .orders-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .orders-list .panel-title h2 { display: flex; align-items: center; gap: 10px; }
 .orders-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; margin-bottom: 12px; }
@@ -284,8 +284,8 @@
 .orders-columns input { width: 16px; height: 16px; }
 /* The table body scrolls; both header rows stay in view. */
 .orders-table-scroll { max-height: min(65vh, 640px); overflow: auto; border: 1px solid var(--line); }
-.orders-table thead { position: sticky; top: 0; z-index: 3; }
-.orders-table thead tr:first-child th { padding-bottom: 4px; }
+.orders-table > thead { position: sticky; top: 0; z-index: 3; }
+.orders-table > thead > tr:first-child > th { padding-bottom: 4px; }
 .orders-filter-row th { padding-top: 0; }
 .orders-filter-row input, .orders-filter-row select { width: 100%; min-width: 90px; min-height: 30px; padding: 4px 8px; font-size: 13px; font-weight: 400; }
 .orders-table .table-sort { display: inline-flex; align-items: center; gap: 4px; min-height: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
@@ -295,8 +295,8 @@
 .orders-table .order-row > td:first-child { box-shadow: inset 5px 0 0 var(--order-color, transparent); }
 .order-number-cell .order-badge { margin-right: 0; min-width: 24px; height: 20px; font-size: 12px; }
 .orders-table { width: 100%; min-width: 860px; border-collapse: separate; border-spacing: 0; font-size: 14px; }
-.orders-table th, .orders-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
-.orders-table thead th { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; background: var(--panel-soft); }
+.orders-table > thead > tr > th, .orders-table > tbody > tr > th, .orders-table > tbody > tr > td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.orders-table > thead > tr > th { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; background: var(--panel-soft); }
 .orders-table tbody th { font-weight: 600; white-space: nowrap; }
 .orders-table .numeric { text-align: right; white-space: nowrap; }
 .orders-table td small { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
@@ -352,3 +352,18 @@
 .orders-table [data-col="po"] { white-space: nowrap; }
 .orders-table [data-col="status"] { white-space: nowrap; }
 .orders-table [data-col="customer"] { min-width: 140px; }
+/* Order detail: processes down the side, one column per batch, then a summary. */
+.order-batch-scroll { overflow-x: auto; }
+.order-batch-table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; background: var(--panel); }
+.order-batch-table th, .order-batch-table td { padding: 8px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.order-batch-table thead th { background: var(--panel-soft); font-weight: 600; }
+.order-batch-table thead th small { display: block; font-weight: 400; color: var(--muted); margin-top: 2px; }
+.order-batch-table thead th .batch-kg { color: var(--ink); font-weight: 600; }
+.order-batch-table tbody th { white-space: nowrap; background: #fafbfa; }
+.order-batch-table tbody th small { display: block; font-weight: 400; color: var(--muted); }
+.order-batch-table .order-batch-summary { min-width: 170px; background: #f6faf8; }
+.order-batch-table input[type="date"] { min-height: 32px; padding: 3px 6px; }
+.batch-cell { display: grid; gap: 3px; justify-items: start; }
+.batch-cell small { color: var(--muted); }
+.batch-progress { height: 8px; border-radius: 4px; background: var(--gray-soft); overflow: hidden; margin: 3px 0 5px; }
+.batch-progress span { display: block; height: 100%; background: var(--green); }

@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, P
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { localDateKey } from "@/lib/services/calendarPrint";
-import { nextOrderNumber, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
+import { nextOrderNumber, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
@@ -157,7 +157,7 @@ function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, e
                 <td><button type="button" className="icon-button order-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} ${row.order.poNumber} details`} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : row.order.id); }}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button></td>
                 {shown.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(row)}</td>)}
               </tr>
-              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail order={row.order} rows={row.rows} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
+              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail order={row.order} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
             </Fragment>;
           })}
         </tbody>
@@ -167,30 +167,63 @@ function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, e
   </div>;
 }
 
-function OrderDetail({ order, rows, linked, editable, customers, onSave, onDelete }: {
-  order: PurchaseOrder; rows: OrderProcessRow[]; linked: boolean; editable: boolean; customers: string[];
+const shortDate = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+
+function BatchSize({ kg, quantity, uom }: { kg?: number; quantity: number; uom: string }) {
+  const mass = ["kg", "g", "mg"].includes(uom);
+  if (kg === undefined) return <small>{quantity.toLocaleString()} {uom}</small>;
+  return <><small className="batch-kg">{kg.toLocaleString("en-MY", { maximumFractionDigits: 2 })} kg</small>{mass ? null : <small>≈ {quantity.toLocaleString()} {uom}</small>}</>;
+}
+
+// One batch's days in one process: dates plus where it stands.
+function BatchStatus({ cell, uom }: { cell?: BatchCell; uom: string }) {
+  if (!cell) return <span className="route-muted">Not planned</span>;
+  const dates = cell.firstDate === cell.lastDate ? shortDate(cell.firstDate) : `${shortDate(cell.firstDate)} – ${shortDate(cell.lastDate)}`;
+  const status = cell.daysDone === cell.days ? ["Done", "success"] : cell.late ? ["Late", "danger"] : cell.daysDone ? ["In progress", "warning"] : ["Planned", "neutral"];
+  return <div className="batch-cell">
+    <span>{dates}</span>
+    <span className={`badge ${status[1]}`}>{status[0]}{cell.days > 1 && cell.daysDone && cell.daysDone < cell.days ? ` ${cell.daysDone}/${cell.days}` : ""}</span>
+    {cell.daysDone ? <small>{cell.completed.toLocaleString()} {uom} made</small> : null}
+  </div>;
+}
+
+function OrderDetail({ order, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete }: {
+  order: PurchaseOrder; rows: OrderProcessRow[]; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; linked: boolean; editable: boolean; customers: string[];
   onSave: (order: PurchaseOrder) => string[]; onDelete: (id: string) => string[];
 }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const units = new Set(rows.map((row) => row.unitName));
+  const matrix = orderBatchMatrix(order, lines, directory, localDateKey(new Date()), visibleCalendarIds);
   return <div className="order-detail">
-    {rows.length ? <table className="order-process-table">
-      <thead><tr><th scope="col">Process</th><th scope="col">Scheduled</th><th scope="col">Planned quantity</th><th scope="col">Completed</th><th scope="col">Expected completion</th></tr></thead>
-      <tbody>{rows.map((row) => <tr key={row.calendar.id}>
-        <th scope="row">{row.processName}{units.size > 1 ? <small>{row.unitName}</small> : null}</th>
-        <td>{row.firstDate === row.lastDate ? displayDate(row.firstDate) : `${displayDate(row.firstDate)} to ${displayDate(row.lastDate)}`}</td>
-        <td>{row.plannedQuantity.toLocaleString()} {order.uom}</td>
-        <td>{row.completedCount ? `${row.completedQuantity.toLocaleString()} ${order.uom} (${row.completedCount}/${row.lineCount} days)` : "-"}</td>
-        <td><input type="date" aria-label={`Expected completion for ${row.processName}`} disabled={!editable} value={order.expectedDates[row.calendar.id] ?? ""}
-          onChange={(event) => {
-            const expectedDates = { ...order.expectedDates };
-            if (event.target.value) expectedDates[row.calendar.id] = event.target.value; else delete expectedDates[row.calendar.id];
-            setErrors(onSave({ ...order, expectedDates })); setSaved(false);
-          }} />{order.expectedDates[row.calendar.id] && order.expectedDates[row.calendar.id] < row.lastDate ? <small className="order-warning">Before last scheduled day</small> : null}</td>
-      </tr>)}</tbody>
-    </table> : <p>No production has been scheduled against this PO yet.</p>}
+    {rows.length ? <div className="order-batch-scroll"><table className="order-batch-table">
+      <thead>
+        <tr><th scope="col" rowSpan={2}>Process</th><th scope="colgroup" colSpan={matrix.batches.length + 1}>Planned quantity</th><th scope="col" rowSpan={2}>Expected completion</th></tr>
+        <tr>
+          {matrix.batches.map((batch) => <th scope="col" key={batch.key}><strong>{batch.label}</strong><BatchSize kg={batch.kg} quantity={batch.quantity} uom={batch.uom} /></th>)}
+          <th scope="col" className="order-batch-summary"><strong>Summary</strong><BatchSize kg={matrix.total.kg} quantity={matrix.total.quantity} uom={order.uom} /></th>
+        </tr>
+      </thead>
+      <tbody>{matrix.rows.map((row) => {
+        const lastDate = rows.find((item) => item.calendar.id === row.calendar.id)?.lastDate ?? "";
+        const percent = row.planned ? Math.min(100, Math.round(row.completed / row.planned * 100)) : 0;
+        return <tr key={row.calendar.id}>
+          <th scope="row">{row.processName}{units.size > 1 ? <small>{rows.find((item) => item.calendar.id === row.calendar.id)?.unitName}</small> : null}</th>
+          {matrix.batches.map((batch) => <td key={batch.key}><BatchStatus cell={row.cells[batch.key]} uom={batch.uom} /></td>)}
+          <td className="order-batch-summary">
+            <div className="batch-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={`${row.processName} ${percent}% complete`}><span style={{ width: `${percent}%` }} /></div>
+            <small>{row.completed.toLocaleString()} / {row.planned.toLocaleString()} {order.uom} · {percent}%</small>
+          </td>
+          <td><input type="date" aria-label={`Expected completion for ${row.processName}`} disabled={!editable} value={order.expectedDates[row.calendar.id] ?? ""}
+            onChange={(event) => {
+              const expectedDates = { ...order.expectedDates };
+              if (event.target.value) expectedDates[row.calendar.id] = event.target.value; else delete expectedDates[row.calendar.id];
+              setErrors(onSave({ ...order, expectedDates })); setSaved(false);
+            }} />{order.expectedDates[row.calendar.id] && order.expectedDates[row.calendar.id] < lastDate ? <small className="order-warning">Before last scheduled day</small> : null}</td>
+        </tr>;
+      })}</tbody>
+    </table></div> : <p>No production has been scheduled against this PO yet.</p>}
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);

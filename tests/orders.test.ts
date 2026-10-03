@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { ORDER_COLORS, batchRoute, nextOrderNumber, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder } from "../src/lib/services/orders";
+import { ORDER_COLORS, batchRoute, nextOrderNumber, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder } from "../src/lib/services/orders";
 
 const state = addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state!;
 const order = state.data.orders.find((item) => item.poNumber === "PO-2609-118")!;
@@ -102,5 +102,32 @@ describe("order numbers and colours", () => {
     const duplicate = structuredClone(state);
     duplicate.data.orders[1].number = duplicate.data.orders[0].number;
     expect(() => parseWorkspace(duplicate)).toThrow();
+  });
+});
+
+describe("order batch grid", () => {
+  const order = state.data.orders.find((item) => item.poNumber === "PO-2609-125")!;
+  it("lays out each process against each batch with batch sizes in kg and pieces", () => {
+    const matrix = orderBatchMatrix(order, state.data.lines, state.directory, "2026-10-07");
+    expect(matrix.batches.map((batch) => [batch.label, batch.quantity, batch.kg])).toEqual([["Batch 1", 300000, 75], ["Batch 2", 300000, 75], ["Batch 3", 300000, 75]]);
+    expect(matrix.total).toEqual({ quantity: 900000, kg: 225 });
+    expect(matrix.rows.map((row) => row.processName)).toEqual(["Dispensing", "Compression", "Filling", "Packing"]);
+    // Filling runs three days per batch; its days add back up to the batch.
+    const filling = matrix.rows.find((row) => row.processName === "Filling")!;
+    expect(filling.cells["Batch 1"]).toMatchObject({ days: 3, planned: 300000 });
+    expect(filling.planned).toBe(900000);
+  });
+  it("marks finished, late and planned batch steps", () => {
+    const lines = structuredClone(state.data.lines);
+    const target = lines.filter((line) => line.productionOrderId === order.id && line.orderReference === "Batch 3" && line.activityType === "Packing");
+    for (const line of target) { delete line.completedAt; delete line.yieldQuantity; }
+    const packing = (today: string) => orderBatchMatrix(order, lines, state.directory, today).rows.find((row) => row.processName === "Packing")!.cells["Batch 3"];
+    expect(packing("2026-01-01")).toMatchObject({ daysDone: 0, late: false });
+    expect(packing("2027-01-01")).toMatchObject({ daysDone: 0, late: true });
+    expect(orderBatchMatrix(order, state.data.lines, state.directory, "2026-10-07").rows[0].cells["Batch 1"]).toMatchObject({ days: 1, daysDone: 1 });
+  });
+  it("keeps natural batch order and groups unlabelled lines", () => {
+    const lines = state.data.lines.filter((line) => line.productionOrderId === order.id).map((line) => ({ ...line, orderReference: line.orderReference === "Batch 2" ? "Batch 10" : line.orderReference === "Batch 3" ? undefined : line.orderReference }));
+    expect(orderBatchMatrix(order, lines, state.directory, "2026-10-07").batches.map((batch) => batch.label)).toEqual(["Batch 1", "Batch 10", "No batch"]);
   });
 });

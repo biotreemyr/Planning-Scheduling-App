@@ -120,3 +120,37 @@ export function orderInMonth(order: PurchaseOrder, rows: OrderProcessRow[], prog
   }
   return rows.some((row) => row.firstDate.slice(0, 7) <= month && row.lastDate.slice(0, 7) >= month);
 }
+
+export type BatchCell = { firstDate: string; lastDate: string; days: number; daysDone: number; planned: number; completed: number; late: boolean };
+export type OrderBatch = { key: string; label: string; quantity: number; uom: string; kg?: number };
+export type OrderBatchMatrix = {
+  batches: OrderBatch[];
+  rows: { calendar: UnitCalendar; processName: string; cells: Record<string, BatchCell>; planned: number; completed: number }[];
+  total: { quantity: number; kg?: number };
+};
+const batchOrder = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
+// An order's work as a grid: one row per scheduled process, one column per batch.
+// Batches are the order's plan lines sharing a batch/order reference.
+export function orderBatchMatrix(order: PurchaseOrder, lines: PlanLine[], directory: CalendarDirectory, today: string, visibleCalendarIds?: string[]): OrderBatchMatrix {
+  const linked = lines.filter((line) => line.productionOrderId === order.id && (!visibleCalendarIds || visibleCalendarIds.includes(line.calendarId ?? "")));
+  const keyOf = (line: PlanLine) => line.orderReference?.trim() || "No batch";
+  const rows = orderProcessRows(order, linked, directory).map((row) => {
+    const cells: Record<string, BatchCell> = {};
+    for (const line of linked.filter((item) => item.calendarId === row.calendar.id).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate))) {
+      const cell = cells[keyOf(line)] ??= { firstDate: line.plannedDate, lastDate: line.plannedDate, days: 0, daysDone: 0, planned: 0, completed: 0, late: false };
+      cell.lastDate = line.plannedDate; cell.days += 1; cell.planned += line.quantity;
+      if (line.completedAt) { cell.daysDone += 1; cell.completed += line.yieldQuantity ?? 0; } else if (line.plannedDate < today) cell.late = true;
+    }
+    return { calendar: row.calendar, processName: row.processName, cells, planned: row.plannedQuantity, completed: row.completedQuantity };
+  });
+  // A batch's size is its largest process total; a multi-day step splits the batch across its days.
+  const batches = [...new Set(linked.map(keyOf))].sort(batchOrder).map((key) => {
+    const quantity = Math.max(0, ...rows.map((row) => row.cells[key]?.planned ?? 0));
+    const sample = linked.find((line) => keyOf(line) === key)!;
+    const kg = sample.batchSizeKg !== undefined && sample.quantity > 0 ? Number((sample.batchSizeKg / sample.quantity * quantity).toPrecision(6)) : undefined;
+    return { key, label: key, quantity, uom: sample.uom ?? order.uom, kg };
+  });
+  const kgKnown = batches.length > 0 && batches.every((batch) => batch.kg !== undefined);
+  return { batches, rows, total: { quantity: batches.reduce((sum, batch) => sum + batch.quantity, 0), kg: kgKnown ? Number(batches.reduce((sum, batch) => sum + batch.kg!, 0).toPrecision(6)) : undefined } };
+}
