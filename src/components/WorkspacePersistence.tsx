@@ -37,7 +37,11 @@ export function useWorkspacePersistence(initial: WorkspaceEnvelope, snapshot: un
         pending.current = null;
       }
       setError(false); setStatus("Saved to PostgreSQL");
-    } catch (error) { failed.current = true; setError(true); setStatus(error instanceof Error ? error.message : "Save failed. Keep this tab open and retry."); }
+    } catch (error) {
+      failed.current = true; setError(true);
+      // A network-level failure ("Failed to fetch") usually means the sign-in needs renewing.
+      setStatus(error instanceof TypeError ? "Could not reach the scheduler, or your sign-in needs renewing. Retry; if it fails again, download your changes and reload the page." : error instanceof Error ? error.message : "Save failed. Keep this tab open and retry.");
+    }
     finally { running.current = false; }
   }, [token]);
 
