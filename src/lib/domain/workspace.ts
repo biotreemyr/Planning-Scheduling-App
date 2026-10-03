@@ -44,7 +44,7 @@ export const workspaceSchema = z.object({
     transfers: z.array(z.object({ id, sourceLineId: id, sourceCalendarId: id, calendarId: id, productId: id, quantity: number.positive(), uom: name,
       orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional() })),
     // Added after the first pilot release; older snapshots load with no orders.
-    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), number: number.int().positive().optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
+    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), number: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([])
   })
 }).strict();

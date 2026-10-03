@@ -1,5 +1,6 @@
 import { parseWorkspace, type WorkspaceSnapshot } from "./workspace";
 import { batchKilograms } from "@/lib/services/measurements";
+import { inferFormat } from "@/lib/services/processRules";
 
 // Every sample record carries this ID prefix so it can be found and removed before go-live.
 export const SAMPLE_PREFIX = "sample-";
@@ -18,6 +19,7 @@ const products = [
   { key: "folic", sku: "SMP-FA400", name: "Folic Acid 400mcg Tablets", uom: "tablets", weight: 250 },
   { key: "mecob", sku: "SMP-MECOB", name: "Methylcobalamin Capsules", uom: "capsules", weight: 400 },
   { key: "iron", sku: "SMP-IRONB", name: "Iron Pyro B-Plus Capsules", uom: "capsules", weight: 500 },
+  { key: "collagen", sku: "SMP-COLSC", name: "Collagen Peptide Sachet", uom: "sachets", weight: 5000 },
   { key: "soy", sku: "SMP-BSFP", name: "Black Soybean Fermented Powder", uom: "kg" },
   { key: "enzyme", sku: "SMP-ENZB", name: "Enzyme Blend Powder", uom: "kg" }
 ] as const;
@@ -52,13 +54,13 @@ type ProductKey = (typeof products)[number]["key"];
 // Each step runs for a number of working days; the next step starts on the following working day.
 type Route = [process: string, days: number][];
 const coatedTablet: Route = [["Dispensing", 1], ["Compression", 2], ["Coating", 2], ["Filling", 2], ["Packing", 1]];
-const plainTablet: Route = [["Dispensing", 1], ["Compression", 2], ["Filling", 3], ["Packing", 1]];
 const capsule: Route = [["Dispensing", 1], ["Capsulation", 2], ["Filling", 2], ["Packing", 1]];
+const sachet: Route = [["Dispensing", 1], ["Filling", 2], ["Packing", 1]];
 const routes: Record<ProductKey, Route> = {
-  vitc: coatedTablet, vitb: coatedTablet, folic: plainTablet, mecob: capsule, iron: capsule,
+  vitc: coatedTablet, vitb: coatedTablet, folic: coatedTablet, mecob: capsule, iron: capsule, collagen: sachet,
   soy: [["Fermentation", 1]], enzyme: [["Fermentation", 1]]
 };
-const quantities: Record<ProductKey, number> = { vitc: 280000, vitb: 140000, folic: 300000, mecob: 120000, iron: 150000, soy: 800, enzyme: 450 };
+const quantities: Record<ProductKey, number> = { vitc: 280000, vitb: 140000, folic: 300000, mecob: 120000, iron: 150000, collagen: 60000, soy: 800, enzyme: 450 };
 // Start is in working days from Monday of the current week, so the calendar always shows work around today.
 const batches: { product: ProductKey; batch: number; start: number; priority?: Line["priority"]; route?: Route; notes?: string }[] = [
   { product: "vitc", batch: 3, start: -14, priority: "High" }, { product: "folic", batch: 1, start: -13 }, { product: "vitb", batch: 1, start: -12 },
@@ -68,6 +70,9 @@ const batches: { product: ProductKey; batch: number; start: number; priority?: L
   { product: "vitc", batch: 6, start: 1 }, { product: "iron", batch: 2, start: 3, priority: "High" }, { product: "vitc", batch: 7, start: 6, priority: "Low" },
   { product: "mecob", batch: 4, start: 7 }, { product: "vitb", batch: 3, start: 8 }, { product: "folic", batch: 3, start: 9 },
   { product: "vitc", batch: 8, start: 11 }, { product: "iron", batch: 3, start: 13 },
+  { product: "collagen", batch: 1, start: -6 },
+  // Deliberately out of order: packing before filling, to show the process-flow warning.
+  { product: "collagen", batch: 2, start: 2, route: [["Dispensing", 1], ["Packing", 1], ["Filling", 2]], notes: "Sample: packing is planned before filling, to show a process-flow warning." },
   { product: "soy", batch: 1, start: -9, priority: "High", notes: "Fermentation batch for black soybean powder." }, { product: "enzyme", batch: 1, start: -4 },
   { product: "soy", batch: 2, start: 0, route: [["Fermentation", 2], ["Drying", 1]] }, { product: "enzyme", batch: 2, start: 4, priority: "High", route: [["Fermentation", 2], ["Drying", 1]] },
   { product: "soy", batch: 3, start: 10, route: [["Fermentation", 2], ["Drying", 1]] }
@@ -90,7 +95,8 @@ const purchaseOrders: { po: string; customer: string; product: ProductKey; batch
   { po: "PO-2610-145", customer: "Vitara Nutrition (Sample)", product: "iron", batches: [], quantity: 300000 },
   { po: "PO-2610-147", customer: "Harmoni Health (Sample)", product: "vitc", batches: [], quantity: 560000 },
   { po: "PO-2610-150", customer: "Sungai Organics (Sample)", product: "soy", batches: [], quantity: 1600 },
-  { po: "PO-2610-151", customer: "Greenleaf Wellness (Sample)", product: "mecob", batches: [], quantity: 240000 }
+  { po: "PO-2610-151", customer: "Greenleaf Wellness (Sample)", product: "mecob", batches: [], quantity: 240000 },
+  { po: "PO-2609-129", customer: "Kinabalu Pharmacy (Sample)", product: "collagen", batches: [1, 2] }
 ];
 const orderId = (po: string) => `${SAMPLE_PREFIX}order-${po.toLowerCase()}`;
 const orderFor = (product: ProductKey, batch: number) => purchaseOrders.find((order) => order.product === product && order.batches.includes(batch));
@@ -244,7 +250,7 @@ export function addSampleData(state: Snapshot, today = new Date()): { state?: Sn
     const expectedDates: Record<string, string> = {};
     if (index % 2 === 0) for (const line of linked) if (!expectedDates[line.calendarId] || expectedDates[line.calendarId] < line.plannedDate) expectedDates[line.calendarId] = line.plannedDate;
     next.data.orders.push({
-      id: orderId(order.po), poNumber: order.po, customerName: order.customer, number: index + 1, productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
+      id: orderId(order.po), poNumber: order.po, customerName: order.customer, number: index + 1, format: inferFormat(product), productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
       uom: product.uom, expectedDates, createdAt: stamp(dateKey(workday(monday, order.batches.length ? -15 : index - 12)), "09:00"), createdBy: "Sample data"
     });
   }

@@ -51,7 +51,9 @@ import { priorities, scheduleStatuses } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
 import { getScheduleReport } from "@/lib/services/reports";
-import { daysBetween, shiftTimestamp, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
+import { syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
+import { createBatchLines, moveActivity, type NewBatch } from "@/lib/services/planChanges";
+import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
 type Tab = "planner" | "orders" | "master" | "reports";
 type PlanningView = "calendar" | "list";
@@ -127,6 +129,15 @@ function AppHeader({
   );
 }
 
+// Process-flow warnings for what is on screen; each links to the activity it concerns.
+function FlowBanner({ warnings, onOpen }: { warnings: FlowWarning[]; onOpen: (id: string) => void }) {
+  if (!warnings.length) return null;
+  return <details className="flow-banner">
+    <summary><AlertTriangle size={16} />{warnings.length} process-flow warning{warnings.length === 1 ? "" : "s"} in this view</summary>
+    <ul>{warnings.map((warning) => <li key={warning.message}><span>{warning.message}</span><button type="button" className="calendar-button" onClick={() => onOpen(warning.lineIds[0])}>Open</button></li>)}</ul>
+  </details>;
+}
+
 function PlannerBoard({
   processNames,
   calendars,
@@ -137,6 +148,7 @@ function PlannerBoard({
   planLines,
   products,
   orders,
+  flow,
   onAddLine,
   onMoveLine,
   canPlan,
@@ -155,6 +167,7 @@ function PlannerBoard({
   planLines: PlanLine[];
   products: Product[];
   orders: PurchaseOrder[];
+  flow: FlowWarning[];
   onAddLine: (line: PlanLine) => void;
   onMoveLine: (id: string, date: string) => string;
   canPlan: boolean;
@@ -192,8 +205,9 @@ function PlannerBoard({
           <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{["Unscheduled", "Partially Scheduled", "Fully Scheduled"].map((value) => <option key={value}>{value}</option>)}</select></label>
           <span className="result-count" aria-live="polite">{visibleLines.length} of {planLines.length} lines</span>
         </div>
+        <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} initialDate={initialDate} onMove={onMoveLine} onCreate={(activity) => {
+        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onCreate={(activity) => {
           onAddLine({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" });
           setQuery(""); setPriorityFilter(""); setStatusFilter("");
         }} />
@@ -653,6 +667,13 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   const selectedLine = allowedLines.find((line) => line.id === selectedActivity);
   const activityCalendar = allowedCalendars.find((item) => item.id === selectedLine?.calendarId);
   const canEditOrders = caps.createPlan || caps.manage;
+  // One set of process-flow warnings feeds the calendar, list, activity panel and orders.
+  const flow = checkProcessFlow(data.lines, data.entries, data.orders, products, directory);
+  const flowByLine = warningsByLine(flow);
+  const route = selectedLine ? batchRoute(selectedLine, allowedLines, directory) : [];
+  const routeLineIds = new Set(route.flatMap((step) => step.lines.map((item) => item.id)));
+  const selectedOrder = data.orders.find((order) => order.id === selectedLine?.productionOrderId);
+  const selectedFormat = selectedOrder?.format ?? inferFormat(products.find((item) => item.id === selectedLine?.productId));
   const calendarMachines = machines.filter((machine) => machine.unitId === calendar?.unitId && visibleCalendars.some((item) => machine.processIds?.includes(item.processId)));
   const unitMachines = machines.filter((machine) => machine.unitId === activityCalendar?.unitId);
   const activityMachines = unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? ""));
@@ -720,21 +741,48 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     setSelectedActivity(null);
     return [];
   }
-  // Move an activity to a new date. Its open machine bookings move by the same number of days.
+  // Every date change (drag in calendar or list, or the activity's date field) goes through here,
+  // so bookings, orders and reports follow. Process-flow problems are warned about, not blocked.
   function moveLine(id: string, date: string) {
-    const line = planLines.find((item) => item.id === id);
-    if (!canPlan || !line) return "You cannot move this activity.";
-    if (line.completedAt) return "Completed activities cannot be moved.";
-    const days = daysBetween(line.plannedDate, date);
-    if (!days) return "";
-    const moving = data.entries.filter((entry) => entry.planLineId === id && !["Completed", "Cancelled"].includes(entry.status));
-    const entries = data.entries.map((entry) => moving.includes(entry) ? { ...entry, startAt: shiftTimestamp(entry.startAt, days), endAt: shiftTimestamp(entry.endAt, days), changedBy: member.name } : entry);
-    setData((current) => ({ ...current, lines: current.lines.map((item) => item.id === id ? { ...item, plannedDate: date } : item), entries }));
+    if (!canPlan || !allowedLines.some((item) => item.id === id)) return "You cannot move this activity.";
+    const result = moveActivity(data.lines, data.entries, id, date, member.name);
+    if ("error" in result) return result.error;
+    if (result.lines === data.lines) return "";
+    setData((current) => ({ ...current, lines: result.lines, entries: result.entries }));
     const when = new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-    const movedIds = new Set(moving.map((entry) => entry.id));
-    const clash = findMachineConflicts(entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => movedIds.has(entryId)));
-    if (clash) return `Moved to ${when}. ${machines.find((item) => item.id === clash.machineId)?.name ?? "A machine"} is now double-booked that day; change the machine in the activity or check Reports.`;
-    return moving.length ? `Moved to ${when}. Its machine booking${moving.length === 1 ? "" : "s"} moved with it.` : `Moved to ${when}. No machine booked yet.`;
+    const moved = new Set(result.movedEntryIds);
+    const clash = findMachineConflicts(result.entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => moved.has(entryId)));
+    const flowWarning = checkProcessFlow(result.lines, result.entries, data.orders, products, directory).find((warning) => warning.lineIds.includes(id) && !flow.some((old) => old.message === warning.message));
+    const base = clash ? `Moved to ${when}. ${machines.find((item) => item.id === clash.machineId)?.name ?? "A machine"} is now double-booked that day; change the machine in the activity or check Reports.`
+      : moved.size ? `Moved to ${when}. Its machine booking${moved.size === 1 ? "" : "s"} moved with it.` : `Moved to ${when}. No machine booked yet.`;
+    return flowWarning ? `${base} Warning: ${flowWarning.message}` : base;
+  }
+  // The activity panel's planning form: quantity, priority, notes and PO in one update, and a
+  // date change through moveActivity so its bookings follow, exactly like dragging.
+  function savePlanning(line: PlanLine) {
+    const current = allowedLines.find((item) => item.id === line.id);
+    if (!canPlan || !current || current.completedAt) return "This activity cannot be changed.";
+    if (!Number.isFinite(line.quantity) || line.quantity <= 0) return "Quantity must be greater than zero.";
+    if (line.productionOrderId && !data.orders.some((order) => order.id === line.productionOrderId)) return "Choose an existing PO.";
+    const edited = data.lines.map((item) => item.id === line.id ? { ...(({ productionOrderId: _, ...rest }) => rest)(item), ...(line.productionOrderId ? { productionOrderId: line.productionOrderId } : {}), quantity: line.quantity, priority: line.priority, notes: line.notes, batchSizeKg: batchKilograms(line.quantity, item.uom ?? products.find((product) => product.id === item.productId)?.uom ?? "", item.unitWeightMg) } : item);
+    const moved = moveActivity(edited, data.entries, line.id, line.plannedDate, member.name);
+    if ("error" in moved) return moved.error;
+    setData((state) => ({ ...state, lines: moved.lines, entries: moved.entries }));
+    const warning = checkProcessFlow(moved.lines, moved.entries, data.orders, products, directory).find((item) => item.lineIds.includes(line.id));
+    const bookings = moved.movedEntryIds.length ? ` Its machine booking${moved.movedEntryIds.length === 1 ? "" : "s"} moved with it.` : "";
+    return `Planning saved.${bookings}${warning ? ` Warning: ${warning.message}` : ""}`;
+  }
+  // The order grid's "+ Add batch": one activity per step of the order's route.
+  function addBatch(orderId: string, batch: NewBatch) {
+    if (!caps.createPlan) return ["Planning access is required to add batches."];
+    const order = data.orders.find((item) => item.id === orderId);
+    if (!order) return ["This order no longer exists."];
+    const product = products.find((item) => item.id === order.productId);
+    const result = createBatchLines(batch, { order, format: order.format ?? inferFormat(product), lines: data.lines, directory, uom: order.uom, newId: () => newId("line") });
+    if ("error" in result) return [result.error];
+    if (result.lines.some((line) => !allowedCalendars.some((calendar) => calendar.id === line.calendarId))) return ["You do not have access to every process of this batch."];
+    setData((current) => ({ ...current, lines: [...current.lines, ...result.lines] }));
+    return [];
   }
   function saveOrder(order: PurchaseOrder) {
     if (!canEditOrders) return ["Planner or administrator access is required."];
@@ -827,12 +875,12 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {activeTab !== "planner" ? <div className="workspace-heading"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1></div> : null}
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} flow={flow}
         onMoveLine={moveLine}
         onAddLine={(line) => { if (canCreate && visibleCalendars.some((item) => item.id === line.calendarId) && products.some((item) => item.id === line.productId && item.active === "Active") && Number.isFinite(line.quantity) && line.quantity > 0 && (!line.productionOrderId || data.orders.some((order) => order.id === line.productionOrderId))) setData((current) => ({ ...current, lines: [...current.lines, line] })); }} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} machines={activityMachines} entries={entries.filter((item) => item.planLineId === selectedLine.id)} canPlan={canPlan && !selectedLine.completedAt} canProduce={canProduce && !selectedLine.completedAt} onClose={() => setSelectedActivity(null)} onProduction={saveProduction}
-        orders={data.orders} route={batchRoute(selectedLine, allowedLines, directory)} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} statuses={statuses} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
-        onPlan={(line) => { if (canPlan && !selectedLine.completedAt && Number.isFinite(line.quantity) && line.quantity > 0 && (!line.productionOrderId || data.orders.some((order) => order.id === line.productionOrderId))) setData((current) => ({ ...current, lines: current.lines.map((item) => item.id === selectedLine.id ? { ...(({ productionOrderId: _, ...rest }) => rest)(item), ...(line.productionOrderId ? { productionOrderId: line.productionOrderId } : {}), quantity: line.quantity, plannedDate: line.plannedDate, priority: line.priority, notes: line.notes, batchSizeKg: batchKilograms(line.quantity, item.uom ?? products.find((product) => product.id === item.productId)?.uom ?? "", item.unitWeightMg) } : item) })); }}>
+        orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} statuses={statuses} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
+        onPlan={savePlanning}>
         <EndProduction line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} onComplete={completeProduction} />
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
@@ -854,7 +902,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "orders" ? <OrdersPanel orders={data.orders} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onDelete={deleteOrder} /> : null}
+      {activeTab === "orders" ? <OrdersPanel orders={data.orders} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onDelete={deleteOrder} flow={flow} canAddBatch={caps.createPlan} onAddBatch={addBatch} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />

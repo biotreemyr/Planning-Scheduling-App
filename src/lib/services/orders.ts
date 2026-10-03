@@ -1,5 +1,6 @@
 import type { CalendarDirectory, UnitCalendar } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
+import type { ProductFormat } from "./processRules";
 
 // A customer purchase order. Plan lines link to it through `productionOrderId`.
 export type PurchaseOrder = {
@@ -8,6 +9,8 @@ export type PurchaseOrder = {
   customerName?: string;
   // Running number given when the order is entered; it picks the order's colour and never changes.
   number?: number;
+  // Capsule, tablet or sachet: decides the required process route. Older orders infer it from the product.
+  format?: ProductFormat;
   // Expected completion date keyed by the unit-process calendar the work runs in.
   expectedDates: Record<string, string>;
   notes?: string; createdAt: string; createdBy: string;

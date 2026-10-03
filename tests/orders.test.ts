@@ -111,10 +111,10 @@ describe("order batch grid", () => {
     const matrix = orderBatchMatrix(order, state.data.lines, state.directory, "2026-10-07");
     expect(matrix.batches.map((batch) => [batch.label, batch.quantity, batch.kg])).toEqual([["Batch 1", 300000, 75], ["Batch 2", 300000, 75], ["Batch 3", 300000, 75]]);
     expect(matrix.total).toEqual({ quantity: 900000, kg: 225 });
-    expect(matrix.rows.map((row) => row.processName)).toEqual(["Dispensing", "Compression", "Filling", "Packing"]);
-    // Filling runs three days per batch; its days add back up to the batch.
+    expect(matrix.rows.map((row) => row.processName)).toEqual(["Dispensing", "Compression", "Coating", "Filling", "Packing"]);
+    // Filling runs two days per batch; its days add back up to the batch.
     const filling = matrix.rows.find((row) => row.processName === "Filling")!;
-    expect(filling.cells["Batch 1"]).toMatchObject({ days: 3, planned: 300000 });
+    expect(filling.cells["Batch 1"]).toMatchObject({ days: 2, planned: 300000 });
     expect(filling.planned).toBe(900000);
   });
   it("marks finished, late and planned batch steps", () => {

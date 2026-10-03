@@ -15,8 +15,8 @@ const DRAG_THRESHOLD = 5;
 const EDGE = 56;
 
 // Month grid: dates down the side, one column per process, like the planning spreadsheet.
-export function PlanningList({ date, lines, products, orders = [], calendars, canPlan, canCreate = canPlan, onMove, onSelect, onCreate }: {
-  date: string; lines: PlanLine[]; products: Product[]; orders?: PurchaseOrder[]; calendars: UnitCalendar[]; canPlan: boolean; canCreate?: boolean;
+export function PlanningList({ date, lines, products, orders = [], warnings, calendars, canPlan, canCreate = canPlan, onMove, onSelect, onCreate }: {
+  date: string; lines: PlanLine[]; products: Product[]; orders?: PurchaseOrder[]; warnings?: Map<string, string[]>; calendars: UnitCalendar[]; canPlan: boolean; canCreate?: boolean;
   onMove: (id: string, date: string) => string; onSelect: (id: string) => void; onCreate: (date: string, calendarId: string) => void;
 }) {
   const dates = monthDates(date);
@@ -151,8 +151,8 @@ export function PlanningList({ date, lines, products, orders = [], calendars, ca
                           else if (moving?.id === line.id && event.key === "Enter") { event.preventDefault(); finish(line.id, moving.target); }
                           else if (event.key === "Escape") setMoving(null);
                         }}><GripVertical size={14} /></button> : null}
-                      <button className="plan-list-product" type="button" title={`${line.completedAt ? "Completed: " : ""}${name}\n${detail}`} onClick={() => { if (!suppressClick.current) onSelect(line.id); }}>
-                        <strong><OrderBadge number={number} poNumber={order?.poNumber} /><PriorityMark priority={line.priority} />{line.completedAt ? <CheckCircle2 size={12} aria-label="Completed" /> : null}{name}</strong>
+                      <button className="plan-list-product" type="button" title={`${line.completedAt ? "Completed: " : ""}${name}\n${detail}${warnings?.get(line.id) ? `\n⚠ ${warnings.get(line.id)!.join("\n⚠ ")}` : ""}`} onClick={() => { if (!suppressClick.current) onSelect(line.id); }}>
+                        <strong><OrderBadge number={number} poNumber={order?.poNumber} /><PriorityMark priority={line.priority} />{warnings?.get(line.id) ? <span className="flow-mark" aria-label="Process-flow warning">⚠</span> : null}{line.completedAt ? <CheckCircle2 size={12} aria-label="Completed" /> : null}{name}</strong>
                         <small>{detail}</small>
                       </button>
                     </div>;

@@ -23,9 +23,11 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
 type NewActivity = Pick<PlanLine, "calendarId" | "productId" | "plannedDate" | "quantity" | "priority" | "notes" | "orderReference" | "uom" | "activityType" | "unitWeightMg" | "batchSizeKg" | "productionOrderId">;
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
-export default function PlanningCalendar({ orders = [], processNames, planningView = "calendar", planLines, products, initialDate, onCreate, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
+export default function PlanningCalendar({ orders = [], warnings, processNames, planningView = "calendar", planLines, products, initialDate, onCreate, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
   processNames: Record<string, string>;
   orders?: PurchaseOrder[];
+  // Process-flow warnings by activity id, marked with ⚠ on the calendar and list.
+  warnings?: Map<string, string[]>;
   planningView?: "calendar" | "list";
   calendars?: UnitCalendar[];
   calendarTitle?: string; allPrintLines?: PlanLine[]; entries?: ScheduleEntry[]; machines?: Machine[];
@@ -88,10 +90,10 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
         month: { startDayOfWeek: 1 },
         week: { startDayOfWeek: 1, taskView: false, eventView: ["allday"] },
         template: { allday: (event) => {
-          const { number, priority, completed } = (event.raw ?? {}) as { number?: number; priority?: string; completed?: boolean };
+          const { number, priority, completed, warn } = (event.raw ?? {}) as { number?: number; priority?: string; completed?: boolean; warn?: string };
           const badge = number ? `<span class="order-badge">${number}</span>` : "";
           const mark = priority === "High" || priority === "Urgent" ? `<span class="priority-mark ${priority.toLowerCase()}" title="${priority} priority">!</span>` : "";
-          return `<button type="button" class="calendar-plan-event${number ? "" : " no-order"}" data-plan-id="${escapeHtml(event.id)}">${badge}${mark}${completed ? "✓ " : ""}${escapeHtml(event.title)}</button>`;
+          return `<button type="button" class="calendar-plan-event${number ? "" : " no-order"}" data-plan-id="${escapeHtml(event.id)}">${badge}${mark}${warn ? `<span class="flow-mark" title="${escapeHtml(warn)}">⚠</span>` : ""}${completed ? "✓ " : ""}${escapeHtml(event.title)}</button>`;
         } }
       });
       instance.on("selectDateTime", (info: { start: Date }) => { openCreate(dateKey(info.start)); instance?.clearGridSelections(); });
@@ -122,14 +124,14 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
       const color = number ? orderColor(number) : NO_ORDER;
       return {
         id: line.id, calendarId: "planning", category: "allday", isAllday: true,
-        raw: { number, priority: line.priority, completed: !!line.completedAt },
+        raw: { number, priority: line.priority, completed: !!line.completedAt, warn: warnings?.get(line.id)?.join("\n") },
         title: `${line.activityType ? `${line.activityType}: ` : ""}${item?.name ?? "Unknown product"} - ${line.quantity.toLocaleString()} ${line.uom ?? item?.uom ?? ""}`,
         start: line.plannedDate, end: line.plannedDate, isReadOnly: !canPlan || !!line.completedAt,
         color: "#1f2528", borderColor: color, backgroundColor: line.completedAt ? "#ecefed" : tint(color)
       };
     }));
     instance.setOptions({ isReadOnly: !canPlan && !canCreate });
-  }, [ready, planLines, products, canPlan, canCreate, orders]);
+  }, [ready, planLines, products, canPlan, canCreate, orders, warnings]);
 
   useEffect(() => {
     const instance = calendar.current;
@@ -184,7 +186,7 @@ export default function PlanningCalendar({ orders = [], processNames, planningVi
     {!ready && !failed ? <p role="status">Loading calendar...</p> : null}
     {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
     {!canPlan && planLines.some((line) => !line.completedAt) ? <p className="plan-grid-hint">Your role can view this plan but not move activities.{demo ? <> Switch <strong>User</strong> to a planner or administrator to drag and drop.</> : " Ask your Bio Tree administrator for planning access if you need it."}</p> : null}
-    {planningView === "list" ? <PlanningList key={date.slice(0, 7)} date={date} lines={planLines} products={products} orders={orders} calendars={calendars} canPlan={canPlan} canCreate={canCreate} onMove={onMove} onSelect={(id) => { if (onSelect) onSelect(id); else setSelectedId(id); }} onCreate={openCreate} /> : null}
+    {planningView === "list" ? <PlanningList key={date.slice(0, 7)} date={date} lines={planLines} products={products} orders={orders} warnings={warnings} calendars={calendars} canPlan={canPlan} canCreate={canCreate} onMove={onMove} onSelect={(id) => { if (onSelect) onSelect(id); else setSelectedId(id); }} onCreate={openCreate} /> : null}
     <div hidden={planningView === "list"} className="calendar-scroll" onScroll={() => setHover(null)}><div ref={host} className="calendar-host" onMouseOver={(event) => { if (!event.buttons) preview(event.target as HTMLElement); }} onMouseDown={() => setHover(null)} onFocus={(event) => preview(event.target as HTMLElement)} onBlur={() => setHover(null)} onClick={(event) => {
       const target = event.target as HTMLElement;
       const id = target.closest<HTMLElement>("[data-plan-id]")?.dataset.planId;
