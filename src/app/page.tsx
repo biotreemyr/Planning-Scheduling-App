@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import SchedulerDemo from "@/components/SchedulerDemo";
-import { AccessError, requirePermission } from "@/lib/auth/guards";
+import { AccessError, requireAnyPermission } from "@/lib/auth/guards";
 import { getAuthMode, getSignInUrl } from "@/lib/auth/config";
-import { permissions } from "@/lib/auth/permissions";
+import { boardPermissions } from "@/lib/auth/permissions";
 import { headers } from "next/headers";
 import { localPersistenceAllowed } from "@/lib/persistence/access";
 import { db, writeToken } from "@/lib/persistence/database";
@@ -24,10 +24,10 @@ export default async function Home() {
   }
   let signInUrl: string | null = null;
   try {
-    await requirePermission(permissions.view);
+    await requireAnyPermission(boardPermissions);
   } catch (error) {
     if (error instanceof AccessError && error.code === "unauthenticated") {
-      try { signInUrl = getSignInUrl(); } catch { signInUrl = null; }
+      try { signInUrl = getSignInUrl(process.env, "/"); } catch { signInUrl = null; }
       if (!signInUrl) return <AccessMessage title="Sign-in unavailable" message="Please contact your Bio Tree administrator." />;
     } else if (error instanceof AccessError && error.code === "forbidden") {
       return <AccessMessage title="Access denied" message="Your Bio Tree account does not have access to this scheduler." />;
