@@ -42,7 +42,10 @@ export const workspaceSchema = z.object({
     actuals: z.array(z.object({ calendarId: id, planLineId: id, teamId: text, actualQuantity: number.nonnegative(), plannedQuantity: number.positive(),
       uom: name, productionDate: date, hasDeviation: z.boolean(), deviation: text, correctiveAction: text, updatedBy: name, updatedAt: timestamp })),
     transfers: z.array(z.object({ id, sourceLineId: id, sourceCalendarId: id, calendarId: id, productId: id, quantity: number.positive(), uom: name,
-      orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional() }))
+      orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional() })),
+    // Added after the first pilot release; older snapshots load with no orders.
+    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
+      notes: text.optional(), createdAt: timestamp, createdBy: name })).default([])
   })
 }).strict();
 
@@ -51,7 +54,7 @@ export type WorkspaceEnvelope = { revision: number; snapshot: WorkspaceSnapshot 
 
 export function newWorkspace(): WorkspaceSnapshot {
   return workspaceSchema.parse({ schemaVersion: 1, directory: emptyDirectory(), products: [], workCentres: [], machines: [],
-    measurements: measurementDefaults, data: { lines: [], entries: [], actuals: [], transfers: [] } });
+    measurements: measurementDefaults, data: { lines: [], entries: [], actuals: [], transfers: [], orders: [] } });
 }
 
 // Validate structure and references before accepting a complete atomic save.
@@ -60,7 +63,7 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
   const { directory: d, data } = state;
   const has = (items: { id: string }[], value: string) => items.some((item) => item.id === value);
   const require = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
-  for (const list of [...Object.values(d), state.products, state.workCentres, state.machines, data.lines, data.entries, data.transfers]) {
+  for (const list of [...Object.values(d), state.products, state.workCentres, state.machines, data.lines, data.entries, data.transfers, data.orders]) {
     require(new Set(list.map((item) => item.id)).size === list.length, "Duplicate record ID");
   }
   for (const list of [d.units.map((item) => item.name), d.processes.map((item) => item.name), state.products.map((item) => item.sku), state.machines.map((item) => item.code), state.workCentres.map((item) => item.code)]) {
@@ -87,6 +90,8 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
     const machine = state.machines.find((machine) => machine.id === entry.machineId);
     require(!!line && line.calendarId === entry.calendarId && line.productId === entry.productId && !!machine && machine.workCentreId === entry.workCentreId && machine.unitId === calendar?.unitId && machine.processIds.includes(calendar?.processId ?? "") && Date.parse(entry.endAt) > Date.parse(entry.startAt), "Invalid production booking");
   });
+  require(new Set(data.orders.map((item) => item.poNumber.trim().toLowerCase())).size === data.orders.length, "Duplicate PO number");
+  data.orders.forEach((order) => require(has(state.products, order.productId), "Invalid order product"));
   require(new Set(data.actuals.map((item) => item.planLineId)).size === data.actuals.length, "Duplicate actual result");
   data.actuals.forEach((actual) => require(data.lines.some((line) => line.id === actual.planLineId && line.calendarId === actual.calendarId) && (!actual.hasDeviation || !!actual.deviation.trim()), "Invalid actual result"));
   require(new Set(data.transfers.map((item) => item.sourceLineId)).size === data.transfers.length, "Duplicate WIP handoff");

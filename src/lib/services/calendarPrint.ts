@@ -26,3 +26,14 @@ export function printedActivity(line: PlanLine, products: Product[]) {
     quantity: `${line.quantity.toLocaleString("en-GB")} ${uom}`.trim()
   };
 }
+
+// The list layout shows the batch reference too, matching the planning spreadsheet.
+export type PrintColumn = { id: string; name: string };
+export type ListPrintInput = Omit<CalendarPrintInput, "view" | "processNames"> & { columns: PrintColumn[] };
+export function printedListActivity(line: PlanLine, products: Product[]) {
+  const activity = printedActivity(line, products);
+  return { productName: activity.productName, detail: [line.orderReference?.trim(), activity.quantity].filter(Boolean).join(" · ") };
+}
+export function listPrintCells(day: string, lines: PlanLine[], columns: PrintColumn[]) {
+  return columns.map((column) => lines.filter((line) => line.plannedDate === day && line.calendarId === column.id));
+}

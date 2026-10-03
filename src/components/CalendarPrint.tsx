@@ -1,6 +1,7 @@
 "use client";
 import { createPortal } from "react-dom";
-import { printDates, printedActivity, type CalendarPrintInput } from "@/lib/services/calendarPrint";
+import { listPrintCells, printDates, printedActivity, printedListActivity, type CalendarPrintInput, type ListPrintInput } from "@/lib/services/calendarPrint";
+import { monthDates } from "@/lib/services/planningMonth";
 
 export function CalendarPrint({ title, date, view, lines, products, processNames }: CalendarPrintInput) {
   if (typeof document === "undefined") return null;
@@ -11,5 +12,23 @@ export function CalendarPrint({ title, date, view, lines, products, processNames
       const activity = printedActivity(line, products);
       return <article key={line.id}><strong>{activity.productName}</strong><p>{activity.quantity}</p></article>;
     })}</section>)}</div>
+  </section>, document.body);
+}
+
+export function ListPrint({ title, date, lines, products, columns }: ListPrintInput) {
+  if (typeof document === "undefined") return null;
+  const shown = columns.length ? columns : [{ id: "", name: "No processes to show" }];
+  return createPortal(<section className="calendar-print-sheet print-list" aria-hidden="true">
+    <header><h1>Unit: {title}</h1><p>Production list · {date.slice(0, 7)}</p></header>
+    <table className="print-list-table">
+      <thead><tr><th>Date</th>{shown.map((column) => <th key={column.id}>{column.name}</th>)}</tr></thead>
+      <tbody>{monthDates(date).map((day) => <tr key={day} className={[0, 6].includes(new Date(`${day}T12:00`).getDay()) ? "print-weekend" : undefined}>
+        <th>{new Date(`${day}T12:00`).toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short" })}</th>
+        {listPrintCells(day, lines, shown).map((cell, index) => <td key={shown[index].id}>{cell.map((line) => {
+          const activity = printedListActivity(line, products);
+          return <article key={line.id}><strong>{activity.productName}</strong><p>{activity.detail}</p></article>;
+        })}</td>)}
+      </tr>)}</tbody>
+    </table>
   </section>, document.body);
 }

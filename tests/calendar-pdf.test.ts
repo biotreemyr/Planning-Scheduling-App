@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mkdirSync } from "node:fs";
-import { buildCalendarPdf } from "../src/lib/services/calendarPdf";
+import { buildCalendarPdf, buildListPdf } from "../src/lib/services/calendarPdf";
 import { seedData } from "../src/lib/seed";
 
 describe("calendar PDF", () => {
@@ -25,5 +25,22 @@ describe("calendar PDF", () => {
     const pdf = buildCalendarPdf({ title: "Manufacturing", date: "2026-09-14", view: "month", lines, products: seedData.products, processNames: { ferm: "Fermentation" } });
     expect(pdf.getNumberOfPages()).toBeGreaterThan(1);
     expect(pdf.output()).toContain("10,099 kg");
+  });
+  it("prints the list as a month table by process with batch references", () => {
+    const columns = [{ id: "disp", name: "Dispensing" }, { id: "pack", name: "Packing" }];
+    const lines = [
+      { ...seedData.planLines[0], calendarId: "disp", plannedDate: "2026-09-14", orderReference: "Batch 3" },
+      { ...seedData.planLines[1], calendarId: "pack", plannedDate: "2026-09-30" },
+      { ...seedData.planLines[2], calendarId: "other", plannedDate: "2026-09-15" }
+    ];
+    const content = buildListPdf({ title: "Manufacturing", date: "2026-09-14", lines, products: seedData.products, columns }).output();
+    for (const text of ["Unit: Manufacturing", "PRODUCTION LIST | 2026-09", "Dispensing", "Packing", "Batch 3 · 1,200 kg", "Mon 14 Sept", "Wed 30 Sept"]) expect(content).toContain(text);
+    expect(content).not.toContain("Enzyme Blend");
+  });
+  it("paginates a dense list without dropping activities", () => {
+    const lines = Array.from({ length: 120 }, (_, index) => ({ ...seedData.planLines[0], id: `line-${index}`, calendarId: "disp", quantity: 10000 + index }));
+    const pdf = buildListPdf({ title: "Manufacturing", date: "2026-09-14", lines, products: seedData.products, columns: [{ id: "disp", name: "Dispensing" }] });
+    expect(pdf.getNumberOfPages()).toBeGreaterThan(1);
+    expect(pdf.output()).toContain("10,119 kg");
   });
 });

@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Copy,
   Factory,
+  FileText,
   LayoutGrid,
   Plus,
   Search,
@@ -25,8 +26,11 @@ import { CatalogAdmin } from "@/components/CatalogAdmin";
 import { validateDirectoryChange } from "@/lib/services/adminConfiguration";
 import { EndProduction, WipInbox } from "@/components/ProductionFlow";
 import { accessibleCalendars, selectedUnitCalendars, scopeCalendarRecords, type CalendarDirectory } from "@/lib/domain/calendarAccess";
-import type { WorkspaceEnvelope } from "@/lib/domain/workspace";
+import type { WorkspaceEnvelope, WorkspaceSnapshot } from "@/lib/domain/workspace";
+import { SampleDataAdmin } from "@/components/SampleDataAdmin";
 import { useWorkspacePersistence } from "@/components/WorkspacePersistence";
+import { OrdersPanel } from "@/components/OrdersPanel";
+import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
 import { validateCompletion, type CompletionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
@@ -46,12 +50,14 @@ import { priorities, scheduleStatuses } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
 import { getScheduleReport } from "@/lib/services/reports";
-import { syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
+import { daysBetween, shiftTimestamp, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 
-type Tab = "planner" | "master" | "reports";
+type Tab = "planner" | "orders" | "master" | "reports";
+type PlanningView = "calendar" | "list";
 
 const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: "planner", label: "Planner Board", icon: CalendarDays },
+  { id: "orders", label: "Orders", icon: FileText },
   { id: "master", label: "Admin", icon: LayoutGrid },
   { id: "reports", label: "Reports", icon: ClipboardList }
 ];
@@ -127,10 +133,13 @@ function PlannerBoard({
   machines,
   planLines,
   products,
+  orders,
   onAddLine,
   onMoveLine,
   canPlan,
-  onSelect
+  onSelect,
+  planningView,
+  onPlanningView
 }: {
   processNames: Record<string, string>;
   calendars: UnitCalendar[];
@@ -140,12 +149,15 @@ function PlannerBoard({
   machines: Machine[];
   planLines: PlanLine[];
   products: Product[];
+  orders: PurchaseOrder[];
   onAddLine: (line: PlanLine) => void;
-  onMoveLine: (id: string, date: string) => void;
+  onMoveLine: (id: string, date: string) => string;
   canPlan: boolean;
   onSelect: (id: string) => void;
+  planningView: PlanningView;
+  onPlanningView: (view: PlanningView) => void;
 }) {
-  const [planningView, setPlanningView] = useState<"calendar" | "list">("calendar");
+  const setPlanningView = onPlanningView;
   const [initialDate] = useState(() => localDateKey(new Date()));
   const [query, setQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -173,8 +185,8 @@ function PlannerBoard({
           <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{["Unscheduled", "Partially Scheduled", "Fully Scheduled"].map((value) => <option key={value}>{value}</option>)}</select></label>
           <span className="result-count" aria-live="polite">{visibleLines.length} of {planLines.length} lines</span>
         </div>
-        {visibleLines.length === 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} onSelect={onSelect} planLines={visibleLines} products={products} initialDate={initialDate} onMove={onMoveLine} onCreate={(activity) => {
+        {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
+        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} initialDate={initialDate} onMove={onMoveLine} onCreate={(activity) => {
           onAddLine({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" });
           setQuery(""); setPriorityFilter(""); setStatusFilter("");
         }} />
@@ -593,32 +605,39 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
   const member = directory.people.find((item) => item.id === memberId)!;
   const [unitSelection, setUnitSelection] = useState("");
   const availableUnits = directory.units.filter((item) => member.role === "admin" || member.unitIds.includes(item.id));
-  const unit = availableUnits.find((item) => item.id === unitSelection) ?? availableUnits[0];
   const allowedCalendars = accessibleCalendars(member, directory);
+  const unit = availableUnits.find((item) => item.id === unitSelection) ?? availableUnits.find((item) => allowedCalendars.some((calendar) => calendar.unitId === item.id)) ?? availableUnits[0];
   const calendar = allowedCalendars.find((item) => item.unitId === unit?.id);
   const calendarId = calendar?.id ?? "";
   const [processSelection, setProcessSelection] = useState<string[] | null>(null);
   const unitCalendars = allowedCalendars.filter((item) => item.unitId === unit?.id);
   const visibleCalendars = selectedUnitCalendars(member, directory, unit?.id ?? "", processSelection);
-  const canPlan = member.role === "planner" && !!calendar;
+  // Administrators can plan too, matching Core's Scheduler Admin role, which holds every scheduler permission.
+  const canPlan = (member.role === "planner" || member.role === "admin") && !!calendar;
   const canProduce = member.role === "production" && !!calendar;
   const canManage = member.role === "admin";
   const [activeTab, setActiveTab] = useState<Tab>("master");
+  const [planningView, setPlanningView] = useState<PlanningView>("calendar");
   const [adminSection, setAdminSection] = useState("Configuration");
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>(initial.snapshot.products);
   const [workCentres, setWorkCentres] = useState<WorkCentre[]>(initial.snapshot.workCentres);
   const [machines, setMachines] = useState<Machine[]>(initial.snapshot.machines);
-  const [data, setData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[] }>(initial.snapshot.data);
+  const [data, setData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[] }>(initial.snapshot.data);
   const { uoms, activities } = useSettings();
-  const persistenceStatus = useWorkspacePersistence(initial, { schemaVersion: 1, directory, products, workCentres, machines, measurements: { uoms, activities }, data }, writeToken);
+  const snapshot = { schemaVersion: 1, directory, products, workCentres, machines, measurements: { uoms, activities }, data } as WorkspaceSnapshot;
+  const persistenceStatus = useWorkspacePersistence(initial, snapshot, writeToken);
   const scope = <T extends { calendarId?: string },>(records: T[]) => visibleCalendars.flatMap((item) => scopeCalendarRecords(records, member, item, directory));
   const entries = scope(data.entries);
   const planLines = syncPlanLineStatuses(scope(data.lines), entries);
-  const selectedLine = planLines.find((line) => line.id === selectedActivity);
+  // The activity panel can step along a batch's route into processes that are filtered out of view.
+  const allowedLines = syncPlanLineStatuses(allowedCalendars.flatMap((item) => scopeCalendarRecords(data.lines, member, item, directory)), data.entries);
+  const selectedLine = allowedLines.find((line) => line.id === selectedActivity);
   const activityCalendar = allowedCalendars.find((item) => item.id === selectedLine?.calendarId);
+  const canEditOrders = member.role === "planner" || canManage;
   const calendarMachines = machines.filter((machine) => machine.unitId === calendar?.unitId && visibleCalendars.some((item) => machine.processIds?.includes(item.processId)));
-  const activityMachines = calendarMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? ""));
+  const unitMachines = machines.filter((machine) => machine.unitId === activityCalendar?.unitId);
+  const activityMachines = unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? ""));
   const conflicts = findMachineConflicts(entries, machines, products);
   const calendarTitle = unit?.name ?? "No unit assigned";
   const processNames = Object.fromEntries(visibleCalendars.map((item) => [item.id, directory.processes.find((process) => process.id === item.processId)?.name ?? "Unassigned process"]));
@@ -683,6 +702,61 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
     setSelectedActivity(null);
     return [];
   }
+  // Move an activity to a new date. Its open machine bookings move by the same number of days.
+  function moveLine(id: string, date: string) {
+    const line = planLines.find((item) => item.id === id);
+    if (!canPlan || !line) return "You cannot move this activity.";
+    if (line.completedAt) return "Completed activities cannot be moved.";
+    const days = daysBetween(line.plannedDate, date);
+    if (!days) return "";
+    const moving = data.entries.filter((entry) => entry.planLineId === id && !["Completed", "Cancelled"].includes(entry.status));
+    const entries = data.entries.map((entry) => moving.includes(entry) ? { ...entry, startAt: shiftTimestamp(entry.startAt, days), endAt: shiftTimestamp(entry.endAt, days), changedBy: member.name } : entry);
+    setData((current) => ({ ...current, lines: current.lines.map((item) => item.id === id ? { ...item, plannedDate: date } : item), entries }));
+    const when = new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+    const movedIds = new Set(moving.map((entry) => entry.id));
+    const clash = findMachineConflicts(entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => movedIds.has(entryId)));
+    if (clash) return `Moved to ${when}. ${machines.find((item) => item.id === clash.machineId)?.name ?? "A machine"} is now double-booked that day; change the machine in the activity or check Reports.`;
+    return moving.length ? `Moved to ${when}. Its machine booking${moving.length === 1 ? "" : "s"} moved with it.` : `Moved to ${when}. No machine booked yet.`;
+  }
+  function saveOrder(order: PurchaseOrder) {
+    if (!canEditOrders) return ["Planner or administrator access is required."];
+    const errors = validateOrder(order, data.orders, products);
+    if (errors.length) return errors;
+    setData((current) => ({ ...current, orders: current.orders.some((item) => item.id === order.id) ? current.orders.map((item) => item.id === order.id ? { ...order, poNumber: order.poNumber.trim(), customerName: order.customerName?.trim() } : item) : [...current.orders, { ...order, poNumber: order.poNumber.trim(), customerName: order.customerName?.trim() }] }));
+    return [];
+  }
+  function deleteOrder(id: string) {
+    if (!canEditOrders) return ["Planner or administrator access is required."];
+    if (data.lines.some((line) => line.productionOrderId === id)) return ["Activities are linked to this PO. Unlink them on the Planner Board first."];
+    setData((current) => ({ ...current, orders: current.orders.filter((item) => item.id !== id) }));
+    return [];
+  }
+  // Set the machine for a batch step. Unbooked days get a draft booking for the working day.
+  function assignMachine(lineIds: string[], machineId: string) {
+    if (member.role !== "planner" && member.role !== "production" && member.role !== "admin") return ["Planner or production access is required."];
+    const targets = allowedLines.filter((line) => lineIds.includes(line.id) && !line.completedAt);
+    if (!targets.length || targets.length !== lineIds.length) return ["These activities can no longer be changed."];
+    let next = data.entries;
+    for (const line of targets) {
+      const processId = allowedCalendars.find((item) => item.id === line.calendarId)?.processId;
+      const own = next.filter((entry) => entry.planLineId === line.id && entry.status !== "Cancelled");
+      if (!machineId) {
+        if (own.some((entry) => entry.status !== "Draft")) return ["Confirmed bookings keep their machine. Choose another machine instead."];
+        next = next.filter((entry) => !own.includes(entry));
+        continue;
+      }
+      const machine = machines.find((item) => item.id === machineId && item.active === "Active" && item.unitId === activityCalendar?.unitId && item.processIds?.includes(processId ?? ""));
+      if (!machine) return ["Select an active machine set up for this process."];
+      next = own.length
+        ? next.map((entry) => own.includes(entry) ? { ...entry, machineId, workCentreId: machine.workCentreId, changedBy: member.name } : entry)
+        : [...next, { id: newId("sched"), calendarId: line.calendarId, planLineId: line.id, productId: line.productId, productionOrderId: line.productionOrderId, workCentreId: machine.workCentreId, machineId, startAt: `${line.plannedDate}T08:00`, endAt: `${line.plannedDate}T17:00`, status: "Draft" as const, changedBy: member.name }];
+    }
+    const changed = new Set(next.filter((entry) => lineIds.includes(entry.planLineId ?? "")).map((entry) => entry.id));
+    const clash = findMachineConflicts(next, machines, products).find((conflict) => conflict.entryIds.some((id) => changed.has(id)));
+    if (clash) return [`${machines.find((item) => item.id === clash.machineId)?.name ?? "This machine"} is already booked at that time.`];
+    setData((current) => ({ ...current, entries: next }));
+    return [];
+  }
   function saveMachine(machine: Machine) {
     if (!canManage) return ["Administrator access is required."];
     if (!machine.name.trim() || !machine.code.trim() || !directory.units.some((item) => item.id === machine.unitId) || !machine.processIds?.length) return ["Enter a name, code, unit and at least one process."];
@@ -699,6 +773,11 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
     if (data.entries.some((entry) => entry.machineId === id)) return ["This machine has production bookings. Mark it inactive instead of deleting it."];
     setMachines((current) => current.filter((machine) => machine.id !== id));
     return [];
+  }
+  function applySnapshot(next: WorkspaceSnapshot) {
+    if (!canManage) return;
+    setDirectory(next.directory); setProducts(next.products); setWorkCentres(next.workCentres); setMachines(next.machines); setData(next.data);
+    setUnitSelection(""); setProcessSelection(null); setSelectedActivity(null);
   }
   function receiveWip(id: string) {
     if (!canProduce || !scope(data.transfers).some((item) => item.id === id)) return;
@@ -730,16 +809,18 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
       {activeTab !== "planner" ? <div className="workspace-heading"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1></div> : null}
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} onSelect={setSelectedActivity} planLines={planLines} products={products}
-        onMoveLine={(id, date) => { if (canPlan && planLines.some((line) => line.id === id)) setData((current) => ({ ...current, lines: current.lines.map((line) => line.id === id && !line.completedAt ? { ...line, plannedDate: date } : line) })); }}
-        onAddLine={(line) => { if (canPlan && visibleCalendars.some((item) => item.id === line.calendarId) && products.some((item) => item.id === line.productId && item.active === "Active") && Number.isFinite(line.quantity) && line.quantity > 0) setData((current) => ({ ...current, lines: [...current.lines, line] })); }} /> : null}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders}
+        onMoveLine={moveLine}
+        onAddLine={(line) => { if (canPlan && visibleCalendars.some((item) => item.id === line.calendarId) && products.some((item) => item.id === line.productId && item.active === "Active") && Number.isFinite(line.quantity) && line.quantity > 0 && (!line.productionOrderId || data.orders.some((order) => order.id === line.productionOrderId))) setData((current) => ({ ...current, lines: [...current.lines, line] })); }} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} machines={activityMachines} entries={entries.filter((item) => item.planLineId === selectedLine.id)} canPlan={canPlan && !selectedLine.completedAt} canProduce={canProduce && !selectedLine.completedAt} onClose={() => setSelectedActivity(null)} onProduction={saveProduction}
-        onPlan={(line) => { if (canPlan && !selectedLine.completedAt && Number.isFinite(line.quantity) && line.quantity > 0) setData((current) => ({ ...current, lines: current.lines.map((item) => item.id === selectedLine.id ? { ...item, quantity: line.quantity, plannedDate: line.plannedDate, priority: line.priority, notes: line.notes, batchSizeKg: batchKilograms(line.quantity, item.uom ?? products.find((product) => product.id === item.productId)?.uom ?? "", item.unitWeightMg) } : item) })); }}>
+        orders={data.orders} route={batchRoute(selectedLine, allowedLines, directory)} routeMachines={unitMachines} routeEntries={data.entries} canAssign={member.role === "planner" || member.role === "production" || member.role === "admin"} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
+        onPlan={(line) => { if (canPlan && !selectedLine.completedAt && Number.isFinite(line.quantity) && line.quantity > 0 && (!line.productionOrderId || data.orders.some((order) => order.id === line.productionOrderId))) setData((current) => ({ ...current, lines: current.lines.map((item) => item.id === selectedLine.id ? { ...(({ productionOrderId: _, ...rest }) => rest)(item), ...(line.productionOrderId ? { productionOrderId: line.productionOrderId } : {}), quantity: line.quantity, plannedDate: line.plannedDate, priority: line.priority, notes: line.notes, batchSizeKg: batchKilograms(line.quantity, item.uom ?? products.find((product) => product.id === item.productId)?.uom ?? "", item.unitWeightMg) } : item) })); }}>
         <EndProduction line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} onComplete={completeProduction} />
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
-        <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements"].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>
+        <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements", "Sample data"].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>
         {adminSection === "Configuration" ? <CalendarAdmin directory={directory} onSave={saveDirectory} machines={machines} workCentres={workCentres} onMachine={saveMachine} onDeleteMachine={deleteMachine} onOpenCalendar={(unitId) => { setUnitSelection(unitId); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
+        {adminSection === "Sample data" ? <SampleDataAdmin snapshot={snapshot} onApply={applySnapshot} onOpenCalendar={() => { setUnitSelection(directory.units.find((item) => item.id.startsWith("sample-"))?.id ?? ""); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
         {adminSection === "Measurements" ? <MeasurementAdmin usedUoms={[...products.map((item) => item.uom), ...data.lines.map((item) => item.uom ?? ""), ...data.transfers.map((item) => item.uom), ...machines.map((item) => item.capacityUom ?? "")]} usedActivities={data.lines.map((item) => item.activityType ?? "")} /> : null}
         {adminSection === "Products" ? <CatalogAdmin products={products} workCentres={workCentres} onProduct={(item) => {
           if (products.some((old) => old.id === item.id && old.uom !== item.uom) && (data.lines.some((line) => line.productId === item.id) || data.entries.some((entry) => entry.productId === item.id))) return ["This product has planning or production records. Keep its existing UOM."];
@@ -755,6 +836,7 @@ function TeamWorkspace({ initial, writeToken }: { initial: WorkspaceEnvelope; wr
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></section> : null}
+      {activeTab === "orders" ? <OrdersPanel orders={data.orders} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onDelete={deleteOrder} /> : null}
       {activeTab === "reports" && calendar ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />
