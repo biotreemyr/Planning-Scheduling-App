@@ -1,10 +1,10 @@
 "use client";
-import { Fragment, useState } from "react";
-import { ChevronDown, ChevronRight, Plus, Search, Trash2 } from "lucide-react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Plus, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { localDateKey } from "@/lib/services/calendarPrint";
-import { orderProcessRows, orderProgress, validateOrder, type OrderProcessRow, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
+import { orderInMonth, orderProcessRows, orderProgress, validateOrder, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
 import { useUoms } from "./MeasurementSettings";
 
@@ -21,23 +21,9 @@ export function OrdersPanel({ orders, lines, products, directory, visibleCalenda
   const [uom, setUom] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
-  const [query, setQuery] = useState("");
-  const [customerFilter, setCustomerFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  const today = localDateKey(new Date());
   const productUom = products.find((item) => item.id === productId)?.uom ?? "";
   const customers = [...new Set(orders.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
-  const rowsFor = (order: PurchaseOrder) => orderProcessRows(order, lines, directory).filter((row) => visibleCalendarIds.includes(row.calendar.id));
-  const table = orders.map((order) => {
-    const rows = rowsFor(order);
-    return { order, rows, product: products.find((item) => item.id === order.productId), progress: orderProgress(order, rows, today, lines) };
-  }).filter(({ order, product, progress }) =>
-    (!customerFilter || order.customerName === customerFilter) && (!statusFilter || progress.status === statusFilter) &&
-    `${order.customerName ?? ""} ${order.poNumber} ${product?.name ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()))
-    .sort((a, b) => (a.order.customerName ?? "").localeCompare(b.order.customerName ?? "") || a.order.poNumber.localeCompare(b.order.poNumber));
-
   return <section className="orders-layout">
     {editable ? <form key={version} className="workspace-panel orders-form" onSubmit={(event) => {
       event.preventDefault();
@@ -61,47 +47,121 @@ export function OrdersPanel({ orders, lines, products, directory, visibleCalenda
       {notice && !errors.length ? <p role="status">{notice}</p> : null}
       <p className="orders-help">Link plan activities to a PO when you add or open them on the Planner Board. Each scheduled process then appears under the order.</p>
     </form> : null}
-    <div className="workspace-panel orders-list">
-      <div className="panel-title"><h2>Customer orders <span className="badge neutral">{orders.length}</span></h2></div>
-      <div className="operational-filters">
-        <label className="planning-search">Search<span className="search-control"><Search size={16} /><input type="search" placeholder="Customer, PO or product" value={query} onChange={(event) => setQuery(event.target.value)} /></span></label>
-        <label>Customer<select value={customerFilter} onChange={(event) => setCustomerFilter(event.target.value)}><option value="">All customers</option>{customers.map((name) => <option key={name}>{name}</option>)}</select></label>
-        <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>
-        <span className="result-count" aria-live="polite">{table.length} of {orders.length} orders</span>
-      </div>
-      <div className="orders-table-scroll">
-        <table className="orders-table">
-          <thead><tr>
-            <th scope="col"><span className="admin-sr-only">Details</span></th><th scope="col">Customer</th><th scope="col">PO number</th><th scope="col">Product</th>
-            <th scope="col" className="numeric">Order qty</th><th scope="col">Progress</th><th scope="col" className="numeric">Finished</th><th scope="col">Expected completion</th><th scope="col">Status</th>
-          </tr></thead>
-          <tbody>
-            {!table.length ? <tr><td colSpan={9} className="empty-state">{orders.length ? "No orders match these filters." : "No orders yet. Add a customer, PO number and quantity to start."}</td></tr> : null}
-            {table.map(({ order, rows, product, progress }) => {
-              const open = expanded === order.id;
-              return <Fragment key={order.id}>
-                <tr className={open ? "order-row open" : "order-row"} onClick={() => setExpanded(open ? null : order.id)}>
-                  <td><button type="button" className="icon-button order-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} ${order.poNumber} details`} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : order.id); }}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button></td>
-                  <td>{order.customerName || <span className="route-muted">Not set</span>}</td>
-                  <th scope="row">{order.poNumber}</th>
-                  <td>{product?.name ?? "Unknown product"}</td>
-                  <td className="numeric">{order.quantity.toLocaleString()} {order.uom}</td>
-                  <td><div className="order-steps" role="img" aria-label={rows.map((row) => `${row.processName} ${Math.round(row.completedCount / row.lineCount * 100)}%`).join(", ")}>
-                    {rows.map((row) => <i key={row.calendar.id} title={`${row.processName}: ${row.completedCount} of ${row.lineCount} days complete`} style={{ "--filled": `${row.completedCount / row.lineCount * 100}%` } as React.CSSProperties} />)}
-                  </div><small>{!progress.processCount ? "Not scheduled" : progress.status === "Completed" ? `All ${progress.batchCount} batch${progress.batchCount === 1 ? "" : "es"} finished`
-                    : `${progress.batchesFinished}/${progress.batchCount} batches finished${progress.nextStep ? ` · ${progress.nextStep.batch} at ${progress.nextStep.processName}` : ""}`}</small></td>
-                  <td className="numeric">{progress.finishedQuantity ? <>{progress.finishedQuantity.toLocaleString()}<small>{progress.percent}% of order</small></> : "-"}</td>
-                  <td>{progress.expectedDate ? displayDate(progress.expectedDate) : <span className="route-muted">Not set</span>}{progress.overdue ? <span className="badge danger">Overdue</span> : null}</td>
-                  <td><span className={`badge ${statusBadge[progress.status]}`}>{progress.status}</span></td>
-                </tr>
-                {open ? <tr className="order-detail-row"><td colSpan={9}><OrderDetail order={order} rows={rows} linked={lines.some((line) => line.productionOrderId === order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
-              </Fragment>;
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <OrdersTable orders={orders} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customers} onSave={onSave} onDelete={onDelete} />
   </section>;
+}
+
+type Row = { order: PurchaseOrder; rows: OrderProcessRow[]; product?: Product; progress: OrderProgress };
+type Column = {
+  key: string; label: string; numeric?: boolean; required?: boolean;
+  sort: (row: Row) => string | number; cell: (row: Row) => ReactNode;
+  filter?: { kind: "text"; text: (row: Row) => string } | { kind: "select"; options: string[]; value: (row: Row) => string };
+};
+const COLUMN_STORAGE = "scheduler.orderColumns";
+
+function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete }: {
+  orders: PurchaseOrder[]; lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[];
+  editable: boolean; customers: string[]; onSave: (order: PurchaseOrder) => string[]; onDelete: (id: string) => string[];
+}) {
+  const today = localDateKey(new Date());
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [sort, setSort] = useState<{ key: string; ascending: boolean }>({ key: "customer", ascending: true });
+  const [month, setMonth] = useState("");
+  const [basis, setBasis] = useState<MonthBasis>("scheduled");
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  // Column choice is a per-viewer convenience; storage may be unavailable.
+  useEffect(() => { try { const saved = JSON.parse(localStorage.getItem(COLUMN_STORAGE) ?? "[]"); if (Array.isArray(saved)) setHidden(saved.filter((key) => typeof key === "string")); } catch { /* keep defaults */ } }, []);
+  function toggleColumn(key: string) {
+    const next = hidden.includes(key) ? hidden.filter((item) => item !== key) : [...hidden, key];
+    setHidden(next);
+    try { localStorage.setItem(COLUMN_STORAGE, JSON.stringify(next)); } catch { /* not persisted */ }
+  }
+  const columns: Column[] = [
+    { key: "customer", label: "Customer", sort: (row) => row.order.customerName ?? "", cell: (row) => row.order.customerName || <span className="route-muted">Not set</span>, filter: { kind: "text", text: (row) => row.order.customerName ?? "" } },
+    { key: "po", label: "PO number", required: true, sort: (row) => row.order.poNumber, cell: (row) => <strong>{row.order.poNumber}</strong>, filter: { kind: "text", text: (row) => row.order.poNumber } },
+    { key: "product", label: "Product", sort: (row) => row.product?.name ?? "", cell: (row) => row.product?.name ?? "Unknown product", filter: { kind: "text", text: (row) => `${row.product?.name ?? ""} ${row.product?.sku ?? ""}` } },
+    { key: "quantity", label: "Order qty", numeric: true, sort: (row) => row.order.quantity, cell: (row) => `${row.order.quantity.toLocaleString()} ${row.order.uom}` },
+    { key: "progress", label: "Progress", sort: (row) => row.progress.batchCount ? row.progress.batchesFinished / row.progress.batchCount : -1, cell: (row) => <>
+      <div className="order-steps" role="img" aria-label={row.rows.map((item) => `${item.processName} ${Math.round(item.completedCount / item.lineCount * 100)}%`).join(", ")}>
+        {row.rows.map((item) => <i key={item.calendar.id} title={`${item.processName}: ${item.completedCount} of ${item.lineCount} days complete`} style={{ "--filled": `${item.completedCount / item.lineCount * 100}%` } as React.CSSProperties} />)}
+      </div>
+      <small>{!row.progress.processCount ? "Not scheduled" : row.progress.status === "Completed" ? `All ${row.progress.batchCount} batch${row.progress.batchCount === 1 ? "" : "es"} finished`
+        : `${row.progress.batchesFinished}/${row.progress.batchCount} batches finished${row.progress.nextStep ? ` · ${row.progress.nextStep.batch} at ${row.progress.nextStep.processName}` : ""}`}</small></> },
+    { key: "finished", label: "Finished", numeric: true, sort: (row) => row.progress.percent, cell: (row) => row.progress.finishedQuantity ? <>{row.progress.finishedQuantity.toLocaleString()}<small>{row.progress.percent}% of order</small></> : "-" },
+    { key: "expected", label: "Expected completion", sort: (row) => row.progress.expectedDate ?? "9999", cell: (row) => <>{row.progress.expectedDate ? displayDate(row.progress.expectedDate) : <span className="route-muted">Not set</span>}{row.progress.overdue ? <span className="badge danger">Overdue</span> : null}</> },
+    { key: "status", label: "Status", sort: (row) => statuses.indexOf(row.progress.status), cell: (row) => <span className={`badge ${statusBadge[row.progress.status]}`}>{row.progress.status}</span>, filter: { kind: "select", options: statuses, value: (row) => row.progress.status } }
+  ];
+  const shown = columns.filter((column) => column.required || !hidden.includes(column.key));
+  const all: Row[] = orders.map((order) => {
+    const rows = orderProcessRows(order, lines, directory).filter((row) => visibleCalendarIds.includes(row.calendar.id));
+    return { order, rows, product: products.find((item) => item.id === order.productId), progress: orderProgress(order, rows, today, lines) };
+  });
+  const sorter = columns.find((column) => column.key === sort.key) ?? columns[0];
+  const table = all.filter((row) => orderInMonth(row.order, row.rows, row.progress, month, basis) && columns.every((column) => {
+    const value = filters[column.key]?.trim().toLowerCase();
+    if (!value || !column.filter) return true;
+    return column.filter.kind === "text" ? column.filter.text(row).toLowerCase().includes(value) : column.filter.value(row).toLowerCase() === value;
+  })).sort((a, b) => {
+    const x = sorter.sort(a), y = sorter.sort(b);
+    const result = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+    return (result || a.order.poNumber.localeCompare(b.order.poNumber)) * (sort.ascending ? 1 : -1);
+  });
+  const filtering = !!month || Object.values(filters).some((value) => value.trim());
+  return <div className="workspace-panel orders-list">
+    <div className="panel-title"><h2>Customer orders <span className="badge neutral">{orders.length}</span></h2></div>
+    <div className="orders-toolbar">
+      <fieldset className="orders-month"><legend>Month</legend>
+        <select aria-label="Month based on" value={basis} onChange={(event) => setBasis(event.target.value as MonthBasis)}>
+          <option value="scheduled">Scheduled in</option><option value="expected">Expected completion in</option><option value="created">Order created in</option>
+        </select>
+        <input type="month" aria-label="Month" value={month} onChange={(event) => setMonth(event.target.value)} />
+      </fieldset>
+      <details className="orders-columns">
+        <summary className="calendar-button"><Columns3 size={16} />Columns</summary>
+        <div role="group" aria-label="Columns to show">{columns.map((column) => <label key={column.key}><input type="checkbox" disabled={column.required} checked={column.required || !hidden.includes(column.key)} onChange={() => toggleColumn(column.key)} />{column.label}</label>)}</div>
+      </details>
+      {filtering ? <button type="button" className="calendar-button" onClick={() => { setFilters({}); setMonth(""); }}><X size={16} />Clear filters</button> : null}
+      <span className="result-count" aria-live="polite">{table.length} of {orders.length} orders</span>
+    </div>
+    <div className="orders-table-scroll" tabIndex={0} role="region" aria-label="Customer orders">
+      <table className="orders-table">
+        <thead>
+          <tr>
+            <th scope="col" className="order-toggle-column"><span className="admin-sr-only">Details</span></th>
+            {shown.map((column) => {
+              const active = sort.key === column.key;
+              const Icon = !active ? ArrowUpDown : sort.ascending ? ArrowUp : ArrowDown;
+              return <th scope="col" key={column.key} className={column.numeric ? "numeric" : undefined} aria-sort={active ? sort.ascending ? "ascending" : "descending" : "none"}>
+                <button type="button" className="table-sort" onClick={() => setSort({ key: column.key, ascending: active ? !sort.ascending : true })}>{column.label}<Icon size={13} /></button>
+              </th>;
+            })}
+          </tr>
+          <tr className="orders-filter-row">
+            <th scope="col"><span className="admin-sr-only">Filters</span></th>
+            {shown.map((column) => <th scope="col" key={column.key}>
+              {column.filter?.kind === "text" ? <input type="search" aria-label={`Search ${column.label}`} placeholder="Search" value={filters[column.key] ?? ""} list={column.key === "customer" ? "order-filter-customers" : undefined} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })} /> : null}
+              {column.filter?.kind === "select" ? <select aria-label={`Filter ${column.label}`} value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })}><option value="">All</option>{column.filter.options.map((option) => <option key={option}>{option}</option>)}</select> : null}
+            </th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {!table.length ? <tr><td colSpan={shown.length + 1} className="empty-state">{orders.length ? "No orders match these filters." : "No orders yet. Add a customer, PO number and quantity to start."}</td></tr> : null}
+          {table.map((row) => {
+            const open = expanded === row.order.id;
+            return <Fragment key={row.order.id}>
+              <tr className={open ? "order-row open" : "order-row"} onClick={() => setExpanded(open ? null : row.order.id)}>
+                <td><button type="button" className="icon-button order-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} ${row.order.poNumber} details`} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : row.order.id); }}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button></td>
+                {shown.map((column) => <td key={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(row)}</td>)}
+              </tr>
+              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail order={row.order} rows={row.rows} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
+            </Fragment>;
+          })}
+        </tbody>
+      </table>
+      <datalist id="order-filter-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
+    </div>
+  </div>;
 }
 
 function OrderDetail({ order, rows, linked, editable, customers, onSave, onDelete }: {

@@ -74,7 +74,8 @@ const batches: { product: ProductKey; batch: number; start: number; priority?: L
 ];
 
 // Purchase orders covering the batches above. Order quantity is the total of its batches.
-const purchaseOrders: { po: string; customer: string; product: ProductKey; batches: number[] }[] = [
+// Orders with no batches are newly received and not scheduled yet.
+const purchaseOrders: { po: string; customer: string; product: ProductKey; batches: number[]; quantity?: number }[] = [
   { po: "PO-2609-118", customer: "Greenleaf Wellness (Sample)", product: "vitc", batches: [3, 4, 5] },
   { po: "PO-2610-131", customer: "Greenleaf Wellness (Sample)", product: "vitc", batches: [6, 7, 8] },
   { po: "PO-2609-122", customer: "Vitara Nutrition (Sample)", product: "vitb", batches: [1, 2, 3] },
@@ -83,7 +84,13 @@ const purchaseOrders: { po: string; customer: string; product: ProductKey; batch
   { po: "PO-2610-133", customer: "Kinabalu Pharmacy (Sample)", product: "mecob", batches: [3, 4] },
   { po: "PO-2609-127", customer: "Harmoni Health (Sample)", product: "iron", batches: [1, 2, 3] },
   { po: "PO-2609-115", customer: "Sungai Organics (Sample)", product: "soy", batches: [1, 2, 3] },
-  { po: "PO-2609-116", customer: "Sungai Organics (Sample)", product: "enzyme", batches: [1, 2] }
+  { po: "PO-2609-116", customer: "Sungai Organics (Sample)", product: "enzyme", batches: [1, 2] },
+  { po: "PO-2610-140", customer: "Greenleaf Wellness (Sample)", product: "vitb", batches: [], quantity: 280000 },
+  { po: "PO-2610-142", customer: "Kinabalu Pharmacy (Sample)", product: "folic", batches: [], quantity: 600000 },
+  { po: "PO-2610-145", customer: "Vitara Nutrition (Sample)", product: "iron", batches: [], quantity: 300000 },
+  { po: "PO-2610-147", customer: "Harmoni Health (Sample)", product: "vitc", batches: [], quantity: 560000 },
+  { po: "PO-2610-150", customer: "Sungai Organics (Sample)", product: "soy", batches: [], quantity: 1600 },
+  { po: "PO-2610-151", customer: "Greenleaf Wellness (Sample)", product: "mecob", batches: [], quantity: 240000 }
 ];
 const orderId = (po: string) => `${SAMPLE_PREFIX}order-${po.toLowerCase()}`;
 const orderFor = (product: ProductKey, batch: number) => purchaseOrders.find((order) => order.product === product && order.batches.includes(batch));
@@ -237,8 +244,8 @@ export function addSampleData(state: Snapshot, today = new Date()): { state?: Sn
     const expectedDates: Record<string, string> = {};
     if (index % 2 === 0) for (const line of linked) if (!expectedDates[line.calendarId] || expectedDates[line.calendarId] < line.plannedDate) expectedDates[line.calendarId] = line.plannedDate;
     next.data.orders.push({
-      id: orderId(order.po), poNumber: order.po, customerName: order.customer, productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: quantities[order.product] * order.batches.length,
-      uom: product.uom, expectedDates, createdAt: stamp(dateKey(workday(monday, -15)), "09:00"), createdBy: "Sample data"
+      id: orderId(order.po), poNumber: order.po, customerName: order.customer, productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
+      uom: product.uom, expectedDates, createdAt: stamp(dateKey(workday(monday, order.batches.length ? -15 : index - 12)), "09:00"), createdBy: "Sample data"
     });
   }
 

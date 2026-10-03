@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { batchRoute, orderProcessRows, orderProgress, validateOrder } from "../src/lib/services/orders";
+import { batchRoute, orderInMonth, orderProcessRows, orderProgress, validateOrder } from "../src/lib/services/orders";
 
 const state = addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state!;
 const order = state.data.orders.find((item) => item.poNumber === "PO-2609-118")!;
@@ -63,5 +63,20 @@ describe("production route", () => {
     expect(route.map((step) => step.processName)).toEqual(["Dispensing", "Compression", "Capsulation", "Coating", "Filling", "Packing"]);
     expect(route.map((step) => step.lines.length)).toEqual([1, 2, 0, 2, 2, 1]);
     expect(route.flatMap((step) => step.lines).every((item) => item.orderReference === "Batch 4")).toBe(true);
+  });
+});
+
+describe("order month filter", () => {
+  it("matches orders by scheduled work, expected completion or creation month", () => {
+    const order = state.data.orders.find((item) => item.poNumber === "PO-2609-118")!;
+    const rows = orderProcessRows(order, state.data.lines, state.directory);
+    const first = rows[0].firstDate.slice(0, 7), last = rows.at(-1)!.lastDate.slice(0, 7);
+    expect(orderInMonth(order, rows, {}, first, "scheduled")).toBe(true);
+    expect(orderInMonth(order, rows, {}, last, "scheduled")).toBe(true);
+    expect(orderInMonth(order, rows, {}, "2025-01", "scheduled")).toBe(false);
+    expect(orderInMonth(order, rows, { expectedDate: "2026-11-04" }, "2026-11", "expected")).toBe(true);
+    expect(orderInMonth(order, rows, {}, "2026-11", "expected")).toBe(false);
+    expect(orderInMonth({ ...order, createdAt: new Date(2026, 8, 15, 9).toISOString() }, rows, {}, "2026-09", "created")).toBe(true);
+    expect(orderInMonth(order, rows, {}, "", "created")).toBe(true);
   });
 });

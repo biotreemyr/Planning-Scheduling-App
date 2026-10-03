@@ -89,3 +89,15 @@ export function orderProgress(order: PurchaseOrder, rows: OrderProcessRow[], tod
     expectedDate, overdue: status !== "Completed" && !!expectedDate && expectedDate < today
   };
 }
+
+export type MonthBasis = "scheduled" | "expected" | "created";
+// Whether an order belongs to a "YYYY-MM" month: work scheduled in it, expected to finish in it, or created in it.
+export function orderInMonth(order: PurchaseOrder, rows: OrderProcessRow[], progress: Pick<OrderProgress, "expectedDate">, month: string, basis: MonthBasis) {
+  if (!month) return true;
+  if (basis === "expected") return progress.expectedDate?.slice(0, 7) === month;
+  if (basis === "created") {
+    const created = new Date(order.createdAt);
+    return `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}` === month;
+  }
+  return rows.some((row) => row.firstDate.slice(0, 7) <= month && row.lastDate.slice(0, 7) >= month);
+}
