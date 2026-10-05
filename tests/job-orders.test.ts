@@ -64,4 +64,19 @@ describe("job orders", () => {
     resized.data.jobOrders[0].quantity += 1;
     expect(reviewWorkspaceChange(state, resized, production).denied).toEqual(["edit job orders"]);
   });
+  it("requires every new activity to carry out a job order, and never unlinks one", () => {
+    const planner = capabilitiesForDemoRole("planner");
+    expect(state.data.lines.every((line) => line.jobOrderId)).toBe(true);
+    const linked = state.data.lines.find((line) => line.jobOrderId && !line.completedAt)!;
+    const adhoc = structuredClone(state);
+    adhoc.data.lines.push({ ...linked, id: "adhoc", jobOrderId: undefined });
+    expect(reviewWorkspaceChange(state, adhoc, planner)).toMatchObject({ allowed: false, denied: ["add activities without a job order"] });
+    const withJob = structuredClone(state);
+    withJob.data.lines.push({ ...linked, id: "second-day" });
+    expect(reviewWorkspaceChange(state, withJob, planner).allowed).toBe(true);
+    const unlinked = structuredClone(state);
+    const line = unlinked.data.lines.find((item) => item.id === linked.id)!;
+    delete line.jobOrderId;
+    expect(reviewWorkspaceChange(state, unlinked, planner).denied).toContain("unlink activities from their job order");
+  });
 });

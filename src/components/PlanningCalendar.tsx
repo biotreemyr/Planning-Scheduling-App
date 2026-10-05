@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import type Calendar from "@toast-ui/calendar";
 import { ChevronLeft, ChevronRight, X, Plus, Printer, Download } from "lucide-react";
 import { CalendarPrint, ListPrint } from "./CalendarPrint";
-import { ProductSelect } from "./ProductSelect";
 import { PlanningList } from "./PlanningList";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { priorities } from "@/lib/domain/types";
@@ -214,27 +213,29 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
         const quantity = Number(data.get("quantity"));
         const productId = String(data.get("product"));
         if (!Number.isFinite(quantity) || quantity <= 0 || !products.some((item) => item.id === productId)) return;
+        // Every activity carries out a job order, which decides its product, PO and batch.
         const picked = jobOrders.find((item) => item.id === String(data.get("job") ?? ""));
         const pickedOrder = orders.find((item) => item.id === picked?.orderId);
-        if (picked && pickedOrder?.productId !== productId) return;
+        if (!picked || pickedOrder?.productId !== productId) return;
         callbacks.current.onCreate({ ...readMeasurement(data), calendarId: String(data.get("calendar") ?? ""), productId, plannedDate: String(data.get("date")), quantity, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""),
-          orderReference: picked ? picked.number : String(data.get("order") ?? ""), productionOrderId: picked ? picked.orderId : String(data.get("po") ?? "") || undefined, ...(picked ? { jobOrderId: picked.id } : {}) });
+          orderReference: picked.number, productionOrderId: picked.orderId, jobOrderId: picked.id });
         setDate(String(data.get("date")));
         event.currentTarget.reset();
         dialog.current?.close();
         setNotice("Activity added to the current team plan.");
       }}>
         <div className="panel-title"><h2>Add activity</h2><button className="icon-button" type="button" aria-label="Close activity form" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
-        <label>Job order<select name="job" value={draftJob} onChange={(event) => setDraftJob(event.target.value)}><option value="">Not linked to a job order</option>{jobOrders.map((item) => { const order = orders.find((entry) => entry.id === item.orderId); return <option key={item.id} value={item.id}>{jobLabel(item)} · {products.find((product) => product.id === order?.productId)?.name ?? "Unknown product"} · {item.quantity.toLocaleString()} {item.uom}{order ? ` · ${order.poNumber}` : ""}</option>; })}</select></label>
-        <ProductSelect key={`product-${draftJob}`} products={products} value={jobOrder?.productId} />
+        {jobOrders.length ? null : <p role="alert">No job orders yet. Create them from a PO on the Orders tab first.</p>}
+        <label>Job order<select name="job" required value={draftJob} onChange={(event) => setDraftJob(event.target.value)}><option value="" disabled>Choose a job order</option>{jobOrders.map((item) => { const order = orders.find((entry) => entry.id === item.orderId); return <option key={item.id} value={item.id}>{jobLabel(item)} · {products.find((product) => product.id === order?.productId)?.name ?? "Unknown product"} · {item.quantity.toLocaleString()} {item.uom}{order ? ` · ${order.poNumber}` : ""}</option>; })}</select></label>
+        <p className="orders-help">Product: <strong>{job ? products.find((product) => product.id === jobOrder?.productId)?.name ?? "Unknown product" : "set by the job order"}</strong></p>
+        <input type="hidden" name="product" value={jobOrder?.productId ?? ""} />
         <label>Process<select name="calendar" required defaultValue={draftCalendar || undefined}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label>Planned date<input name="date" type="date" required defaultValue={draftDate} /></label>
         <MeasurementFields key={`measure-${draftJob}`} defaultQuantity={job?.quantity} defaultUom={job?.uom} />
         <label>Priority<select name="priority" defaultValue="Normal">{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-        <label>PO number<select name="po" key={`po-${draftJob}`} defaultValue={jobOrder?.id ?? ""} disabled={!!job} title={job ? "Set by the job order" : undefined}><option value="">Not linked</option>{orders.map((item) => <option key={item.id} value={item.id}>{orderNumbers(orders).get(item.id)} · {poLabel(item, orders)}{item.customerName ? ` · ${item.customerName}` : ""} · {products.find((product) => product.id === item.productId)?.name ?? "Unknown product"}</option>)}</select></label>
-        {job ? <p className="orders-help">Batch reference: <strong>{job.number}</strong>{job.batchNumber ? ` · Batch no. ${job.batchNumber}` : " · production keys in the batch number"}</p> : <label>Batch / order reference<input name="order" placeholder="e.g. Batch 4" /></label>}
+        {job && jobOrder ? <p className="orders-help">PO number: <strong>{poLabel(jobOrder, orders)}</strong>{jobOrder.customerName ? ` · ${jobOrder.customerName}` : ""}<br />Batch reference: <strong>{job.number}</strong>{job.batchNumber ? ` · Batch no. ${job.batchNumber}` : " · production keys in the batch number"}</p> : null}
         <label>Remarks<textarea name="notes" /></label>
-        <button className="primary-button" type="submit"><Plus size={17} />Add to plan</button>
+        <button className="primary-button" type="submit" disabled={!job}><Plus size={17} />Add to plan</button>
       </form>
     </dialog>
     <div className="order-legend" aria-label="Legend">

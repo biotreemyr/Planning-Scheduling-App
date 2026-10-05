@@ -54,6 +54,9 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
 
   const lines = diff(before.data.lines, after.data.lines);
   if (lines.added.length) need(can.createPlan, "add plan activities");
+  // Every new activity carries out a job order; received work in progress follows its source batch.
+  if (lines.added.some((line) => !line.jobOrderId && !line.incomingWipId)) need(false, "add activities without a job order");
+  if (lines.changed.some(({ before: old, after: line }) => old.jobOrderId && !line.jobOrderId)) need(false, "unlink activities from their job order");
   if (lines.removed.length) need(can.editPlan, "remove plan activities");
   for (const { before: old, after: line } of lines.changed) {
     // Completing production writes only the completion time and final yield.
