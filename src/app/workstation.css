@@ -374,7 +374,6 @@
 .order-batch-table .order-batch-col { width: 168px; min-width: 168px; max-width: 168px; }
 .order-batch-table .order-batch-process { position: sticky; left: 0; z-index: 1; min-width: 110px; }
 .order-batch-table thead .order-batch-process { background: var(--panel-soft); }
-.order-batch-table .order-batch-add { width: 116px; min-width: 116px; text-align: center; vertical-align: middle; background: #fbfcfb; }
 .order-batch-table thead th { background: var(--panel-soft); font-weight: 600; }
 .order-batch-table thead th small { display: block; font-weight: 400; color: var(--muted); margin-top: 2px; }
 .order-batch-table thead th .batch-kg { color: var(--ink); font-weight: 600; }
@@ -405,13 +404,7 @@
 .order-warn-badge { margin-left: 6px; }
 .order-detail-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .order-detail-head .route-format { margin: 0; }
-.order-add-batch { min-height: 30px; padding: 3px 10px; white-space: nowrap; }
 .order-empty { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.order-batch-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; padding: 12px; border: 1px solid var(--line); background: #fafbfa; }
-.order-batch-form h3, .order-batch-form p { flex-basis: 100%; margin: 0; }
-.order-batch-form p { font-size: 13px; color: var(--muted); }
-.order-batch-form p[role="alert"] { color: var(--red); }
-.order-batch-form label { width: 180px; }
 @media print {
   .print-orders header { margin-bottom: 4mm; }
   .print-orders-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }

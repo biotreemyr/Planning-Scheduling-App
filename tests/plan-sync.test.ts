@@ -80,14 +80,11 @@ describe("moves that break the process flow warn", () => {
   });
 });
 
-describe("adding a batch from the grid", async () => {
-  const { createBatchLines, nextBatchLabel } = await import("../src/lib/services/planChanges");
+describe("creating a batch's route activities", async () => {
+  const { createBatchLines } = await import("../src/lib/services/planChanges");
   const tablets = state.data.orders.find((item) => item.poNumber === "PO-2610-131")!;
   let n = 0;
   const context = (order = tablets, format: "Tablet" | "Capsule" | "Sachet" | "Other" = "Tablet") => ({ order, format, lines: state.data.lines, directory: state.directory, uom: order.uom, newId: () => `new-${++n}` });
-  it("suggests the next batch number", () => {
-    expect(nextBatchLabel(tablets, state.data.lines)).toBe("Batch 9");
-  });
   it("creates one activity per route step on consecutive working days, in the order's unit", () => {
     const result = createBatchLines({ label: "Batch 9", quantity: 280000, startDate: "2026-10-23" }, context());
     if ("error" in result) throw new Error(result.error);

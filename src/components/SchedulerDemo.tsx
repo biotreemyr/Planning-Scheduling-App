@@ -811,9 +811,10 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     const bookings = moved.movedEntryIds.length ? ` Its machine booking${moved.movedEntryIds.length === 1 ? "" : "s"} moved with it.` : "";
     return `Planning saved.${bookings}${warning ? ` Warning: ${warning.message}` : ""}`;
   }
-  // The order grid's "+ Add batch": one activity per step of the order's route.
+  // One activity per step of the order's route. Every batch comes from a job order, so it has one.
   function addBatch(orderId: string, batch: NewBatch) {
     if (!caps.createPlan) return ["Planning access is required to add batches."];
+    if (!batch.jobOrderId) return ["Create a job order for this batch first."];
     const order = data.orders.find((item) => item.id === orderId);
     if (!order) return ["This order no longer exists."];
     const product = products.find((item) => item.id === order.productId);
@@ -997,7 +998,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "orders" ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} jobActions={{ canCreate: caps.createPlan || caps.manage, canPlan: caps.createPlan, onCreate: createJobOrders, onDelete: deleteJobOrder, onPlan: planJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} canAddBatch={caps.createPlan} onAddBatch={addBatch} /> : null}
+      {activeTab === "orders" ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} jobActions={{ canCreate: caps.createPlan || caps.manage, canPlan: caps.createPlan, onCreate: createJobOrders, onDelete: deleteJobOrder, onPlan: planJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />

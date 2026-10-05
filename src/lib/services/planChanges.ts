@@ -35,12 +35,6 @@ type BatchContext = {
 const nextWorkday = (date: Date) => { do { date.setDate(date.getDate() + 1); } while (date.getDay() === 0 || date.getDay() === 6); return date; };
 const key = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
-// Next free "Batch N" label for an order.
-export function nextBatchLabel(order: PurchaseOrder, lines: PlanLine[]) {
-  const numbers = lines.filter((line) => line.productionOrderId === order.id).map((line) => Number(/batch\s*(\d+)/i.exec(line.orderReference ?? "")?.[1])).filter(Number.isFinite);
-  return `Batch ${Math.max(0, ...numbers) + 1}`;
-}
-
 /**
  * Create a batch: one activity per step of the order's format route, one working day each,
  * in the unit the order already runs in (or the first unit set up for the whole route).

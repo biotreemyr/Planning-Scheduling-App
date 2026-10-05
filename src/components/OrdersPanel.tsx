@@ -2,7 +2,6 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Plus, Printer, Trash2, X } from "lucide-react";
-import { nextBatchLabel, type NewBatch } from "@/lib/services/planChanges";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { customerLabel, jobsFor, linesForJob, planJobOrders, productBatch, type JobOrder } from "@/lib/services/jobOrders";
@@ -24,16 +23,15 @@ export type JobActions = {
   onPlan: (id: string, startDate: string) => string[];
 };
 
-export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, lines, products, directory, visibleCalendarIds, editable, userName, onSave, onAdd, onDelete, flow = [], canAddBatch = false, onAddBatch }: {
+export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, lines, products, directory, visibleCalendarIds, editable, userName, onSave, onAdd, onDelete, flow = [] }: {
   orders: PurchaseOrder[]; customers?: Customer[]; jobOrders?: JobOrder[]; jobActions?: JobActions;
   lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[]; flow?: FlowWarning[];
-  canAddBatch?: boolean; onAddBatch?: (orderId: string, batch: NewBatch) => string[];
   editable: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer) => string[]; onDelete: (id: string) => string[];
 }) {
   const customerNames = [...new Set(orders.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
   return <section className="orders-layout">
     {editable ? <NewOrderForm orders={orders} customers={customers} products={products} userName={userName} onAdd={onAdd} /> : null}
-    <OrdersTable orders={orders} customerRecords={customers} jobOrders={jobOrders} jobActions={jobActions} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} canAddBatch={canAddBatch && !!onAddBatch} onAddBatch={onAddBatch ?? (() => [])} />
+    <OrdersTable orders={orders} customerRecords={customers} jobOrders={jobOrders} jobActions={jobActions} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
   </section>;
 }
 
@@ -123,9 +121,9 @@ type Column = {
 };
 const COLUMN_STORAGE = "scheduler.orderColumns";
 
-function OrdersTable({ orders, customerRecords, jobOrders, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow, canAddBatch, onAddBatch }: {
+function OrdersTable({ orders, customerRecords, jobOrders, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
   customerRecords: Customer[]; jobOrders: JobOrder[]; jobActions?: JobActions;
-  flow: FlowWarning[]; canAddBatch: boolean; onAddBatch: (orderId: string, batch: NewBatch) => string[];
+  flow: FlowWarning[];
   orders: PurchaseOrder[]; lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[];
   editable: boolean; customers: string[]; onSave: (order: PurchaseOrder) => string[]; onDelete: (id: string) => string[];
 }) {
@@ -227,7 +225,7 @@ function OrdersTable({ orders, customerRecords, jobOrders, jobActions, lines, pr
                 <td><button type="button" className="icon-button order-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} ${row.order.poNumber} details`} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : row.order.id); }}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button></td>
                 {shown.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(row)}</td>)}
               </tr>
-              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail jobOrders={jobOrders} jobActions={jobActions} product={row.product} canAddBatch={canAddBatch} onAddBatch={onAddBatch} onPrint={() => setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 }))} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
+              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail jobOrders={jobOrders} jobActions={jobActions} product={row.product} onPrint={() => setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 }))} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
             </Fragment>;
           })}
         </tbody>
@@ -356,10 +354,10 @@ function BatchStatus({ cell, uom }: { cell?: BatchCell; uom: string }) {
   </div>;
 }
 
-function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete, canAddBatch, onAddBatch, onPrint }: {
+function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete, onPrint }: {
   product?: Product; jobOrders: JobOrder[]; jobActions?: JobActions;
   format: ProductFormat; warnings: FlowWarning[];
-  canAddBatch: boolean; onAddBatch: (orderId: string, batch: NewBatch) => string[]; onPrint: () => void;
+  onPrint: () => void;
   order: PurchaseOrder; rows: OrderProcessRow[]; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; linked: boolean; editable: boolean; customers: string[];
   onSave: (order: PurchaseOrder) => string[]; onDelete: (id: string) => string[];
 }) {
@@ -368,11 +366,7 @@ function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, 
   const [confirming, setConfirming] = useState(false);
   const units = new Set(rows.map((row) => row.unitName));
   const matrix = orderBatchMatrix(order, lines, directory, localDateKey(new Date()), visibleCalendarIds);
-  const [adding, setAdding] = useState(false);
-  const [batchErrors, setBatchErrors] = useState<string[]>([]);
   const lastDate = rows.reduce((latest, row) => row.lastDate > latest ? row.lastDate : latest, "");
-  const remaining = Math.max(0, order.quantity - matrix.total.quantity);
-  const addButton = canAddBatch ? <button type="button" className="calendar-button order-add-batch" onClick={() => { setAdding(true); setBatchErrors([]); }} title={`Create activities for ${routeLabel(format)}`}><Plus size={15} />Add batch</button> : null;
   return <div className="order-detail">
     <div className="order-detail-head">
       <p className="route-format">Format: <strong>{format}</strong> · {routeLabel(format)}</p>
@@ -381,10 +375,9 @@ function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, 
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     {rows.length ? <div className="order-batch-scroll"><table className="order-batch-table">
       <thead>
-        <tr><th scope="col" rowSpan={2} className="order-batch-process">Process</th><th scope="colgroup" colSpan={matrix.batches.length + 1 + (canAddBatch ? 1 : 0)}>Planned quantity</th><th scope="col" rowSpan={2}>Expected completion</th></tr>
+        <tr><th scope="col" rowSpan={2} className="order-batch-process">Process</th><th scope="colgroup" colSpan={matrix.batches.length + 1}>Planned quantity</th><th scope="col" rowSpan={2}>Expected completion</th></tr>
         <tr>
           {matrix.batches.map((batch) => <th scope="col" key={batch.key} className="order-batch-col"><strong>{batch.label}</strong><BatchSize kg={batch.kg} quantity={batch.quantity} uom={batch.uom} /></th>)}
-          {canAddBatch ? <th scope="col" className="order-batch-add">{addButton}</th> : null}
           <th scope="col" className="order-batch-summary"><strong>Summary</strong><BatchSize kg={matrix.total.kg} quantity={matrix.total.quantity} uom={order.uom} />{matrix.total.quantity > order.quantity ? <small className="order-warning">More than the {order.quantity.toLocaleString()} ordered</small> : null}</th>
         </tr>
       </thead>
@@ -394,7 +387,6 @@ function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, 
         return <tr key={row.calendar.id}>
           <th scope="row" className="order-batch-process">{row.processName}{units.size > 1 ? <small>{rows.find((item) => item.calendar.id === row.calendar.id)?.unitName}</small> : null}</th>
           {matrix.batches.map((batch) => <td key={batch.key} className="order-batch-col"><BatchStatus cell={row.cells[batch.key]} uom={batch.uom} /></td>)}
-          {canAddBatch ? <td className="order-batch-add" /> : null}
           <td className="order-batch-summary">
             <div className="batch-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={`${row.processName} ${percent}% complete`}><span style={{ width: `${percent}%` }} /></div>
             <small>{row.completed.toLocaleString()} / {row.planned.toLocaleString()} {order.uom} · {percent}%</small>
@@ -407,25 +399,8 @@ function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, 
             }} />{order.expectedDates[row.calendar.id] && order.expectedDates[row.calendar.id] < lastDate ? <small className="order-warning">Before last scheduled day</small> : null}</td>
         </tr>;
       })}</tbody>
-    </table></div> : <p className="order-empty">No production has been scheduled against this PO yet. {addButton}</p>}
+    </table></div> : <p className="order-empty">No production has been scheduled against this PO yet. Create its job orders below, then plan each one.</p>}
     {jobActions ? <JobOrders order={order} product={product} jobOrders={jobOrders} lines={lines} actions={jobActions} /> : null}
-    {adding ? <form className="order-batch-form" onSubmit={(event) => {
-      event.preventDefault();
-      const data = new FormData(event.currentTarget);
-      const result = onAddBatch(order.id, { label: String(data.get("label")), quantity: Number(data.get("quantity")), startDate: String(data.get("start")) });
-      setBatchErrors(result);
-      if (!result.length) setAdding(false);
-    }}>
-      <h3>Add batch</h3>
-      <p>Creates one activity per process ({routeLabel(format)}), one working day each, starting on the date you choose. Drag them in the planner to adjust.</p>
-      <p>Ordered {order.quantity.toLocaleString()} {order.uom} · already in batches {matrix.total.quantity.toLocaleString()} · {remaining ? `${remaining.toLocaleString()} still to plan` : "fully planned"}.</p>
-      <label>Batch name<input name="label" required defaultValue={nextBatchLabel(order, lines)} /></label>
-      <label>Quantity ({order.uom})<input name="quantity" type="number" min="1" step="any" required defaultValue={remaining || matrix.batches.at(-1)?.quantity || ""} /></label>
-      <label>Start date<input name="start" type="date" required defaultValue={lastDate || localDateKey(new Date())} /></label>
-      <button type="submit" className="primary-button"><Plus size={16} />Create batch</button>
-      <button type="button" className="calendar-button" onClick={() => setAdding(false)}>Cancel</button>
-      {batchErrors.map((error) => <p role="alert" key={error}>{error}</p>)}
-    </form> : null}
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
