@@ -9,11 +9,16 @@ export const isSample = (id?: string) => !!id?.startsWith(SAMPLE_PREFIX);
 type Snapshot = WorkspaceSnapshot;
 type Line = Snapshot["data"]["lines"][number];
 
-const units = [
+// The fermentation plant is switched off for now: its unit, machines, staff, products, plans and
+// work-in-progress handover are left out. Set this to true to bring it back.
+export const FERMENTATION = false;
+const inFermentation = (key: string) => ["ferm", "soy", "enzyme", "dry", "fermA", "fermB", "spray", "mei", "lim"].includes(key);
+
+const allUnits = [
   { id: "sample-unit-mfg", name: "Manufacturing (Sample)", processes: ["Dispensing", "Compression", "Capsulation", "Coating", "Filling", "Packing"] },
   { id: "sample-unit-ferm", name: "Fermentation Plant (Sample)", processes: ["Fermentation", "Drying"] }
 ];
-const products = [
+const allProducts = [
   { key: "vitc", sku: "SMP-VCP28", name: "Vitamin C Plus (28 tabs x 1000mg)", uom: "tablets", weight: 1450 },
   { key: "vitb", sku: "SMP-VBP07", name: "Vitamin B Plus (7 tabs x 1000mg)", uom: "tablets", weight: 1300 },
   { key: "folic", sku: "SMP-FA400", name: "Folic Acid 400mcg Tablets", uom: "tablets", weight: 250 },
@@ -23,13 +28,13 @@ const products = [
   { key: "soy", sku: "SMP-BSFP", name: "Black Soybean Fermented Powder", uom: "kg" },
   { key: "enzyme", sku: "SMP-ENZB", name: "Enzyme Blend Powder", uom: "kg" }
 ] as const;
-const centres = [
+const allCentres = [
   { key: "disp", code: "SMP-DISP", name: "Dispensing Room" }, { key: "comp", code: "SMP-COMP", name: "Compression Room" },
   { key: "caps", code: "SMP-CAPS", name: "Capsulation Room" }, { key: "coat", code: "SMP-COAT", name: "Coating Room" },
   { key: "fill", code: "SMP-FILL", name: "Filling Room" }, { key: "pack", code: "SMP-PACK", name: "Packing Hall" },
   { key: "ferm", code: "SMP-FERM", name: "Fermentation Hall" }, { key: "dry", code: "SMP-DRY", name: "Drying Room" }
 ];
-const machines = [
+const allMachines = [
   { key: "booth1", code: "SMP-DB1", name: "Dispensing Booth 1", unit: "mfg", centre: "disp", processes: ["Dispensing"], setup: 15 },
   { key: "booth2", code: "SMP-DB2", name: "Dispensing Booth 2", unit: "mfg", centre: "disp", processes: ["Dispensing"], setup: 15 },
   { key: "press1", code: "SMP-RP1", name: "Rotary Press 1", unit: "mfg", centre: "comp", processes: ["Compression"], setup: 45 },
@@ -44,13 +49,13 @@ const machines = [
   { key: "fermB", code: "SMP-FB", name: "Fermenter B", unit: "ferm", centre: "ferm", processes: ["Fermentation"], setup: 60 },
   { key: "spray", code: "SMP-SD1", name: "Spray Dryer 1", unit: "ferm", centre: "dry", processes: ["Drying"], setup: 30 }
 ];
-const people = [
+const allPeople = [
   { key: "aida", name: "Aida (Sample planner)", role: "planner" as const, unit: "mfg" },
   { key: "mei", name: "Mei (Sample planner)", role: "planner" as const, unit: "ferm" },
   { key: "kumar", name: "Kumar (Sample production)", role: "production" as const, unit: "mfg" },
   { key: "lim", name: "Lim (Sample production)", role: "production" as const, unit: "ferm" }
 ];
-type ProductKey = (typeof products)[number]["key"];
+type ProductKey = (typeof allProducts)[number]["key"];
 // Each step runs for a number of working days; the next step starts on the following working day.
 type Route = [process: string, days: number][];
 const coatedTablet: Route = [["Dispensing", 1], ["Compression", 2], ["Coating", 2], ["Filling", 2], ["Packing", 1]];
@@ -62,7 +67,7 @@ const routes: Record<ProductKey, Route> = {
 };
 const quantities: Record<ProductKey, number> = { vitc: 280000, vitb: 140000, folic: 300000, mecob: 120000, iron: 150000, collagen: 60000, soy: 800, enzyme: 450 };
 // Start is in working days from Monday of the current week, so the calendar always shows work around today.
-const batches: { product: ProductKey; batch: number; start: number; priority?: Line["priority"]; route?: Route; notes?: string }[] = [
+const allBatches: { product: ProductKey; batch: number; start: number; priority?: Line["priority"]; route?: Route; notes?: string }[] = [
   { product: "vitc", batch: 3, start: -14, priority: "High" }, { product: "folic", batch: 1, start: -13 }, { product: "vitb", batch: 1, start: -12 },
   { product: "mecob", batch: 1, start: -11, priority: "High" }, { product: "vitc", batch: 4, start: -9 }, { product: "iron", batch: 1, start: -8 },
   { product: "mecob", batch: 2, start: -5 }, { product: "vitc", batch: 5, start: -4, priority: "Urgent", notes: "Customer launch date fixed. Expedite packing." },
@@ -80,7 +85,7 @@ const batches: { product: ProductKey; batch: number; start: number; priority?: L
 
 // Purchase orders covering the batches above. Order quantity is the total of its batches.
 // Orders with no batches are newly received and not scheduled yet.
-const purchaseOrders: { po: string; customer: string; product: ProductKey; batches: number[]; quantity?: number }[] = [
+const allPurchaseOrders: { po: string; customer: string; product: ProductKey; batches: number[]; quantity?: number }[] = [
   { po: "PO-2609-118", customer: "Greenleaf Wellness (Sample)", product: "vitc", batches: [3, 4, 5] },
   { po: "PO-2610-131", customer: "Greenleaf Wellness (Sample)", product: "vitc", batches: [6, 7, 8] },
   { po: "PO-2609-122", customer: "Vitara Nutrition (Sample)", product: "vitb", batches: [1, 2, 3] },
@@ -98,8 +103,14 @@ const purchaseOrders: { po: string; customer: string; product: ProductKey; batch
   { po: "PO-2610-151", customer: "Greenleaf Wellness (Sample)", product: "mecob", batches: [], quantity: 240000 },
   { po: "PO-2609-129", customer: "Kinabalu Pharmacy (Sample)", product: "collagen", batches: [1, 2] }
 ];
+// Sample customers carry a customer ID like a real customer master.
+const customerCodes: Record<string, string> = {
+  "Greenleaf Wellness (Sample)": "SMP-C001", "Vitara Nutrition (Sample)": "SMP-C002", "Harmoni Health (Sample)": "SMP-C003",
+  "Kinabalu Pharmacy (Sample)": "SMP-C004", "Sungai Organics (Sample)": "SMP-C005"
+};
+const customerId = (name: string) => `${SAMPLE_PREFIX}customer-${customerCodes[name].toLowerCase()}`;
 const orderId = (po: string) => `${SAMPLE_PREFIX}order-${po.toLowerCase()}`;
-const orderFor = (product: ProductKey, batch: number) => purchaseOrders.find((order) => order.product === product && order.batches.includes(batch));
+const jobId = (key: string) => `${SAMPLE_PREFIX}job-${key}`;
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const dateKey = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -118,8 +129,17 @@ export function hasSampleData(state: Snapshot) {
 }
 
 // Build sample units, people, machines and a realistic plan dated around `today`, merged into `state`.
-export function addSampleData(state: Snapshot, today = new Date()): { state?: Snapshot; errors: string[] } {
+export function addSampleData(state: Snapshot, today = new Date(), options = { fermentation: FERMENTATION }): { state?: Snapshot; errors: string[] } {
   if (hasSampleData(state)) return { errors: ["Sample data is already loaded. Remove it first to reload."] };
+  const pick = <T,>(items: readonly T[], keyOf: (item: T) => string) => options.fermentation ? [...items] : items.filter((item) => !inFermentation(keyOf(item)));
+  const units = pick(allUnits, (unit) => unit.id.slice("sample-unit-".length));
+  const products = pick(allProducts, (product) => product.key);
+  const centres = pick(allCentres, (centre) => centre.key);
+  const machines = pick(allMachines, (machine) => machine.key);
+  const people = pick(allPeople, (person) => person.key);
+  const batches = pick(allBatches, (batch) => batch.product);
+  const purchaseOrders = pick(allPurchaseOrders, (order) => order.product);
+  const orderFor = (product: ProductKey, batch: number) => purchaseOrders.find((order) => order.product === product && order.batches.includes(batch));
   const next: Snapshot = structuredClone(state);
   const d = next.directory;
   const processId = (name: string) => {
@@ -147,7 +167,12 @@ export function addSampleData(state: Snapshot, today = new Date()): { state?: Sn
   // Administrators need the sample units to open their calendars.
   for (const admin of d.people.filter((person) => person.role === "admin")) admin.unitIds.push(...units.map((unit) => unit.id));
 
-  for (const product of products) next.products.push({ id: `${SAMPLE_PREFIX}product-${product.key}`, sku: product.sku, name: product.name, uom: product.uom, productType: "Finished Good", active: "Active" });
+  // Each product's allowable batch is one sample batch; its kilograms follow from the unit weight.
+  for (const product of products) {
+    const kg = batchKilograms(quantities[product.key], product.uom, "weight" in product ? product.weight : undefined);
+    next.products.push({ id: `${SAMPLE_PREFIX}product-${product.key}`, sku: product.sku, name: product.name, uom: product.uom, productType: "Finished Good", active: "Active",
+      batchQuantity: quantities[product.key], ...(kg ? { batchSizeKg: kg } : {}) });
+  }
   for (const centre of centres) next.workCentres.push({ id: `${SAMPLE_PREFIX}wc-${centre.key}`, code: centre.code, name: centre.name, description: "Sample work centre", active: "Active" });
   for (const machine of machines) next.machines.push({
     id: `${SAMPLE_PREFIX}machine-${machine.key}`, code: machine.code, name: machine.name, workCentreId: `${SAMPLE_PREFIX}wc-${machine.centre}`,
@@ -187,7 +212,7 @@ export function addSampleData(state: Snapshot, today = new Date()): { state?: Sn
         const line: Line = {
           id, calendarId: calendar.id, planId: "production-plan", productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity, uom: product.uom,
           plannedDate, priority: batch.priority ?? "Normal", status: "Unscheduled", activityType: process, orderReference: `Batch ${batch.batch}`,
-          ...(order ? { productionOrderId: orderId(order.po) } : {}),
+          ...(order ? { productionOrderId: orderId(order.po), jobOrderId: jobId(key) } : {}),
           ...(unitWeightMg ? { unitWeightMg } : {}), batchSizeKg: batchKilograms(quantity, product.uom, unitWeightMg),
           ...(stepIndex === 0 && day === 1 && batch.notes ? { notes: batch.notes } : {})
         };
@@ -243,6 +268,26 @@ export function addSampleData(state: Snapshot, today = new Date()): { state?: Sn
     transfers.push(transfer);
   }
 
+  // One job order per sample batch on a PO. Batches already started carry the batch number production keyed in.
+  for (const name of new Set(purchaseOrders.map((order) => order.customer))) {
+    next.data.customers.push({ id: customerId(name), code: customerCodes[name], name, active: "Active" });
+  }
+  let jobNumber = 0;
+  for (const batch of batches) {
+    const order = orderFor(batch.product, batch.batch);
+    if (!order) continue;
+    const product = products.find((item) => item.key === batch.product)!;
+    const key = `${batch.product}-b${batch.batch}`;
+    const started = lines.some((line) => line.jobOrderId === jobId(key) && line.completedAt);
+    const kg = batchKilograms(quantities[batch.product], product.uom, "weight" in product ? product.weight : undefined);
+    next.data.jobOrders.push({
+      id: jobId(key), number: `JO-SMP-${String(++jobNumber).padStart(3, "0")}`, orderId: orderId(order.po), sequence: order.batches.indexOf(batch.batch) + 1,
+      quantity: quantities[batch.product], uom: product.uom, ...(kg ? { batchSizeKg: kg } : {}),
+      ...(started ? { batchNumber: `${product.sku.slice(4)}-${String(batch.batch).padStart(3, "0")}`, batchNumberBy: "Kumar (Sample production)", batchNumberAt: stamp(dateKey(workday(monday, batch.start)), "08:00") } : {}),
+      createdAt: stamp(dateKey(workday(monday, batch.start - 3)), "09:00"), createdBy: "Sample data"
+    });
+  }
+
   // Expected completion dates are keyed in for the earlier orders and left blank on the later ones.
   for (const [index, order] of purchaseOrders.entries()) {
     const product = products.find((item) => item.key === order.product)!;
@@ -250,7 +295,7 @@ export function addSampleData(state: Snapshot, today = new Date()): { state?: Sn
     const expectedDates: Record<string, string> = {};
     if (index % 2 === 0) for (const line of linked) if (!expectedDates[line.calendarId] || expectedDates[line.calendarId] < line.plannedDate) expectedDates[line.calendarId] = line.plannedDate;
     next.data.orders.push({
-      id: orderId(order.po), poNumber: order.po, customerName: order.customer, number: index + 1, format: inferFormat(product), productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
+      id: orderId(order.po), poNumber: order.po, customerName: order.customer, customerId: customerId(order.customer), number: index + 1, format: inferFormat(product), productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
       uom: product.uom, expectedDates, createdAt: stamp(dateKey(workday(monday, order.batches.length ? -15 : index - 12)), "09:00"), createdBy: "Sample data"
     });
   }
@@ -274,31 +319,42 @@ export function addSampleData(state: Snapshot, today = new Date()): { state?: Sn
 export type SampleRemoval = { state: Snapshot; removed: Record<"units" | "people" | "machines" | "products" | "lines" | "entries", number>; kept: string[] };
 
 // Remove sample units and everything planned inside them. Sample master data still used by real records is kept.
-export function removeSampleData(state: Snapshot): SampleRemoval {
+// With `only`, just those sample units go; the other sample units and their records stay.
+export function removeSampleData(state: Snapshot, only?: string[]): SampleRemoval {
   const next: Snapshot = structuredClone(state);
   const d = next.directory;
   const before = { units: d.units.length, people: d.people.length, machines: next.machines.length, products: next.products.length, lines: next.data.lines.length, entries: next.data.entries.length };
-  d.units = d.units.filter((unit) => !isSample(unit.id));
+  const goes = (unitId: string) => isSample(unitId) && (!only || only.includes(unitId));
+  // A sample record goes with the units being removed; without `only`, every sample record goes.
+  const sampleGoes = (id: string, unitIds: string[]) => isSample(id) && (!only || unitIds.every(goes));
+  d.units = d.units.filter((unit) => !goes(unit.id));
   const unitIds = new Set(d.units.map((unit) => unit.id));
-  d.calendars = d.calendars.filter((calendar) => !isSample(calendar.id) && unitIds.has(calendar.unitId));
-  d.people = d.people.filter((person) => !isSample(person.id));
-  next.machines = next.machines.filter((machine) => !isSample(machine.id) && unitIds.has(machine.unitId));
+  d.calendars = d.calendars.filter((calendar) => !(isSample(calendar.id) && !only) && unitIds.has(calendar.unitId));
+  d.people = d.people.filter((person) => !sampleGoes(person.id, person.unitIds));
+  next.machines = next.machines.filter((machine) => !sampleGoes(machine.id, [machine.unitId]) && unitIds.has(machine.unitId));
   const calendarIds = new Set(d.calendars.map((calendar) => calendar.id));
   const data = next.data;
-  data.lines = data.lines.filter((line) => !isSample(line.id) && calendarIds.has(line.calendarId));
+  data.lines = data.lines.filter((line) => !(isSample(line.id) && !only) && calendarIds.has(line.calendarId));
   let lineIds = new Set(data.lines.map((line) => line.id));
-  data.transfers = data.transfers.filter((item) => !isSample(item.id) && lineIds.has(item.sourceLineId) && calendarIds.has(item.calendarId) && calendarIds.has(item.sourceCalendarId));
+  data.transfers = data.transfers.filter((item) => !(isSample(item.id) && !only) && lineIds.has(item.sourceLineId) && calendarIds.has(item.calendarId) && calendarIds.has(item.sourceCalendarId));
   const transferIds = new Set(data.transfers.map((item) => item.id));
   data.lines = data.lines.map((line) => line.incomingWipId && !transferIds.has(line.incomingWipId) ? (({ incomingWipId: _, ...rest }) => rest)(line) : line);
   lineIds = new Set(data.lines.map((line) => line.id));
   data.transfers = data.transfers.map((item) => item.plannedLineId && !lineIds.has(item.plannedLineId) ? (({ plannedLineId: _, ...rest }) => rest)(item) : item);
   const machineIds = new Set(next.machines.map((machine) => machine.id));
-  data.entries = data.entries.filter((entry) => !isSample(entry.id) && lineIds.has(entry.planLineId) && machineIds.has(entry.machineId));
+  data.entries = data.entries.filter((entry) => !(isSample(entry.id) && !only) && lineIds.has(entry.planLineId) && machineIds.has(entry.machineId));
   data.actuals = data.actuals.filter((actual) => lineIds.has(actual.planLineId));
-  data.orders = data.orders.filter((order) => !isSample(order.id));
+  // Removing one unit: its sample orders go once no remaining activity makes their product.
+  const productsPlanned = new Set(data.lines.map((line) => line.productId));
+  data.orders = data.orders.filter((order) => !(isSample(order.id) && (!only || !productsPlanned.has(order.productId))));
   const orderIds = new Set(data.orders.map((order) => order.id));
   data.lines = data.lines.map((line) => line.productionOrderId && !orderIds.has(line.productionOrderId) ? (({ productionOrderId: _, ...rest }) => rest)(line) : line);
   data.entries = data.entries.map((entry) => entry.productionOrderId && !orderIds.has(entry.productionOrderId) ? (({ productionOrderId: _, ...rest }) => rest)(entry) : entry);
+  data.jobOrders = data.jobOrders.filter((job) => orderIds.has(job.orderId) && !(isSample(job.id) && !only));
+  const jobIds = new Set(data.jobOrders.map((job) => job.id));
+  data.lines = data.lines.map((line) => line.jobOrderId && !jobIds.has(line.jobOrderId) ? (({ jobOrderId: _, ...rest }) => rest)(line) : line);
+  const customersInUse = new Set(data.orders.map((order) => order.customerId));
+  data.customers = data.customers.filter((customer) => !isSample(customer.id) || customersInUse.has(customer.id));
 
   // Keep sample master data that real records now depend on, so live work is never broken.
   const kept: string[] = [];

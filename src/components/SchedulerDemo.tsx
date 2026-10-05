@@ -47,12 +47,13 @@ import type {
   ScheduleEntryStatus,
   WorkCentre
 } from "@/lib/domain/types";
-import { priorities, scheduleStatuses } from "@/lib/domain/types";
+import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
 import { getScheduleReport } from "@/lib/services/reports";
 import { syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 import { createBatchLines, moveActivity, type NewBatch } from "@/lib/services/planChanges";
+import { buildJobOrders, linesForJob, planJobOrders, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
 type Tab = "planner" | "orders" | "master" | "reports";
@@ -148,6 +149,9 @@ function PlannerBoard({
   planLines,
   products,
   orders,
+  jobOrders,
+  allLines,
+  onPlanJob,
   flow,
   onAddLine,
   onMoveLine,
@@ -167,6 +171,11 @@ function PlannerBoard({
   planLines: PlanLine[];
   products: Product[];
   orders: PurchaseOrder[];
+  jobOrders: JobOrder[];
+  // Every activity, including processes out of view, so a planned job order never shows as waiting.
+  allLines: PlanLine[];
+  // Present when this person may plan job orders.
+  onPlanJob?: (id: string, startDate: string) => string[];
   flow: FlowWarning[];
   onAddLine: (line: PlanLine) => void;
   onMoveLine: (id: string, date: string) => string;
@@ -206,14 +215,40 @@ function PlannerBoard({
           <span className="result-count" aria-live="polite">{visibleLines.length} of {planLines.length} lines</span>
         </div>
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
+        <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} onPlan={onPlanJob} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onCreate={(activity) => {
+        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onCreate={(activity) => {
           onAddLine({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" });
           setQuery(""); setPriorityFilter(""); setStatusFilter("");
         }} />
       </div>
     </section>
   );
+}
+
+// Job orders released from POs that planning has not scheduled yet. Shown for the products this
+// unit's processes can make; planning one creates an activity per process of its route.
+function JobOrderQueue({ jobOrders, orders, products, lines, calendars, onPlan }: { jobOrders: JobOrder[]; orders: PurchaseOrder[]; products: Product[]; lines: PlanLine[]; calendars: UnitCalendar[]; onPlan?: (id: string, startDate: string) => string[] }) {
+  const [starts, setStarts] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const today = localDateKey(new Date());
+  // Every activity of the job counts, even in processes filtered out of view.
+  const waiting = jobOrders.filter((job) => !lines.some((line) => line.jobOrderId === job.id) && calendars.length > 0);
+  if (!waiting.length && !message) return null;
+  return <details className="job-queue" open={waiting.length > 0 && waiting.length <= 6}>
+    <summary>Job orders waiting to be planned <span className="badge info">{waiting.length}</span></summary>
+    {waiting.length ? <ul>{waiting.map((job) => {
+      const order = orders.find((item) => item.id === job.orderId);
+      const product = products.find((item) => item.id === order?.productId);
+      const start = starts[job.id] ?? today;
+      return <li key={job.id}>
+        <span><strong>{job.number}</strong> · {product?.name ?? "Unknown product"} · {job.quantity.toLocaleString()} {job.uom}{job.batchSizeKg ? ` (${job.batchSizeKg.toLocaleString()} kg)` : ""}<small>{order ? `${order.poNumber}${order.customerName ? ` · ${order.customerName}` : ""}` : ""}{job.batchNumber ? ` · Batch no. ${job.batchNumber}` : ""}</small></span>
+        {onPlan ? <span className="job-plan"><input type="date" aria-label={`Start date for ${job.number}`} value={start} onChange={(event) => setStarts({ ...starts, [job.id]: event.target.value })} />
+          <button type="button" className="calendar-button" onClick={() => { const errors = onPlan(job.id, start); setMessage(errors.length ? { text: errors.join(" "), error: true } : { text: `${job.number} planned from ${start.split("-").reverse().join("-")}: one activity per process. Drag them to adjust.`, error: false }); }}>Plan route</button></span> : null}
+      </li>;
+    })}</ul> : null}
+    {message ? <p role={message.error ? "alert" : "status"}>{message.text}</p> : null}
+  </details>;
 }
 
 function ScheduleBoard({
@@ -655,7 +690,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   const [products, setProducts] = useState<Product[]>(initial.snapshot.products);
   const [workCentres, setWorkCentres] = useState<WorkCentre[]>(initial.snapshot.workCentres);
   const [machines, setMachines] = useState<Machine[]>(initial.snapshot.machines);
-  const [data, setData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[] }>(initial.snapshot.data);
+  const [data, setData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] }>(initial.snapshot.data);
   const { uoms, activities } = useSettings();
   const snapshot = { schemaVersion: 1, directory, products, workCentres, machines, measurements: { uoms, activities }, data } as WorkspaceSnapshot;
   const persistenceStatus = useWorkspacePersistence(initial, snapshot, writeToken);
@@ -763,8 +798,12 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     const current = allowedLines.find((item) => item.id === line.id);
     if (!canPlan || !current || current.completedAt) return "This activity cannot be changed.";
     if (!Number.isFinite(line.quantity) || line.quantity <= 0) return "Quantity must be greater than zero.";
-    if (line.productionOrderId && !data.orders.some((order) => order.id === line.productionOrderId)) return "Choose an existing PO.";
-    const edited = data.lines.map((item) => item.id === line.id ? { ...(({ productionOrderId: _, ...rest }) => rest)(item), ...(line.productionOrderId ? { productionOrderId: line.productionOrderId } : {}), quantity: line.quantity, priority: line.priority, notes: line.notes, batchSizeKg: batchKilograms(line.quantity, item.uom ?? products.find((product) => product.id === item.productId)?.uom ?? "", item.unitWeightMg) } : item);
+    // A job order decides the PO; without one the PO can be chosen directly.
+    const job = line.jobOrderId ? data.jobOrders.find((item) => item.id === line.jobOrderId) : undefined;
+    if (line.jobOrderId && (!job || data.orders.find((order) => order.id === job.orderId)?.productId !== current.productId)) return "Choose a job order for this product.";
+    const orderId = job ? job.orderId : line.productionOrderId;
+    if (orderId && !data.orders.some((order) => order.id === orderId)) return "Choose an existing PO.";
+    const edited = data.lines.map((item) => item.id === line.id ? { ...(({ productionOrderId: _, jobOrderId: _j, ...rest }) => rest)(item), ...(orderId ? { productionOrderId: orderId } : {}), ...(job ? { jobOrderId: job.id } : {}), quantity: line.quantity, priority: line.priority, notes: line.notes, batchSizeKg: batchKilograms(line.quantity, item.uom ?? products.find((product) => product.id === item.productId)?.uom ?? "", item.unitWeightMg) } : item);
     const moved = moveActivity(edited, data.entries, line.id, line.plannedDate, member.name);
     if ("error" in moved) return moved.error;
     setData((state) => ({ ...state, lines: moved.lines, entries: moved.entries }));
@@ -792,22 +831,65 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     return [];
   }
   // Several line items of one PO are added together, each checked against the ones before it.
-  function addOrders(items: PurchaseOrder[]) {
+  // A customer ID not seen before is added to the customer list in the same save.
+  function addOrders(items: PurchaseOrder[], customer: Customer) {
     if (!canEditOrders) return ["Planner or administrator access is required."];
+    const known = data.customers.find((item) => item.id === customer.id);
+    const customerErrors = known ? [] : validateCustomer(customer, data.customers);
+    if (customerErrors.length) return customerErrors;
     const accepted: PurchaseOrder[] = [];
     const errors = items.flatMap((order, index) => {
-      const problems = validateOrder(order, [...data.orders, ...accepted], products);
-      if (!problems.length) accepted.push({ ...order, poNumber: order.poNumber.trim(), customerName: order.customerName?.trim() });
+      const linked = { ...order, poNumber: order.poNumber.trim(), customerId: customer.id, customerName: (known ?? customer).name.trim() };
+      const problems = validateOrder(linked, [...data.orders, ...accepted], products);
+      if (!problems.length) accepted.push(linked);
       return items.length > 1 ? problems.map((problem) => `Item ${index + 1}: ${problem}`) : problems;
     });
     if (errors.length) return errors;
-    setData((current) => ({ ...current, orders: [...current.orders, ...accepted] }));
+    setData((current) => ({ ...current, customers: known ? current.customers : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted] }));
     return [];
+  }
+  // Job orders: one per batch of a PO item, split by the allowable batch quantity.
+  function createJobOrders(orderId: string, allowableQuantity: number, batchSizeKg?: number) {
+    if (!caps.createPlan && !caps.manage) return ["Planning access is required to create job orders."];
+    const order = data.orders.find((item) => item.id === orderId);
+    if (!order) return ["This order no longer exists."];
+    const plan = planJobOrders(order, data.jobOrders, allowableQuantity, batchSizeKg);
+    if ("error" in plan) return [plan.error];
+    const jobs = buildJobOrders(order, data.jobOrders, plan.jobs, { today: new Date(), userName: member.name, newId: () => newId("job") });
+    setData((current) => ({ ...current, jobOrders: [...current.jobOrders, ...jobs] }));
+    return [];
+  }
+  function deleteJobOrder(id: string) {
+    if (!caps.createPlan && !caps.manage) return ["Planning access is required to remove job orders."];
+    if (linesForJob(id, data.lines).length) return ["This job order is planned. Remove or unlink its activities on the Planner Board first."];
+    setData((current) => ({ ...current, jobOrders: current.jobOrders.filter((job) => job.id !== id) }));
+    return [];
+  }
+  // Planning picks up a job order: one activity per process of the product's route, linked to it.
+  function planJobOrder(id: string, startDate: string) {
+    const job = data.jobOrders.find((item) => item.id === id);
+    if (!job) return ["This job order no longer exists."];
+    if (linesForJob(id, data.lines).length) return [`${job.number} is already planned.`];
+    return addBatch(job.orderId, { label: job.number, quantity: job.quantity, startDate, jobOrderId: job.id });
+  }
+  // Production keys in the batch number; it then shows on every process activity of the job.
+  function saveBatchNumber(id: string, value: string) {
+    if (!caps.produce && !caps.editPlan) return "Production or planning access is required to enter batch numbers.";
+    const job = data.jobOrders.find((item) => item.id === id);
+    if (!job) return "This job order no longer exists.";
+    const problem = validateBatchNumber(value, job, data.jobOrders);
+    if (problem) return problem;
+    const batchNumber = value.trim();
+    setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id !== id ? item
+      : batchNumber ? { ...item, batchNumber, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
+      : (({ batchNumber: _b, batchNumberBy: _by, batchNumberAt: _at, ...rest }) => rest)(item)) }));
+    return batchNumber ? `Batch number ${batchNumber} saved for ${job.number}.` : `Batch number cleared for ${job.number}.`;
   }
   function deleteOrder(id: string) {
     if (!canEditOrders) return ["Planner or administrator access is required."];
     if (data.lines.some((line) => line.productionOrderId === id)) return ["Activities are linked to this PO. Unlink them on the Planner Board first."];
-    setData((current) => ({ ...current, orders: current.orders.filter((item) => item.id !== id) }));
+    // Unplanned job orders of the PO item go with it.
+    setData((current) => ({ ...current, orders: current.orders.filter((item) => item.id !== id), jobOrders: current.jobOrders.filter((job) => job.orderId !== id) }));
     return [];
   }
   // Set the machine for a batch step. Unbooked days get a draft booking for the working day.
@@ -888,12 +970,12 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {activeTab !== "planner" ? <div className="workspace-heading"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1></div> : null}
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} flow={flow}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} onPlanJob={canCreate ? planJobOrder : undefined} flow={flow}
         onMoveLine={moveLine}
-        onAddLine={(line) => { if (canCreate && visibleCalendars.some((item) => item.id === line.calendarId) && products.some((item) => item.id === line.productId && item.active === "Active") && Number.isFinite(line.quantity) && line.quantity > 0 && (!line.productionOrderId || data.orders.some((order) => order.id === line.productionOrderId))) setData((current) => ({ ...current, lines: [...current.lines, line] })); }} /> : null}
+        onAddLine={(line) => { if (canCreate && visibleCalendars.some((item) => item.id === line.calendarId) && products.some((item) => item.id === line.productId && item.active === "Active") && Number.isFinite(line.quantity) && line.quantity > 0 && (!line.productionOrderId || data.orders.some((order) => order.id === line.productionOrderId)) && (!line.jobOrderId || data.jobOrders.some((job) => job.id === line.jobOrderId && job.orderId === line.productionOrderId))) setData((current) => ({ ...current, lines: [...current.lines, line] })); }} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} machines={activityMachines} entries={entries.filter((item) => item.planLineId === selectedLine.id)} canPlan={canPlan && !selectedLine.completedAt} canProduce={canProduce && !selectedLine.completedAt} onClose={() => setSelectedActivity(null)} onProduction={saveProduction}
         orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} statuses={statuses} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
-        onPlan={savePlanning}>
+        onPlan={savePlanning} jobOrders={data.jobOrders} canBatchNumber={caps.produce || caps.editPlan} onBatchNumber={saveBatchNumber}>
         <EndProduction line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} onComplete={completeProduction} />
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
@@ -915,7 +997,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "orders" ? <OrdersPanel orders={data.orders} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} canAddBatch={caps.createPlan} onAddBatch={addBatch} /> : null}
+      {activeTab === "orders" ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} jobActions={{ canCreate: caps.createPlan || caps.manage, canPlan: caps.createPlan, onCreate: createJobOrders, onDelete: deleteJobOrder, onPlan: planJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} canAddBatch={caps.createPlan} onAddBatch={addBatch} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />

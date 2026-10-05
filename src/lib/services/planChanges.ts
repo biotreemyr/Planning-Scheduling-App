@@ -26,7 +26,8 @@ export function moveActivity<L extends PlanLine, E extends ScheduleEntry>(lines:
   };
 }
 
-export type NewBatch = { label: string; quantity: number; startDate: string };
+// With a job order, the activities carry its ID and are labelled with its JO number.
+export type NewBatch = { label: string; quantity: number; startDate: string; jobOrderId?: string };
 type BatchContext = {
   order: PurchaseOrder; format: ProductFormat; lines: PlanLine[]; directory: CalendarDirectory; uom: string;
   newId: () => string;
@@ -69,6 +70,7 @@ export function createBatchLines(batch: NewBatch, context: BatchContext): { line
       id: context.newId(), planId: "production-plan", calendarId: calendar.id, productId: order.productId, productionOrderId: order.id,
       quantity: batch.quantity, uom: context.uom, plannedDate: key(day), priority: sample?.priority ?? "Normal", status: "Unscheduled" as const,
       activityType: directory.processes.find((process) => process.id === calendar.processId)?.name ?? calendar.name, orderReference: label,
+      ...(batch.jobOrderId ? { jobOrderId: batch.jobOrderId } : {}),
       ...(sample?.unitWeightMg ? { unitWeightMg: sample.unitWeightMg } : {}), batchSizeKg: batchKilograms(batch.quantity, context.uom, sample?.unitWeightMg)
     };
   }) };

@@ -13,10 +13,11 @@ export function MeasurementProvider({ children, initial = measurementDefaults }:
   const [activities, setActivities] = useState(initial.activities);
   return <Context.Provider value={{ uoms, setUoms, activities, setActivities }}>{children}</Context.Provider>;
 }
-export function MeasurementFields() {
+// Defaults come from a chosen job order; remount (key) the fields to apply new ones.
+export function MeasurementFields({ defaultQuantity, defaultUom }: { defaultQuantity?: number; defaultUom?: string } = {}) {
   const { uoms, activities } = useSettings();
-  const [quantity, setQuantity] = useState("100");
-  const [selected, setSelected] = useState("");
+  const [quantity, setQuantity] = useState(defaultQuantity ? String(defaultQuantity) : "100");
+  const [selected, setSelected] = useState(defaultUom ?? "");
   const uom = uoms.find((item) => item.name === selected && item.active)?.name ?? uoms.find((item) => item.active)?.name ?? "";
   const [weight, setWeight] = useState("");
   const isMass = ["kg", "g", "mg"].includes(uom);

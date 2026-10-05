@@ -8,6 +8,7 @@ import { localDateKey } from "@/lib/services/calendarPrint";
 import { canMovePlan, monthDates } from "@/lib/services/planningMonth";
 import { orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
 import { OrderBadge, PriorityMark } from "./OrderBadge";
+import type { JobOrder } from "@/lib/services/jobOrders";
 
 type Target = { date: string; calendarId: string };
 type Drag = { id: string; calendarId: string; label: string; pointerId: number; startX: number; startY: number; x: number; y: number; started: boolean; touch: boolean };
@@ -18,8 +19,8 @@ const LONG_PRESS_SLOP = 8;
 const EDGE = 56;
 
 // Month grid: dates down the side, one column per process, like the planning spreadsheet.
-export function PlanningList({ date, lines, products, orders = [], warnings, calendars, canPlan, canCreate = canPlan, onMove, onSelect, onCreate }: {
-  date: string; lines: PlanLine[]; products: Product[]; orders?: PurchaseOrder[]; warnings?: Map<string, string[]>; calendars: UnitCalendar[]; canPlan: boolean; canCreate?: boolean;
+export function PlanningList({ date, lines, products, orders = [], jobOrders = [], warnings, calendars, canPlan, canCreate = canPlan, onMove, onSelect, onCreate }: {
+  date: string; lines: PlanLine[]; products: Product[]; orders?: PurchaseOrder[]; jobOrders?: JobOrder[]; warnings?: Map<string, string[]>; calendars: UnitCalendar[]; canPlan: boolean; canCreate?: boolean;
   onMove: (id: string, date: string) => string; onSelect: (id: string) => void; onCreate: (date: string, calendarId: string) => void;
 }) {
   const dates = monthDates(date);
@@ -181,7 +182,8 @@ export function PlanningList({ date, lines, products, orders = [], warnings, cal
                     const movable = canMovePlan(line, canPlan);
                     const order = orders.find((item) => item.id === line.productionOrderId);
                     const number = order ? numbers.get(order.id) : undefined;
-                    const detail = [order?.poNumber, line.orderReference, `${line.quantity.toLocaleString()} ${line.uom ?? product?.uom ?? ""}`.trim()].filter(Boolean).join(" · ");
+                    const job = jobOrders.find((item) => item.id === line.jobOrderId);
+                    const detail = [order?.poNumber, line.orderReference, job?.batchNumber ? `Batch no. ${job.batchNumber}` : "", `${line.quantity.toLocaleString()} ${line.uom ?? product?.uom ?? ""}`.trim()].filter(Boolean).join(" · ");
                     return <div key={line.id} data-movable={movable || undefined} className={`plan-grid-item${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
                       style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
                       onPointerDown={(event) => pointerDown(event, line, name)} onContextMenu={(event) => { if (drag.current?.touch) event.preventDefault(); }}>

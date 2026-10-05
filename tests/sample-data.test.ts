@@ -16,7 +16,10 @@ describe("sample data", () => {
     expect(dates[0] < "2026-10-07" && dates.at(-1)! > "2026-10-07").toBe(true);
     expect(state.data.lines.some((line) => line.completedAt)).toBe(true);
     expect(state.data.entries.some((entry) => entry.status === "In Progress")).toBe(true);
-    expect(state.data.transfers).toHaveLength(2);
+    // The fermentation plant (and its work-in-progress handover) is switched off for now.
+    expect(state.data.transfers).toHaveLength(0);
+    expect(state.directory.units.map((unit) => unit.name)).toEqual(["Manufacturing (Sample)"]);
+    expect(state.directory.processes.some((process) => /ferment|drying/i.test(process.name))).toBe(false);
     expect(findMachineConflicts(state.data.entries, state.machines as never, state.products)).toHaveLength(1);
   });
   it("gives the administrator and sample staff access to the sample calendars", () => {
@@ -24,6 +27,29 @@ describe("sample data", () => {
     const admin = state.directory.people.find((person) => person.role === "admin")!;
     expect(accessibleCalendars(admin, state.directory)).toHaveLength(state.directory.calendars.length);
     for (const person of state.directory.people.filter((item) => item.role !== "admin")) expect(accessibleCalendars(person, state.directory).length).toBeGreaterThan(0);
+  });
+  it("links sample POs to customer IDs and each started batch to a job order with its batch number", () => {
+    const state = loaded();
+    expect(state.data.customers.map((customer) => customer.code)).toContain("SMP-C001");
+    expect(state.data.orders.every((order) => state.data.customers.some((customer) => customer.id === order.customerId))).toBe(true);
+    const linked = state.data.lines.filter((line) => line.productionOrderId);
+    expect(linked.every((line) => state.data.jobOrders.some((job) => job.id === line.jobOrderId))).toBe(true);
+    expect(state.data.jobOrders.some((job) => job.batchNumber)).toBe(true);
+    expect(state.products.find((product) => product.id === "sample-product-vitc")).toMatchObject({ batchQuantity: 280000, batchSizeKg: 406 });
+  });
+  it("removes just the fermentation plant from a workspace that still has it", () => {
+    const withPlant = addSampleData(newWorkspace(), today, { fermentation: true }).state!;
+    expect(withPlant.data.transfers).toHaveLength(2);
+    const { state: after } = removeSampleData(withPlant, ["sample-unit-ferm"]);
+    const manufacturing = loaded();
+    expect(after.directory.units.map((unit) => unit.id)).toEqual(["sample-unit-mfg"]);
+    expect(after.directory.processes.map((item) => item.name).sort()).toEqual(manufacturing.directory.processes.map((item) => item.name).sort());
+    expect(after.machines.map((item) => item.code).sort()).toEqual(manufacturing.machines.map((item) => item.code).sort());
+    expect(after.products.map((item) => item.sku).sort()).toEqual(manufacturing.products.map((item) => item.sku).sort());
+    expect(after.directory.people.map((item) => item.name).sort()).toEqual(manufacturing.directory.people.map((item) => item.name).sort());
+    expect(after.data.lines.length).toBe(manufacturing.data.lines.length);
+    expect(after.data.orders.map((item) => item.poNumber).sort()).toEqual(manufacturing.data.orders.map((item) => item.poNumber).sort());
+    expect(after.data.transfers).toEqual([]);
   });
   it("refuses to load twice", () => {
     expect(addSampleData(loaded(), today).errors).toHaveLength(1);

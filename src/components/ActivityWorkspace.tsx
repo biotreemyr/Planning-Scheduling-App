@@ -6,9 +6,12 @@ import { priorities, scheduleStatuses } from "@/lib/domain/types";
 import { orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
 import { ROUTES, routeLabel, stepOf, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
 import { OrderBadge } from "./OrderBadge";
+import { jobLabel, type JobOrder } from "@/lib/services/jobOrders";
 
-export function ActivityWorkspace({ line, product, machines, entries, canPlan, canProduce, onClose, onPlan, onProduction, children, statuses = scheduleStatuses, format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
+export function ActivityWorkspace({ line, product, machines, entries, canPlan, canProduce, onClose, onPlan, onProduction, children, jobOrders = [], canBatchNumber = false, onBatchNumber, statuses = scheduleStatuses, format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
   children?: ReactNode;
+  // Production keys the batch number in on the job order; planning may correct it.
+  jobOrders?: JobOrder[]; canBatchNumber?: boolean; onBatchNumber?: (jobId: string, value: string) => string;
   // Booking statuses this person may set; Confirmed and Cancelled need Core approve and cancel.
   statuses?: readonly ScheduleEntry["status"][];
   // The batch's product format and any process-flow warnings for its activities.
@@ -24,17 +27,31 @@ export function ActivityWorkspace({ line, product, machines, entries, canPlan, c
   const [planNotice, setPlanNotice] = useState("");
   const order = orders.find((item) => item.id === line.productionOrderId);
   const numbers = orderNumbers(orders);
+  const job = jobOrders.find((item) => item.id === line.jobOrderId);
+  const [jobId, setJobId] = useState(line.jobOrderId ?? "");
+  const pickedJob = jobOrders.find((item) => item.id === jobId);
+  const [batchNotice, setBatchNotice] = useState("");
+  // Job orders of POs for this product.
+  const jobChoices = jobOrders.filter((item) => item.id === line.jobOrderId || orders.find((entry) => entry.id === item.orderId)?.productId === line.productId);
   useEffect(() => { dialog.current?.showModal(); }, []);
   return <dialog ref={dialog} className="activity-dialog unified-activity" aria-labelledby="activity-workspace-title" onClose={onClose}>
     <header className="panel-title"><div><p className="eyebrow">Activity workspace</p><h2 id="activity-workspace-title">{product?.name}</h2>
-      <p className="activity-order-ref">{order?.customerName ? <span>Customer: <strong>{order.customerName}</strong></span> : null}<span>{order ? <OrderBadge number={numbers.get(order.id)} poNumber={order.poNumber} /> : null}PO number: <strong>{order ? poLabel(order, orders) : "Not linked"}</strong></span>{line.orderReference ? <span>{line.orderReference}</span> : null}{order ? <span>Order quantity: {order.quantity.toLocaleString()} {order.uom}</span> : null}</p></div><button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></header>
+      <p className="activity-order-ref">{order?.customerName ? <span>Customer: <strong>{order.customerName}</strong></span> : null}<span>{order ? <OrderBadge number={numbers.get(order.id)} poNumber={order.poNumber} /> : null}PO number: <strong>{order ? poLabel(order, orders) : "Not linked"}</strong></span>{job ? <span>Job order: <strong>{job.number}</strong></span> : line.orderReference ? <span>{line.orderReference}</span> : null}{job ? <span>Batch no.: <strong>{job.batchNumber ?? "Not entered"}</strong></span> : null}{order ? <span>Order quantity: {order.quantity.toLocaleString()} {order.uom}</span> : null}</p></div><button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></header>
     {route.length ? <ProductionRoute line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} editable={canAssign} onAssign={onAssignMachine} onOpenLine={onOpenLine} /> : null}
-    <section><h3>Part 1 - Planning</h3><form className="form-panel" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setPlanNotice(onPlan({ ...line, productionOrderId: String(data.get("order")) || undefined, plannedDate: String(data.get("date")), quantity: Number(data.get("quantity")), priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes")) })); }}>
-      <fieldset disabled={!canPlan}><label>PO number<select name="order" defaultValue={line.productionOrderId ?? ""}><option value="">Not linked</option>{orders.filter((item) => item.productId === line.productId || item.id === line.productionOrderId).map((item) => <option key={item.id} value={item.id}>{numbers.get(item.id)} · {poLabel(item, orders)}{item.customerName ? ` · ${item.customerName}` : ""} · {item.quantity.toLocaleString()} {item.uom}</option>)}</select></label><label>Planned date<input name="date" type="date" defaultValue={line.plannedDate} required /></label><label>Quantity ({line.uom ?? product?.uom})<input name="quantity" type="number" min="0.000001" step="any" defaultValue={line.quantity} required /></label><label>Priority<select name="priority" defaultValue={line.priority}>{priorities.map((value) => <option key={value}>{value}</option>)}</select></label><label>Remarks<textarea name="notes" defaultValue={line.notes} /></label></fieldset>
+    <section><h3>Part 1 - Planning</h3><form className="form-panel" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setPlanNotice(onPlan({ ...line, productionOrderId: pickedJob ? pickedJob.orderId : String(data.get("order")) || undefined, jobOrderId: pickedJob?.id, plannedDate: String(data.get("date")), quantity: Number(data.get("quantity")), priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes")) })); }}>
+      <fieldset disabled={!canPlan}>{jobChoices.length ? <label>Job order<select value={jobId} onChange={(event) => setJobId(event.target.value)}><option value="">Not linked to a job order</option>{jobChoices.map((item) => <option key={item.id} value={item.id}>{jobLabel(item)} · {item.quantity.toLocaleString()} {item.uom} · {orders.find((entry) => entry.id === item.orderId)?.poNumber ?? ""}</option>)}</select></label> : null}<label>PO number<select name="order" key={`po-${jobId}`} defaultValue={pickedJob ? pickedJob.orderId : line.productionOrderId ?? ""} disabled={!!pickedJob} title={pickedJob ? "Set by the job order" : undefined}><option value="">Not linked</option>{orders.filter((item) => item.productId === line.productId || item.id === line.productionOrderId).map((item) => <option key={item.id} value={item.id}>{numbers.get(item.id)} · {poLabel(item, orders)}{item.customerName ? ` · ${item.customerName}` : ""} · {item.quantity.toLocaleString()} {item.uom}</option>)}</select></label><label>Planned date<input name="date" type="date" defaultValue={line.plannedDate} required /></label><label>Quantity ({line.uom ?? product?.uom})<input name="quantity" type="number" min="0.000001" step="any" defaultValue={line.quantity} required /></label><label>Priority<select name="priority" defaultValue={line.priority}>{priorities.map((value) => <option key={value}>{value}</option>)}</select></label><label>Remarks<textarea name="notes" defaultValue={line.notes} /></label></fieldset>
       <p>{line.activityType}{line.batchSizeKg !== undefined ? ` · ${line.batchSizeKg} kg equivalent` : ""}</p>
       {planNotice ? <p role="status" className={planNotice.includes("Warning:") ? "flow-warning-text" : undefined}>{planNotice}</p> : null}
       {canPlan ? <button type="submit" className="primary-button">Save planning</button> : null}
     </form></section>
+    {job ? <section className="batch-number"><h3>Batch number</h3>
+      <form className="admin-inline" onSubmit={(event) => { event.preventDefault(); const value = String(new FormData(event.currentTarget).get("batchNumber") ?? ""); setBatchNotice(onBatchNumber?.(job.id, value) ?? ""); }}>
+        <label>Batch number for {job.number}<input name="batchNumber" maxLength={60} defaultValue={job.batchNumber ?? ""} readOnly={!canBatchNumber} placeholder="Keyed in by production" key={job.batchNumber ?? ""} /></label>
+        {canBatchNumber ? <button type="submit" className="calendar-button">Save batch number</button> : null}
+      </form>
+      <p className="route-muted">One batch number per job order. It shows on every process of {job.number}{job.batchNumberBy ? ` · last entered by ${job.batchNumberBy}` : ""}.</p>
+      {batchNotice ? <p role="status">{batchNotice}</p> : null}
+    </section> : null}
     <section><h3>Part 2 - Production</h3>
       {entries.length === 0 ? <p>No production details yet.</p> : null}
       {/* Keyed on the booking's times too, so a date move refreshes the form instead of leaving stale times that would move it back. */}

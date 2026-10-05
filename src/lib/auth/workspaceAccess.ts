@@ -39,6 +39,19 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   if (orders.added.length || orders.removed.length || orders.changed.length) need(can.createPlan || can.manage, "add or edit orders");
   count("orders added", orders.added.length); count("orders changed", orders.changed.length); count("orders removed", orders.removed.length);
 
+  const customers = diff(before.data.customers, after.data.customers);
+  if (customers.added.length || customers.removed.length || customers.changed.length) need(can.createPlan || can.manage, "add or edit customers");
+  count("customers added", customers.added.length); count("customers changed", customers.changed.length);
+
+  const jobs = diff(before.data.jobOrders, after.data.jobOrders);
+  if (jobs.added.length || jobs.removed.length) need(can.createPlan || can.manage, "create or remove job orders");
+  for (const { before: old, after: job } of jobs.changed) {
+    // Production keys in the batch number; anything else on a job order is planning.
+    if (only(changedKeys(old, job), ["batchNumber", "batchNumberBy", "batchNumberAt"])) need(can.produce || can.editPlan, "enter batch numbers");
+    else need(can.createPlan || can.manage, "edit job orders");
+  }
+  count("job orders added", jobs.added.length); count("job orders changed", jobs.changed.length); count("job orders removed", jobs.removed.length);
+
   const lines = diff(before.data.lines, after.data.lines);
   if (lines.added.length) need(can.createPlan, "add plan activities");
   if (lines.removed.length) need(can.editPlan, "remove plan activities");

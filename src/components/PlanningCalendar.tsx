@@ -13,6 +13,7 @@ import { StatusBadge } from "./StatusBadge";
 import { MeasurementFields } from "./MeasurementSettings";
 import { readMeasurement } from "@/lib/services/measurements";
 import { ORDER_COLORS, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
+import { jobLabel, type JobOrder } from "@/lib/services/jobOrders";
 
 type View = "month" | "week" | "day";
 const NO_ORDER = "#ffffff";
@@ -20,12 +21,13 @@ const NO_ORDER = "#ffffff";
 const tint = (hex: string, amount = 0.12) => { const [r, g, b] = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16)); return `rgb(${[r, g, b].map((value) => Math.round(255 - (255 - value) * amount)).join(", ")})`; };
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 
-type NewActivity = Pick<PlanLine, "calendarId" | "productId" | "plannedDate" | "quantity" | "priority" | "notes" | "orderReference" | "uom" | "activityType" | "unitWeightMg" | "batchSizeKg" | "productionOrderId">;
+type NewActivity = Pick<PlanLine, "calendarId" | "productId" | "plannedDate" | "quantity" | "priority" | "notes" | "orderReference" | "uom" | "activityType" | "unitWeightMg" | "batchSizeKg" | "productionOrderId" | "jobOrderId">;
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
-export default function PlanningCalendar({ orders = [], warnings, processNames, planningView = "calendar", planLines, products, initialDate, onCreate, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
+export default function PlanningCalendar({ orders = [], jobOrders = [], warnings, processNames, planningView = "calendar", planLines, products, initialDate, onCreate, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
   processNames: Record<string, string>;
   orders?: PurchaseOrder[];
+  jobOrders?: JobOrder[];
   // Process-flow warnings by activity id, marked with ⚠ on the calendar and list.
   warnings?: Map<string, string[]>;
   planningView?: "calendar" | "list";
@@ -45,6 +47,10 @@ export default function PlanningCalendar({ orders = [], warnings, processNames, 
   const dialog = useRef<HTMLDialogElement>(null);
   const [draftDate, setDraftDate] = useState(initialDate);
   const [draftCalendar, setDraftCalendar] = useState("");
+  // Choosing a job order fills in its product, PO, quantity and batch reference.
+  const [draftJob, setDraftJob] = useState("");
+  const job = jobOrders.find((item) => item.id === draftJob);
+  const jobOrder = orders.find((item) => item.id === job?.orderId);
   const [formVersion, setFormVersion] = useState(0);
   const [notice, setNotice] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -53,6 +59,7 @@ export default function PlanningCalendar({ orders = [], warnings, processNames, 
   function openCreate(value: string, calendarId = "") {
     if (!callbacks.current.canCreate) return;
     setDraftCalendar(calendarId);
+    setDraftJob("");
     setFormVersion((version) => version + 1);
     setHover(null);
     setDraftDate(value);
@@ -186,7 +193,7 @@ export default function PlanningCalendar({ orders = [], warnings, processNames, 
     {!ready && !failed ? <p role="status">Loading calendar...</p> : null}
     {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
     {!canPlan && planLines.some((line) => !line.completedAt) ? <p className="plan-grid-hint">Your role can view this plan but not move activities.{demo ? <> Switch <strong>User</strong> to a planner or administrator to drag and drop.</> : " Ask your Bio Tree administrator for planning access if you need it."}</p> : null}
-    {planningView === "list" ? <PlanningList key={date.slice(0, 7)} date={date} lines={planLines} products={products} orders={orders} warnings={warnings} calendars={calendars} canPlan={canPlan} canCreate={canCreate} onMove={onMove} onSelect={(id) => { if (onSelect) onSelect(id); else setSelectedId(id); }} onCreate={openCreate} /> : null}
+    {planningView === "list" ? <PlanningList key={date.slice(0, 7)} date={date} lines={planLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warnings} calendars={calendars} canPlan={canPlan} canCreate={canCreate} onMove={onMove} onSelect={(id) => { if (onSelect) onSelect(id); else setSelectedId(id); }} onCreate={openCreate} /> : null}
     <div hidden={planningView === "list"} className="calendar-scroll" onScroll={() => setHover(null)}><div ref={host} className="calendar-host" onMouseOver={(event) => { if (!event.buttons) preview(event.target as HTMLElement); }} onMouseDown={() => setHover(null)} onFocus={(event) => preview(event.target as HTMLElement)} onBlur={() => setHover(null)} onClick={(event) => {
       const target = event.target as HTMLElement;
       const id = target.closest<HTMLElement>("[data-plan-id]")?.dataset.planId;
@@ -197,7 +204,7 @@ export default function PlanningCalendar({ orders = [], warnings, processNames, 
       <p>{hoverLine.plannedDate.split("-").reverse().join("-")} · {hoverLine.quantity.toLocaleString()} {hoverLine.uom ?? products.find((item) => item.id === hoverLine.productId)?.uom}</p>
       <p>{hoverLine.activityType}{hoverLine.batchSizeKg !== undefined ? ` · ${hoverLine.batchSizeKg} kg equivalent` : ""}</p>
       <div className="record-meta"><StatusBadge value={hoverLine.priority} /><StatusBadge value={hoverLine.completedAt ? "Completed" : hoverLine.status} /></div>
-      {hoverLine.orderReference ? <p>{hoverLine.orderReference}</p> : null}
+      {hoverLine.orderReference ? <p>{hoverLine.orderReference}{(() => { const batch = jobOrders.find((item) => item.id === hoverLine.jobOrderId)?.batchNumber; return batch ? ` · Batch no. ${batch}` : ""; })()}</p> : null}
       {hoverLine.notes ? <p>{hoverLine.notes}</p> : null}
     </div> : null}
     <dialog ref={dialog} className="activity-dialog" onClose={() => { calendar.current?.clearGridSelections(); }}>
@@ -207,20 +214,25 @@ export default function PlanningCalendar({ orders = [], warnings, processNames, 
         const quantity = Number(data.get("quantity"));
         const productId = String(data.get("product"));
         if (!Number.isFinite(quantity) || quantity <= 0 || !products.some((item) => item.id === productId)) return;
-        callbacks.current.onCreate({ ...readMeasurement(data), calendarId: String(data.get("calendar") ?? ""), productId, plannedDate: String(data.get("date")), quantity, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""), orderReference: String(data.get("order") ?? ""), productionOrderId: String(data.get("po") ?? "") || undefined });
+        const picked = jobOrders.find((item) => item.id === String(data.get("job") ?? ""));
+        const pickedOrder = orders.find((item) => item.id === picked?.orderId);
+        if (picked && pickedOrder?.productId !== productId) return;
+        callbacks.current.onCreate({ ...readMeasurement(data), calendarId: String(data.get("calendar") ?? ""), productId, plannedDate: String(data.get("date")), quantity, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""),
+          orderReference: picked ? picked.number : String(data.get("order") ?? ""), productionOrderId: picked ? picked.orderId : String(data.get("po") ?? "") || undefined, ...(picked ? { jobOrderId: picked.id } : {}) });
         setDate(String(data.get("date")));
         event.currentTarget.reset();
         dialog.current?.close();
         setNotice("Activity added to the current team plan.");
       }}>
         <div className="panel-title"><h2>Add activity</h2><button className="icon-button" type="button" aria-label="Close activity form" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
-        <ProductSelect products={products} />
+        <label>Job order<select name="job" value={draftJob} onChange={(event) => setDraftJob(event.target.value)}><option value="">Not linked to a job order</option>{jobOrders.map((item) => { const order = orders.find((entry) => entry.id === item.orderId); return <option key={item.id} value={item.id}>{jobLabel(item)} · {products.find((product) => product.id === order?.productId)?.name ?? "Unknown product"} · {item.quantity.toLocaleString()} {item.uom}{order ? ` · ${order.poNumber}` : ""}</option>; })}</select></label>
+        <ProductSelect key={`product-${draftJob}`} products={products} value={jobOrder?.productId} />
         <label>Process<select name="calendar" required defaultValue={draftCalendar || undefined}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label>Planned date<input name="date" type="date" required defaultValue={draftDate} /></label>
-        <MeasurementFields />
+        <MeasurementFields key={`measure-${draftJob}`} defaultQuantity={job?.quantity} defaultUom={job?.uom} />
         <label>Priority<select name="priority" defaultValue="Normal">{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-        <label>PO number<select name="po" defaultValue=""><option value="">Not linked</option>{orders.map((item) => <option key={item.id} value={item.id}>{orderNumbers(orders).get(item.id)} · {poLabel(item, orders)}{item.customerName ? ` · ${item.customerName}` : ""} · {products.find((product) => product.id === item.productId)?.name ?? "Unknown product"}</option>)}</select></label>
-        <label>Batch / order reference<input name="order" placeholder="e.g. Batch 4" /></label>
+        <label>PO number<select name="po" key={`po-${draftJob}`} defaultValue={jobOrder?.id ?? ""} disabled={!!job} title={job ? "Set by the job order" : undefined}><option value="">Not linked</option>{orders.map((item) => <option key={item.id} value={item.id}>{orderNumbers(orders).get(item.id)} · {poLabel(item, orders)}{item.customerName ? ` · ${item.customerName}` : ""} · {products.find((product) => product.id === item.productId)?.name ?? "Unknown product"}</option>)}</select></label>
+        {job ? <p className="orders-help">Batch reference: <strong>{job.number}</strong>{job.batchNumber ? ` · Batch no. ${job.batchNumber}` : " · production keys in the batch number"}</p> : <label>Batch / order reference<input name="order" placeholder="e.g. Batch 4" /></label>}
         <label>Remarks<textarea name="notes" /></label>
         <button className="primary-button" type="submit"><Plus size={17} />Add to plan</button>
       </form>

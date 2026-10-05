@@ -26,7 +26,7 @@ export const workspaceSchema = z.object({
     teams: z.array(record.extend({ processId: id })),
     people: z.array(record.extend({ role: z.enum(["admin", "planner", "production"]), unitIds: z.array(id), teamIds: z.array(id), calendarIds: z.array(id), processIds: z.array(id).optional() })).min(1)
   }),
-  products: z.array(record.extend({ sku: name, uom: name, productType: z.enum(["Finished Good", "Intermediate", "Packaging", "Raw Material"]), active })),
+  products: z.array(record.extend({ sku: name, uom: name, productType: z.enum(["Finished Good", "Intermediate", "Packaging", "Raw Material"]), active, batchQuantity: number.positive().optional(), batchSizeKg: number.positive().optional() })),
   workCentres: z.array(record.extend({ code: name, description: text.optional(), active })),
   machines: z.array(record.extend({ code: name, workCentreId: id, unitId: id, processIds: z.array(id).min(1), setupMinutes: number.int().nonnegative(), capacity: number.positive().optional(), capacityUom: text.optional(), capacityNotes: text.optional(), active })),
   measurements: settings,
@@ -35,7 +35,7 @@ export const workspaceSchema = z.object({
       priority: z.enum(["Low", "Normal", "High", "Urgent"]), status: z.enum(["Unscheduled", "Partially Scheduled", "Fully Scheduled"]),
       completedAt: timestamp.optional(), yieldQuantity: number.nonnegative().optional(), incomingWipId: id.optional(), uom: name.optional(),
       activityType: text.optional(), unitWeightMg: number.positive().optional(), batchSizeKg: number.nonnegative().optional(),
-      teamId: text.optional(), productionOrderId: id.optional(), orderReference: text.optional(), notes: text.optional() })),
+      teamId: text.optional(), productionOrderId: id.optional(), jobOrderId: id.optional(), orderReference: text.optional(), notes: text.optional() })),
     entries: z.array(z.object({ id, calendarId: id, planLineId: id, productId: id, workCentreId: id, machineId: id,
       startAt: timestamp, endAt: timestamp, status: z.enum(["Draft", "Confirmed", "In Progress", "Completed", "Blocked", "Cancelled"]),
       teamId: text.optional(), productionOrderId: id.optional(), reasonCode: text.optional(), notes: text.optional(), changedBy: text.optional() })),
@@ -44,7 +44,12 @@ export const workspaceSchema = z.object({
     transfers: z.array(z.object({ id, sourceLineId: id, sourceCalendarId: id, calendarId: id, productId: id, quantity: number.positive(), uom: name,
       orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional() })),
     // Added after the first pilot release; older snapshots load with no orders.
-    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
+    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), customerId: id.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
+      notes: text.optional(), createdAt: timestamp, createdBy: name })).default([]),
+    // Customer master and job orders came later still; older snapshots load with none.
+    customers: z.array(z.object({ id, code: name, name, contactNotes: text.optional(), active })).default([]),
+    jobOrders: z.array(z.object({ id, number: name, orderId: id, sequence: number.int().positive(), quantity: number.positive(), uom: name,
+      batchSizeKg: number.positive().optional(), batchNumber: z.string().trim().max(60).optional(), batchNumberBy: text.optional(), batchNumberAt: timestamp.optional(),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([])
   })
 }).strict();
@@ -54,7 +59,7 @@ export type WorkspaceEnvelope = { revision: number; snapshot: WorkspaceSnapshot 
 
 export function newWorkspace(): WorkspaceSnapshot {
   return workspaceSchema.parse({ schemaVersion: 1, directory: emptyDirectory(), products: [], workCentres: [], machines: [],
-    measurements: measurementDefaults, data: { lines: [], entries: [], actuals: [], transfers: [], orders: [] } });
+    measurements: measurementDefaults, data: { lines: [], entries: [], actuals: [], transfers: [], orders: [], customers: [], jobOrders: [] } });
 }
 
 // Validate structure and references before accepting a complete atomic save.
@@ -100,6 +105,18 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
     poCustomers.set(po, customer);
   });
   data.orders.forEach((order) => require(has(state.products, order.productId), "Invalid order product"));
+  require(new Set(data.customers.map((item) => item.code.trim().toLowerCase())).size === data.customers.length, "Duplicate customer ID");
+  data.orders.forEach((order) => require(!order.customerId || has(data.customers, order.customerId), "Invalid order customer"));
+  require(new Set(data.jobOrders.map((item) => item.number.trim().toLowerCase())).size === data.jobOrders.length, "Duplicate job order number");
+  const batchNumbers = data.jobOrders.map((item) => item.batchNumber?.trim().toLowerCase()).filter(Boolean);
+  require(new Set(batchNumbers).size === batchNumbers.length, "Duplicate batch number");
+  data.jobOrders.forEach((job) => require(has(data.orders, job.orderId), "Invalid job order PO"));
+  data.lines.forEach((line) => {
+    if (!line.jobOrderId) return;
+    const job = data.jobOrders.find((item) => item.id === line.jobOrderId);
+    const order = data.orders.find((item) => item.id === job?.orderId);
+    require(!!job && !!order && order.productId === line.productId && line.productionOrderId === order.id, "Activity linked to an invalid job order");
+  });
   const numbered = data.orders.filter((order) => order.number !== undefined);
   require(new Set(numbered.map((order) => order.number)).size === numbered.length, "Duplicate order number");
   require(new Set(data.actuals.map((item) => item.planLineId)).size === data.actuals.length, "Duplicate actual result");

@@ -8,6 +8,8 @@ export type PurchaseOrder = {
   id: string; poNumber: string; productId: string; quantity: number; uom: string;
   // Optional only so orders saved before the field existed still load.
   customerName?: string;
+  // The customer record (customer ID and name). Older orders carry only the name.
+  customerId?: string;
   // Running number given when the order is entered; it picks the order's colour and never changes.
   number?: number;
   // Line item within its PO, from 1. Orders saved before items existed are item 1.

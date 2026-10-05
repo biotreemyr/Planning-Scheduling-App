@@ -29,6 +29,10 @@ export type Product = {
   uom: string;
   productType: "Finished Good" | "Intermediate" | "Packaging" | "Raw Material";
   active: ActiveState;
+  // Allowable quantity of one batch, in the product's UOM, and the kilograms of that full batch.
+  // Job orders are split from a PO with these.
+  batchQuantity?: number;
+  batchSizeKg?: number;
 };
 
 export type WorkCentre = {
@@ -93,6 +97,8 @@ export type PlanLine = {
   id: string;
   planId: string;
   productionOrderId?: string;
+  // The job order (one batch of a PO item) this activity carries out.
+  jobOrderId?: string;
   productId: string;
   quantity: number;
   plannedDate: string;
