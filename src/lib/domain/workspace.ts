@@ -44,7 +44,7 @@ export const workspaceSchema = z.object({
     transfers: z.array(z.object({ id, sourceLineId: id, sourceCalendarId: id, calendarId: id, productId: id, quantity: number.positive(), uom: name,
       orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional() })),
     // Added after the first pilot release; older snapshots load with no orders.
-    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), number: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
+    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([])
   })
 }).strict();
@@ -90,7 +90,15 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
     const machine = state.machines.find((machine) => machine.id === entry.machineId);
     require(!!line && line.calendarId === entry.calendarId && line.productId === entry.productId && !!machine && machine.workCentreId === entry.workCentreId && machine.unitId === calendar?.unitId && machine.processIds.includes(calendar?.processId ?? "") && Date.parse(entry.endAt) > Date.parse(entry.startAt), "Invalid production booking");
   });
-  require(new Set(data.orders.map((item) => item.poNumber.trim().toLowerCase())).size === data.orders.length, "Duplicate PO number");
+  // A PO may have several product line items: each item number once, and one customer per PO.
+  require(new Set(data.orders.map((item) => `${item.poNumber.trim().toLowerCase()}#${item.item ?? 1}`)).size === data.orders.length, "Duplicate PO line item");
+  const poCustomers = new Map<string, string>();
+  data.orders.forEach((item) => {
+    const po = item.poNumber.trim().toLowerCase(), customer = item.customerName?.trim().toLowerCase();
+    if (!customer) return;
+    require((poCustomers.get(po) ?? customer) === customer, "PO number used by two customers");
+    poCustomers.set(po, customer);
+  });
   data.orders.forEach((order) => require(has(state.products, order.productId), "Invalid order product"));
   const numbered = data.orders.filter((order) => order.number !== undefined);
   require(new Set(numbered.map((order) => order.number)).size === numbered.length, "Duplicate order number");

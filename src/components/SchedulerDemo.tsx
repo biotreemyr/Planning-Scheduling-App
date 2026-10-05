@@ -791,6 +791,19 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     setData((current) => ({ ...current, orders: current.orders.some((item) => item.id === order.id) ? current.orders.map((item) => item.id === order.id ? { ...order, poNumber: order.poNumber.trim(), customerName: order.customerName?.trim() } : item) : [...current.orders, { ...order, poNumber: order.poNumber.trim(), customerName: order.customerName?.trim() }] }));
     return [];
   }
+  // Several line items of one PO are added together, each checked against the ones before it.
+  function addOrders(items: PurchaseOrder[]) {
+    if (!canEditOrders) return ["Planner or administrator access is required."];
+    const accepted: PurchaseOrder[] = [];
+    const errors = items.flatMap((order, index) => {
+      const problems = validateOrder(order, [...data.orders, ...accepted], products);
+      if (!problems.length) accepted.push({ ...order, poNumber: order.poNumber.trim(), customerName: order.customerName?.trim() });
+      return items.length > 1 ? problems.map((problem) => `Item ${index + 1}: ${problem}`) : problems;
+    });
+    if (errors.length) return errors;
+    setData((current) => ({ ...current, orders: [...current.orders, ...accepted] }));
+    return [];
+  }
   function deleteOrder(id: string) {
     if (!canEditOrders) return ["Planner or administrator access is required."];
     if (data.lines.some((line) => line.productionOrderId === id)) return ["Activities are linked to this PO. Unlink them on the Planner Board first."];
@@ -902,7 +915,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "orders" ? <OrdersPanel orders={data.orders} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onDelete={deleteOrder} flow={flow} canAddBatch={caps.createPlan} onAddBatch={addBatch} /> : null}
+      {activeTab === "orders" ? <OrdersPanel orders={data.orders} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} canAddBatch={caps.createPlan} onAddBatch={addBatch} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />

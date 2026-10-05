@@ -12,7 +12,7 @@ import type { PlanLine, Product, Machine, ScheduleEntry } from "@/lib/domain/typ
 import { StatusBadge } from "./StatusBadge";
 import { MeasurementFields } from "./MeasurementSettings";
 import { readMeasurement } from "@/lib/services/measurements";
-import { ORDER_COLORS, orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
+import { ORDER_COLORS, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
 
 type View = "month" | "week" | "day";
 const NO_ORDER = "#ffffff";
@@ -219,7 +219,7 @@ export default function PlanningCalendar({ orders = [], warnings, processNames, 
         <label>Planned date<input name="date" type="date" required defaultValue={draftDate} /></label>
         <MeasurementFields />
         <label>Priority<select name="priority" defaultValue="Normal">{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-        <label>PO number<select name="po" defaultValue=""><option value="">Not linked</option>{orders.map((item) => <option key={item.id} value={item.id}>{orderNumbers(orders).get(item.id)} · {item.poNumber}{item.customerName ? ` · ${item.customerName}` : ""} · {products.find((product) => product.id === item.productId)?.name ?? "Unknown product"}</option>)}</select></label>
+        <label>PO number<select name="po" defaultValue=""><option value="">Not linked</option>{orders.map((item) => <option key={item.id} value={item.id}>{orderNumbers(orders).get(item.id)} · {poLabel(item, orders)}{item.customerName ? ` · ${item.customerName}` : ""} · {products.find((product) => product.id === item.productId)?.name ?? "Unknown product"}</option>)}</select></label>
         <label>Batch / order reference<input name="order" placeholder="e.g. Batch 4" /></label>
         <label>Remarks<textarea name="notes" /></label>
         <button className="primary-button" type="submit"><Plus size={17} />Add to plan</button>

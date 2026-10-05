@@ -2,13 +2,16 @@ import type { CalendarDirectory, UnitCalendar } from "@/lib/domain/calendarAcces
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { ProductFormat } from "./processRules";
 
-// A customer purchase order. Plan lines link to it through `productionOrderId`.
+// One product line item of a customer purchase order. A PO with several products is several of
+// these sharing a PO number, numbered by `item`. Plan lines link to one through `productionOrderId`.
 export type PurchaseOrder = {
   id: string; poNumber: string; productId: string; quantity: number; uom: string;
   // Optional only so orders saved before the field existed still load.
   customerName?: string;
   // Running number given when the order is entered; it picks the order's colour and never changes.
   number?: number;
+  // Line item within its PO, from 1. Orders saved before items existed are item 1.
+  item?: number;
   // Capsule, tablet or sachet: decides the required process route. Older orders infer it from the product.
   format?: ProductFormat;
   // Expected completion date keyed by the unit-process calendar the work runs in.
@@ -16,13 +19,28 @@ export type PurchaseOrder = {
   notes?: string; createdAt: string; createdBy: string;
 };
 
-export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName" | "number">, orders: PurchaseOrder[], products: Product[]) {
+const samePo = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+export const poItem = (order: Pick<PurchaseOrder, "item">) => order.item ?? 1;
+// The other line items keyed under the same PO number.
+export const poItems = (poNumber: string, orders: PurchaseOrder[]) => orders.filter((item) => samePo(item.poNumber, poNumber));
+export const nextPoItem = (poNumber: string, orders: PurchaseOrder[]) => Math.max(0, ...poItems(poNumber, orders).map(poItem)) + 1;
+// "PO-123 · item 2 of 3" for a PO with several items, just the PO number otherwise.
+export function poLabel(order: PurchaseOrder, orders: PurchaseOrder[]) {
+  const count = poItems(order.poNumber, orders).length;
+  return count > 1 ? `${order.poNumber} · item ${poItem(order)} of ${count}` : order.poNumber;
+}
+
+export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName" | "number" | "item">, orders: PurchaseOrder[], products: Product[]) {
   const errors: string[] = [];
   if (order.number !== undefined && orders.some((item) => item.id !== order.id && item.number === order.number)) errors.push("This order number is already in use.");
   if (!order.customerName?.trim()) errors.push("Enter the customer name.");
   const po = order.poNumber.trim();
+  const others = poItems(po, orders).filter((item) => item.id !== order.id);
+  const owner = others.find((item) => item.customerName?.trim() && !samePo(item.customerName, order.customerName ?? ""));
   if (!po) errors.push("Enter a PO number.");
-  else if (orders.some((item) => item.id !== order.id && item.poNumber.trim().toLowerCase() === po.toLowerCase())) errors.push("This PO number already exists.");
+  // A PO may hold several products, but it belongs to one customer and each item number is used once.
+  else if (owner) errors.push(`PO ${po} already belongs to ${owner.customerName!.trim()}.`);
+  else if (others.some((item) => poItem(item) === poItem(order))) errors.push(`Item ${poItem(order)} of PO ${po} already exists.`);
   if (!products.some((product) => product.id === order.productId)) errors.push("Choose a product.");
   if (!Number.isFinite(order.quantity) || order.quantity <= 0) errors.push("Quantity must be greater than zero.");
   return errors;

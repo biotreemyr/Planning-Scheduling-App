@@ -10,8 +10,11 @@ import { orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/ord
 import { OrderBadge, PriorityMark } from "./OrderBadge";
 
 type Target = { date: string; calendarId: string };
-type Drag = { id: string; calendarId: string; label: string; pointerId: number; startX: number; startY: number; x: number; y: number; started: boolean };
+type Drag = { id: string; calendarId: string; label: string; pointerId: number; startX: number; startY: number; x: number; y: number; started: boolean; touch: boolean };
 const DRAG_THRESHOLD = 5;
+// A finger held this long on a card picks it up; a quicker swipe still scrolls the grid.
+const LONG_PRESS_MS = 350;
+const LONG_PRESS_SLOP = 8;
 const EDGE = 56;
 
 // Month grid: dates down the side, one column per process, like the planning spreadsheet.
@@ -29,6 +32,7 @@ export function PlanningList({ date, lines, products, orders = [], warnings, cal
   const drag = useRef<Drag | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setInterval>>(undefined);
+  const press = useRef<ReturnType<typeof setTimeout>>(undefined);
   const suppressClick = useRef(false);
   const label = (day: string, options: Intl.DateTimeFormatOptions) => new Date(`${day}T12:00:00`).toLocaleDateString("en-GB", options);
 
@@ -38,10 +42,6 @@ export function PlanningList({ date, lines, products, orders = [], warnings, cal
       setNotice(onMove(id, target.date));
     }
     setMoving(null);
-  }
-  function cancelDrag() {
-    clearInterval(timer.current);
-    drag.current = null; setGhost(null); setMoving(null);
   }
   // The cell under the pointer, accepted only in the activity's own process column.
   function locate(current: Drag) {
@@ -68,53 +68,94 @@ export function PlanningList({ date, lines, products, orders = [], warnings, cal
     const dx = speed(right - current.x) - speed(current.x - left);
     if (dx || dy) { box.scrollBy(dx, dy); track(); }
   }
-  // The interval outlives renders, so it always calls the latest autoScroll.
-  const autoScrollRef = useRef(autoScroll);
-  autoScrollRef.current = autoScroll;
-  function pointerDown(event: ReactPointerEvent<HTMLDivElement>, line: PlanLine, name: string) {
-    if (!canMovePlan(line, canPlan) || event.button !== 0 || moving) return;
-    // Touch and pen drag from the grip so the grid can still be scrolled with a finger.
-    if (event.pointerType !== "mouse" && !(event.target as HTMLElement).closest(".plan-list-grip")) return;
-    drag.current = { id: line.id, calendarId: line.calendarId!, label: name, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, started: false };
-    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* the pointer is already gone */ }
+  function begin(current: Drag) {
+    current.started = true;
+    clearInterval(timer.current);
+    timer.current = setInterval(() => handlers.current.autoScroll(), 16);
+    setGhost({ x: current.x, y: current.y, label: current.label });
+    track();
   }
-  function pointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+  // Moves and the release are heard on the window, not the card: the card re-renders while it is
+  // dragged, and pointer capture is dropped by some browsers, so listening on it lost the drop.
+  function windowMove(event: PointerEvent) {
     const current = drag.current;
     if (!current || current.pointerId !== event.pointerId) return;
     current.x = event.clientX; current.y = event.clientY;
+    const travelled = Math.hypot(current.x - current.startX, current.y - current.startY);
     if (!current.started) {
-      if (Math.hypot(current.x - current.startX, current.y - current.startY) < DRAG_THRESHOLD) return;
-      current.started = true;
-      timer.current = setInterval(() => autoScrollRef.current(), 16);
+      // A touch that moves before the long press is a scroll; let the browser have it.
+      if (current.touch) { if (travelled > LONG_PRESS_SLOP) cancelDrag(); return; }
+      if (travelled < DRAG_THRESHOLD) return;
+      begin(current);
+      return;
     }
     event.preventDefault();
     setGhost({ x: current.x, y: current.y, label: current.label });
     track();
   }
-  function pointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+  function windowUp(event: PointerEvent) {
     const current = drag.current;
     if (!current || current.pointerId !== event.pointerId) return;
-    if (current.started) {
-      // The pointer-up also produces a click on the activity; skip opening it.
-      suppressClick.current = true;
-      setTimeout(() => { suppressClick.current = false; }, 0);
-      const { target, otherColumn } = locate(current);
-      if (otherColumn) setNotice("Activities stay in their process. Drop it on a date in the same column.");
-      cancelDrag();
-      finish(current.id, target);
-    } else cancelDrag();
+    if (!current.started) { cancelDrag(); return; }
+    current.x = event.clientX; current.y = event.clientY;
+    // The release also produces a click on the activity; skip opening it.
+    suppressClick.current = true;
+    setTimeout(() => { suppressClick.current = false; }, 0);
+    const { target, otherColumn } = locate(current);
+    if (otherColumn) setNotice("Activities stay in their process. Drop it on a date in the same column.");
+    cancelDrag();
+    finish(current.id, target);
+  }
+  // While a finger drags a card the page must not scroll under it.
+  function windowTouchMove(event: TouchEvent) { if (drag.current?.started) event.preventDefault(); }
+  // Listeners outlive renders, so they always call the latest handlers.
+  const handlers = useRef({ windowMove, windowUp, autoScroll, windowTouchMove });
+  handlers.current = { windowMove, windowUp, autoScroll, windowTouchMove };
+  const listeners = useRef({
+    move: (event: PointerEvent) => handlers.current.windowMove(event),
+    up: (event: PointerEvent) => handlers.current.windowUp(event),
+    cancel: () => cancelDrag(),
+    touch: (event: TouchEvent) => handlers.current.windowTouchMove(event)
+  });
+  function listen(on: boolean) {
+    const method = on ? "addEventListener" : "removeEventListener";
+    const { move, up, cancel, touch } = listeners.current;
+    window[method]("pointermove", move as EventListener);
+    window[method]("pointerup", up as EventListener);
+    window[method]("pointercancel", cancel);
+    if (on) window.addEventListener("touchmove", touch, { passive: false }); else window.removeEventListener("touchmove", touch);
+  }
+  function cancelDrag() {
+    clearInterval(timer.current); clearTimeout(press.current);
+    listen(false);
+    drag.current = null; setGhost(null); setMoving(null);
+  }
+  function pointerDown(event: ReactPointerEvent<HTMLDivElement>, line: PlanLine, name: string) {
+    if (event.button !== 0 || moving || drag.current) return;
+    if (!canMovePlan(line, canPlan)) {
+      if (line.completedAt) setNotice(`${name} is completed, so it is locked and cannot be moved.`);
+      return;
+    }
+    // Mouse and pen pick the card up on movement; a finger picks it up from the grip at once, or by holding the card.
+    const grip = !!(event.target as HTMLElement).closest(".plan-list-grip");
+    const touch = event.pointerType === "touch" && !grip;
+    const current: Drag = { id: line.id, calendarId: line.calendarId!, label: name, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, started: false, touch };
+    drag.current = current;
+    listen(true);
+    if (event.pointerType === "touch" && grip) begin(current);
+    if (touch) press.current = setTimeout(() => { if (drag.current === current) { navigator.vibrate?.(15); begin(current); } }, LONG_PRESS_MS);
   }
   useEffect(() => {
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && drag.current) cancelDrag(); };
     window.addEventListener("keydown", escape);
-    return () => { window.removeEventListener("keydown", escape); clearInterval(timer.current); };
+    return () => { window.removeEventListener("keydown", escape); cancelDrag(); };
   }, []);
 
   // Without processes the month still shows, with one empty column.
   const columns = calendars.length ? calendars : [{ id: "", unitId: "", processId: "", name: "No processes to show" }];
   const dragging = moving && ghost ? lines.find((line) => line.id === moving.id) : undefined;
   return <div className={`monthly-plan-list${dragging ? " plan-grid-dragging" : ""}`}>
-    <p className="sr-only" id="list-move-help">Drag an activity to another date in its column. With the keyboard, press Space on the handle, arrow up or down to choose a date, Enter to move, or Escape to cancel.</p>
+    <p className="sr-only" id="list-move-help">Drag an activity to another date in its column; on a touch screen, drag the handle or hold the card first. With the keyboard, press Space on the handle, arrow up or down to choose a date, Enter to move, or Escape to cancel.</p>
     {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
     <span className="sr-only" role="status">{moving?.target ? `Moving activity to ${moving.target.date}` : ""}</span>
     <div className="plan-grid-scroll" ref={scroller}>
@@ -143,7 +184,7 @@ export function PlanningList({ date, lines, products, orders = [], warnings, cal
                     const detail = [order?.poNumber, line.orderReference, `${line.quantity.toLocaleString()} ${line.uom ?? product?.uom ?? ""}`.trim()].filter(Boolean).join(" · ");
                     return <div key={line.id} data-movable={movable || undefined} className={`plan-grid-item${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
                       style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
-                      onPointerDown={(event) => pointerDown(event, line, name)} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={cancelDrag}>
+                      onPointerDown={(event) => pointerDown(event, line, name)} onContextMenu={(event) => { if (drag.current?.touch) event.preventDefault(); }}>
                       {movable ? <button type="button" className="icon-button plan-list-grip" title={`Move ${name}`} aria-label={`Move ${name}`} aria-describedby="list-move-help"
                         onKeyDown={(event) => {
                           if (event.key === " " && !moving) { event.preventDefault(); setMoving({ id: line.id, target }); }

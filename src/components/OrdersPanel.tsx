@@ -6,7 +6,7 @@ import { nextBatchLabel, type NewBatch } from "@/lib/services/planChanges";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { localDateKey } from "@/lib/services/calendarPrint";
-import { nextOrderNumber, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
+import { nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
@@ -16,47 +16,81 @@ const displayDate = (value: string) => value.split("-").reverse().join("-");
 const statuses: OrderStatus[] = ["Not scheduled", "Scheduled", "In production", "Completed"];
 const statusBadge: Record<OrderStatus, string> = { "Not scheduled": "neutral", Scheduled: "info", "In production": "warning", Completed: "success" };
 
-export function OrdersPanel({ orders, lines, products, directory, visibleCalendarIds, editable, userName, onSave, onDelete, flow = [], canAddBatch = false, onAddBatch }: {
+export function OrdersPanel({ orders, lines, products, directory, visibleCalendarIds, editable, userName, onSave, onAdd, onDelete, flow = [], canAddBatch = false, onAddBatch }: {
   orders: PurchaseOrder[]; lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[]; flow?: FlowWarning[];
   canAddBatch?: boolean; onAddBatch?: (orderId: string, batch: NewBatch) => string[];
-  editable: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onDelete: (id: string) => string[];
+  editable: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[]) => string[]; onDelete: (id: string) => string[];
 }) {
+  const customers = [...new Set(orders.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
+  return <section className="orders-layout">
+    {editable ? <NewOrderForm orders={orders} products={products} customers={customers} userName={userName} onAdd={onAdd} /> : null}
+    <OrdersTable orders={orders} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customers} onSave={onSave} onDelete={onDelete} flow={flow} canAddBatch={canAddBatch && !!onAddBatch} onAddBatch={onAddBatch ?? (() => [])} />
+  </section>;
+}
+
+type DraftItem = { key: string; productId: string; uom: string; format: ProductFormat | "" };
+const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", uom: "", format: "" });
+
+// One PO keyed in once: customer and PO number, then as many product line items as it lists.
+// Typing an existing PO number of the same customer adds further items to that PO.
+function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders: PurchaseOrder[]; products: Product[]; customers: string[]; userName: string; onAdd: (items: PurchaseOrder[]) => string[] }) {
   const uoms = useUoms();
-  const [productId, setProductId] = useState("");
-  const [uom, setUom] = useState("");
-  const [format, setFormat] = useState<ProductFormat | "">("");
-  const chosenFormat = format || inferFormat(products.find((item) => item.id === productId));
+  const [items, setItems] = useState<DraftItem[]>(() => [draftItem()]);
+  const [poNumber, setPoNumber] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [version, setVersion] = useState(0);
-  const productUom = products.find((item) => item.id === productId)?.uom ?? "";
-  const customers = [...new Set(orders.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
-  return <section className="orders-layout">
-    {editable ? <form key={version} className="workspace-panel orders-form" onSubmit={(event) => {
-      event.preventDefault();
-      const data = new FormData(event.currentTarget);
-      const order: PurchaseOrder = { id: `order-${crypto.randomUUID()}`, number: nextOrderNumber(orders), format: chosenFormat, customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), productId,
-        quantity: Number(data.get("quantity")), uom: uom || productUom, expectedDates: {}, createdAt: new Date().toISOString(), createdBy: userName };
-      const result = validateOrder(order, orders, products);
-      if (!result.length) result.push(...onSave(order));
-      setErrors(result);
-      if (!result.length) { setNotice(`Order ${order.number} (${order.poNumber}) added for ${order.customerName}.`); setProductId(""); setUom(""); setFormat(""); setVersion((value) => value + 1); }
-    }}>
-      <h2>New order</h2>
-      <label>Customer name<input name="customer" required maxLength={120} list="order-customers" placeholder="Type or choose a customer" /></label>
-      <datalist id="order-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
-      <label>PO number<input name="po" required maxLength={60} placeholder="e.g. PO-2610-140" /></label>
-      <ProductSelect products={products} value={productId} onChange={(id) => { setProductId(id); setUom(""); setFormat(""); }} />
-      <label title={routeLabel(chosenFormat)}>Format<select value={chosenFormat} onChange={(event) => setFormat(event.target.value as ProductFormat)}>{PRODUCT_FORMATS.map((item) => <option key={item}>{item}</option>)}</select></label>
-      <div className="quantity-fields"><label>Quantity<input name="quantity" type="number" min="1" step="any" required /></label>
-        <label>UOM<select value={uom || productUom} onChange={(event) => setUom(event.target.value)} required>{!productUom && !uom ? <option value="">Select</option> : null}{[...new Set([productUom, ...uoms.filter((item) => item.active).map((item) => item.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select></label></div>
-      <button type="submit" className="primary-button"><Plus size={17} />Add order</button>
-      {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
-      {notice && !errors.length ? <p role="status">{notice}</p> : null}
-      <p className="orders-help">Route for {chosenFormat.toLowerCase()}: {routeLabel(chosenFormat)}. Link plan activities to a PO when you add or open them on the Planner Board. Each scheduled process then appears under the order.</p>
-    </form> : null}
-    <OrdersTable orders={orders} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customers} onSave={onSave} onDelete={onDelete} flow={flow} canAddBatch={canAddBatch && !!onAddBatch} onAddBatch={onAddBatch ?? (() => [])} />
-  </section>;
+  const existing = poNumber.trim() ? poItems(poNumber, orders) : [];
+  const firstItem = nextPoItem(poNumber, orders);
+  const update = (key: string, change: Partial<DraftItem>) => setItems((current) => current.map((item) => item.key === key ? { ...item, ...change } : item));
+  const formatOf = (item: DraftItem) => item.format || inferFormat(products.find((product) => product.id === item.productId));
+  return <form key={version} className="workspace-panel orders-form" onSubmit={(event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const createdAt = new Date().toISOString();
+    let number = nextOrderNumber(orders);
+    const built: PurchaseOrder[] = items.map((item, index) => ({
+      id: `order-${crypto.randomUUID()}`, number: number++, item: firstItem + index, format: formatOf(item),
+      customerName: String(data.get("customer")).trim(), poNumber: poNumber.trim(), productId: item.productId,
+      quantity: Number(data.get(`quantity-${item.key}`)), uom: item.uom || (products.find((product) => product.id === item.productId)?.uom ?? ""),
+      expectedDates: {}, createdAt, createdBy: userName
+    }));
+    const result = onAdd(built);
+    setErrors(result);
+    if (!result.length) {
+      const range = built.length === 1 ? `order ${built[0].number}` : `orders ${built[0].number}-${built.at(-1)!.number}`;
+      setNotice(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}.`);
+      setItems([draftItem()]); setPoNumber(""); setVersion((value) => value + 1);
+    }
+  }}>
+    <h2>New order</h2>
+    <label>Customer name<input name="customer" required maxLength={120} list="order-customers" placeholder="Type or choose a customer" defaultValue={existing[0]?.customerName} key={existing[0]?.id ?? "new"} /></label>
+    <datalist id="order-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
+    <label>PO number<input name="po" required maxLength={60} placeholder="e.g. PO-2610-140" value={poNumber} onChange={(event) => setPoNumber(event.target.value)} /></label>
+    {existing.length ? <p className="orders-help" role="status">{existing[0].poNumber} already has {existing.length} item{existing.length === 1 ? "" : "s"}{existing[0].customerName ? ` for ${existing[0].customerName}` : ""}. These are added as item {firstItem}{items.length > 1 ? ` to ${firstItem + items.length - 1}` : ""}.</p> : null}
+    <fieldset className="order-items">
+      <legend>Line items <span className="badge neutral">{items.length}</span></legend>
+      {items.map((item, index) => {
+        const productUom = products.find((product) => product.id === item.productId)?.uom ?? "";
+        const format = formatOf(item);
+        return <div className="order-item" key={item.key} role="group" aria-label={`Item ${firstItem + index}`}>
+          <div className="order-item-head"><strong>Item {firstItem + index}</strong>
+            {items.length > 1 ? <button type="button" className="icon-button" aria-label={`Remove item ${firstItem + index}`} title="Remove this item" onClick={() => setItems((current) => current.filter((other) => other.key !== item.key))}><Trash2 size={15} /></button> : null}
+          </div>
+          <ProductSelect products={products} name={`product-${item.key}`} value={item.productId} onChange={(id) => update(item.key, { productId: id, uom: "", format: "" })} />
+          <label title={routeLabel(format)}>Format<select value={format} onChange={(event) => update(item.key, { format: event.target.value as ProductFormat })}>{PRODUCT_FORMATS.map((option) => <option key={option}>{option}</option>)}</select></label>
+          <div className="quantity-fields"><label>Quantity<input name={`quantity-${item.key}`} type="number" min="1" step="any" required /></label>
+            <label>UOM<select value={item.uom || productUom} onChange={(event) => update(item.key, { uom: event.target.value })} required>{!productUom && !item.uom ? <option value="">Select</option> : null}{[...new Set([productUom, ...uoms.filter((unit) => unit.active).map((unit) => unit.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select></label></div>
+          <small className="route-muted">Route: {routeLabel(format)}</small>
+        </div>;
+      })}
+      <button type="button" className="calendar-button" onClick={() => setItems((current) => [...current, draftItem()])}><Plus size={16} />Add another product</button>
+    </fieldset>
+    <button type="submit" className="primary-button"><Plus size={17} />{items.length > 1 ? `Add PO with ${items.length} items` : "Add order"}</button>
+    {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
+    {notice && !errors.length ? <p role="status">{notice}</p> : null}
+    <p className="orders-help">Each product on the PO becomes its own numbered order with its own colour, route and batches. Link plan activities to an item when you add or open them on the Planner Board.</p>
+  </form>;
 }
 
 type Row = { order: PurchaseOrder; number: number; rows: OrderProcessRow[]; product?: Product; progress: OrderProgress; format: ProductFormat; warnings: FlowWarning[] };
@@ -92,7 +126,7 @@ function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, e
   const columns: Column[] = [
     { key: "number", label: "#", required: true, sort: (row) => row.number, cell: (row) => <span className="order-number-cell" style={{ "--order-color": orderColor(row.number) } as React.CSSProperties}><OrderBadge number={row.number} poNumber={row.order.poNumber} /></span> },
     { key: "customer", label: "Customer", sort: (row) => row.order.customerName ?? "", cell: (row) => row.order.customerName || <span className="route-muted">Not set</span>, filter: { kind: "text", text: (row) => row.order.customerName ?? "" } },
-    { key: "po", label: "PO number", required: true, sort: (row) => row.order.poNumber, cell: (row) => <strong>{row.order.poNumber}</strong>, filter: { kind: "text", text: (row) => row.order.poNumber } },
+    { key: "po", label: "PO number", required: true, sort: (row) => `${row.order.poNumber}#${String(poItem(row.order)).padStart(4, "0")}`, cell: (row) => <><strong>{row.order.poNumber}</strong>{poItems(row.order.poNumber, orders).length > 1 ? <small>Item {poItem(row.order)} of {poItems(row.order.poNumber, orders).length}</small> : null}</>, filter: { kind: "text", text: (row) => row.order.poNumber } },
     { key: "product", label: "Product", sort: (row) => row.product?.name ?? "", cell: (row) => row.product?.name ?? "Unknown product", filter: { kind: "text", text: (row) => `${row.product?.name ?? ""} ${row.product?.sku ?? ""}` } },
     { key: "format", label: "Format", sort: (row) => row.format, cell: (row) => <span title={routeLabel(row.format)}>{row.format}</span>, filter: { kind: "select", options: [...PRODUCT_FORMATS], value: (row) => row.format } },
     { key: "quantity", label: "Order qty", numeric: true, sort: (row) => row.order.quantity, cell: (row) => `${row.order.quantity.toLocaleString()} ${row.order.uom}` },
@@ -177,7 +211,7 @@ function OrdersTable({ orders, lines, products, directory, visibleCalendarIds, e
       </table>
       <datalist id="order-filter-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
     </div>
-    <OrdersPrint rows={print.orderId ? all.filter((row) => row.order.id === print.orderId) : table} detail={!!print.orderId} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} filtered={table.length !== orders.length} />
+    <OrdersPrint orders={orders} rows={print.orderId ? all.filter((row) => row.order.id === print.orderId) : table} detail={!!print.orderId} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} filtered={table.length !== orders.length} />
   </div>;
 }
 
@@ -185,7 +219,7 @@ const progressText = (progress: OrderProgress) => !progress.processCount ? "Not 
   : `${progress.batchesFinished}/${progress.batchCount} batches finished${progress.nextStep ? ` · ${progress.nextStep.batch} at ${progress.nextStep.processName}` : ""}`;
 
 // Print sheet for the Orders tab: the order list as shown, or one order with its batch grid.
-function OrdersPrint({ rows, detail, lines, directory, visibleCalendarIds, filtered }: { rows: Row[]; detail: boolean; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; filtered: boolean }) {
+function OrdersPrint({ rows, orders, detail, lines, directory, visibleCalendarIds, filtered }: { rows: Row[]; orders: PurchaseOrder[]; detail: boolean; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; filtered: boolean }) {
   if (typeof document === "undefined") return null;
   const printed = new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   return createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
@@ -194,7 +228,7 @@ function OrdersPrint({ rows, detail, lines, directory, visibleCalendarIds, filte
       <table className="print-orders-table">
         <thead><tr><th>#</th><th>Customer</th><th>PO number</th><th>Product</th><th>Format</th><th>Order qty</th><th>Progress</th><th>Finished</th><th>Expected completion</th><th>Status</th></tr></thead>
         <tbody>{rows.map((row) => <tr key={row.order.id}>
-          <td>{row.number}</td><td>{row.order.customerName ?? ""}</td><td>{row.order.poNumber}</td><td>{row.product?.name ?? "Unknown product"}</td><td>{row.format}</td>
+          <td>{row.number}</td><td>{row.order.customerName ?? ""}</td><td>{poLabel(row.order, orders)}</td><td>{row.product?.name ?? "Unknown product"}</td><td>{row.format}</td>
           <td>{row.order.quantity.toLocaleString()} {row.order.uom}</td><td>{progressText(row.progress)}</td>
           <td>{row.progress.finishedQuantity ? `${row.progress.finishedQuantity.toLocaleString()} (${row.progress.percent}%)` : "-"}</td>
           <td>{row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " · Overdue" : ""}</td>
@@ -214,7 +248,7 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
     return <>{dates} · {status}{cell.daysDone ? <><br />{cell.completed.toLocaleString()} made</> : null}</>;
   };
   return <>
-    <header><h1>Order {row.number} · {row.order.poNumber}</h1><p>{row.order.customerName ?? ""} · {row.product?.name ?? "Unknown product"} · {row.order.quantity.toLocaleString()} {row.order.uom} · printed {printed}</p></header>
+    <header><h1>Order {row.number} · {row.order.poNumber}{row.order.item ? ` item ${row.order.item}` : ""}</h1><p>{row.order.customerName ?? ""} · {row.product?.name ?? "Unknown product"} · {row.order.quantity.toLocaleString()} {row.order.uom} · printed {printed}</p></header>
     <p className="print-order-facts">Format: {row.format} ({routeLabel(row.format)}) · Status: {row.progress.status} · {progressText(row.progress)} · Expected completion: {row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " (overdue)" : ""}</p>
     {row.warnings.length ? <ul className="print-order-warnings">{row.warnings.map((warning) => <li key={warning.message}>Warning: {warning.message}</li>)}</ul> : null}
     {matrix.rows.length ? <table className="print-orders-table">

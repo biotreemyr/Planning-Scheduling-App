@@ -224,7 +224,7 @@
 .workstation .plan-grid-item.no-order { border-left-color: transparent; background: #fff; outline: 1px dashed #adb5bd; outline-offset: -1px; }
 .workstation .plan-grid-item.completed { background: var(--gray-soft); }
 .workstation .plan-grid-item.completed .plan-list-product strong { color: #4f5a60; }
-.workstation .plan-grid-item[data-movable], .workstation .plan-grid-item[data-movable] .plan-list-product { cursor: grab; user-select: none; -webkit-user-select: none; }
+.workstation .plan-grid-item[data-movable], .workstation .plan-grid-item[data-movable] .plan-list-product { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .workstation .plan-grid-item.is-dragging { opacity: 0.4; }
 .workstation .plan-grid-dragging, .workstation .plan-grid-dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 .workstation .plan-grid td.plan-grid-droppable { background-image: linear-gradient(#28634e0d, #28634e0d); }
@@ -240,6 +240,8 @@
 .workstation .plan-grid .plan-list-product small { display: block; color: #4f5a60; margin-top: 2px; }
 .workstation .plan-grid .plan-list-product:focus-visible { outline: 2px solid #28634e; outline-offset: -2px; }
 .workstation .plan-list-grip { flex-shrink: 0; width: 22px; min-height: 0; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
+/* Fingers need a larger handle. */
+@media (pointer: coarse) { .workstation .plan-list-grip { width: 32px; } }
 .workstation .plan-list-add { position: absolute; right: 3px; bottom: 3px; width: 24px; height: 24px; min-height: 0; padding: 0; opacity: 0; background: var(--panel); }
 .workstation .plan-grid td:hover .plan-list-add, .workstation .plan-list-add:focus-visible { opacity: 1; }
 .workstation .plan-list-drop-target { background: #e2f0e8 !important; outline: 2px solid #28634e; outline-offset: -2px; }
@@ -265,6 +267,15 @@
 .orders-layout { display: grid; gap: 20px; }
 .orders-form { display: grid; grid-template-columns: minmax(170px, 1.2fr) minmax(130px, 0.8fr) minmax(210px, 1.6fr) minmax(110px, 0.6fr) minmax(190px, 1fr) auto; gap: 12px 14px; align-items: end; }
 .orders-form > h2, .orders-form > p, .orders-form > [role] { grid-column: 1 / -1; margin: 0; }
+/* A PO's product line items: one row each, under the customer and PO number. */
+.orders-form .order-items { grid-column: 1 / -1; display: grid; gap: 8px; min-width: 0; margin: 0; padding: 10px 12px; border: 1px solid var(--line, #d9dfdc); border-radius: 6px; }
+.orders-form .order-items legend { padding: 0 4px; font-weight: 600; }
+.orders-form .order-items > .calendar-button { justify-self: start; }
+.orders-form .order-item { display: grid; grid-template-columns: 86px minmax(210px, 1.6fr) minmax(110px, 0.6fr) minmax(190px, 1fr); gap: 8px 12px; align-items: end; padding-bottom: 8px; border-bottom: 1px dashed var(--line, #d9dfdc); }
+.orders-form .order-item-head { display: flex; align-items: center; gap: 4px; align-self: center; white-space: nowrap; }
+.orders-form .order-item > small { grid-column: 2 / -1; }
+.orders-form > .primary-button { justify-self: start; }
+@media (max-width: 760px) { .orders-form .order-item { grid-template-columns: minmax(0, 1fr); } .orders-form .order-item > small { grid-column: auto; } }
 .orders-form .quantity-fields { margin: 0; }
 .orders-form .primary-button { white-space: nowrap; }
 .orders-help { font-size: 13px; color: var(--muted); }

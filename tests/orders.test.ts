@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { ORDER_COLORS, batchRoute, nextOrderNumber, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder } from "../src/lib/services/orders";
+import { ORDER_COLORS, batchRoute, nextOrderNumber, nextPoItem, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder } from "../src/lib/services/orders";
 
 const state = addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state!;
 const order = state.data.orders.find((item) => item.poNumber === "PO-2609-118")!;
@@ -10,7 +10,8 @@ describe("purchase orders", () => {
   it("rejects blank or duplicate PO numbers, unknown products and non-positive quantities", () => {
     const base = { id: "new", customerName: "Acme", poNumber: "PO-1", productId: state.products[0].id, quantity: 10 };
     expect(validateOrder(base, state.data.orders, state.products)).toEqual([]);
-    expect(validateOrder({ ...base, poNumber: " po-2609-118 " }, state.data.orders, state.products)).toEqual(["This PO number already exists."]);
+    expect(validateOrder({ ...base, poNumber: " po-2609-118 " }, state.data.orders, state.products)).toEqual([`PO po-2609-118 already belongs to ${order.customerName}.`]);
+    expect(validateOrder({ ...base, customerName: order.customerName, poNumber: " po-2609-118 " }, state.data.orders, state.products)).toEqual(["Item 1 of PO po-2609-118 already exists."]);
     expect(validateOrder({ ...base, id: order.id, poNumber: order.poNumber }, state.data.orders, state.products)).toEqual([]);
     expect(validateOrder({ ...base, poNumber: "", productId: "missing", quantity: 0 }, state.data.orders, state.products)).toHaveLength(3);
     expect(validateOrder({ ...base, customerName: "  " }, state.data.orders, state.products)).toEqual(["Enter the customer name."]);
@@ -29,6 +30,33 @@ describe("purchase orders", () => {
     const duplicate = structuredClone(state);
     duplicate.data.orders.push({ ...order, id: "copy" });
     expect(() => parseWorkspace(duplicate)).toThrow();
+  });
+});
+
+describe("a PO with several products", () => {
+  const product = (index: number) => state.products[index].id;
+  const item = (id: string, productIndex: number, itemNumber: number, number: number) => ({ ...order, id, productId: product(productIndex), item: itemNumber, number, expectedDates: {} });
+  it("keys further products under the same PO as numbered items, for the same customer only", () => {
+    expect(nextPoItem(order.poNumber, state.data.orders)).toBe(2);
+    expect(nextPoItem("PO-NEW", state.data.orders)).toBe(1);
+    const second = item("second", 1, 2, 900);
+    expect(validateOrder(second, state.data.orders, state.products)).toEqual([]);
+    const orders = [...state.data.orders, second];
+    expect(poLabel(second, orders)).toBe(`${order.poNumber} · item 2 of 2`);
+    expect(poLabel(order, orders)).toBe(`${order.poNumber} · item 1 of 2`);
+    expect(poLabel(order, state.data.orders)).toBe(order.poNumber);
+    expect(validateOrder({ ...item("third", 2, 2, 901) }, orders, state.products)).toEqual([`Item 2 of PO ${order.poNumber} already exists.`]);
+  });
+  it("saves and reloads a multi-item PO, and refuses a PO shared by two customers", () => {
+    const next = structuredClone(state);
+    next.data.orders.push(item("second", 1, 2, 900), item("third", 2, 3, 901));
+    expect(parseWorkspace(next).data.orders.filter((entry) => entry.poNumber === order.poNumber).map((entry) => entry.item ?? 1)).toEqual([1, 2, 3]);
+    const repeated = structuredClone(next);
+    repeated.data.orders.push(item("again", 3, 3, 902));
+    expect(() => parseWorkspace(repeated)).toThrow();
+    const shared = structuredClone(state);
+    shared.data.orders.push({ ...item("other", 1, 2, 903), customerName: "Someone Else" });
+    expect(() => parseWorkspace(shared)).toThrow();
   });
 });
 
