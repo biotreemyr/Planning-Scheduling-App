@@ -104,3 +104,20 @@ describe("creating a batch's route activities", async () => {
     expect(createBatchLines({ label: "Batch 11", quantity: 5, startDate: "2026-10-26" }, context(tablets, "Other"))).toMatchObject({ error: expect.stringContaining("Set the order's format") });
   });
 });
+
+describe("planning a whole route at once", async () => {
+  const { routeDrafts } = await import("../src/lib/services/planChanges");
+  const calendars = state.directory.calendars.filter((item) => item.unitId === "sample-unit-mfg");
+  const name = (id: string) => state.directory.processes.find((process) => process.id === state.directory.calendars.find((item) => item.id === id)?.processId)?.name ?? "";
+  it("lists every tablet process with consecutive working days, starting Monday after a weekend", () => {
+    const rows = routeDrafts("Tablet", calendars, name, "2026-10-10");
+    expect(rows.map((row) => [row.processName, row.date])).toEqual([["Dispensing", "2026-10-12"], ["Compression", "2026-10-13"], ["Coating", "2026-10-14"], ["Filling", "2026-10-15"], ["Packing", "2026-10-16"]]);
+  });
+  it("flags a step the unit has no process for, and has no route for Other", () => {
+    const rows = routeDrafts("Capsule", calendars.filter((item) => name(item.id) !== "Capsulation"), name, "2026-10-12");
+    const missing = rows.find((row) => row.step === "capsulation")!;
+    expect([missing.label, missing.calendarId]).toEqual(["Capsulation", undefined]);
+    expect(rows.filter((row) => row.calendarId)).toHaveLength(3);
+    expect(routeDrafts("Other", calendars, name, "2026-10-12")).toEqual([]);
+  });
+});

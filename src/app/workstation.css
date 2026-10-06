@@ -443,3 +443,18 @@
 .job-queue li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px dashed #c9ddd3; font-size: 13px; }
 .batch-number { padding-top: 4px; }
 @media (max-width: 760px) { .job-order-form { grid-template-columns: minmax(0, 1fr); } }
+
+/* Add activity: plan every process of a job order's route at once. */
+.plan-mode { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 0; border: 0; }
+.plan-mode legend { padding: 0; margin-bottom: 4px; font-weight: 600; font-size: 13px; }
+.plan-mode label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+.plan-mode input { width: auto; min-height: 0; }
+.route-plan { display: grid; gap: 8px; }
+.route-plan-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.route-plan-table th, .route-plan-table td { padding: 5px 6px; border-bottom: 1px solid var(--line, #d9dfdc); text-align: left; vertical-align: middle; }
+.route-plan-table th { color: var(--muted); font-weight: 600; }
+.route-plan-table td:first-child { width: 44px; }
+.route-plan-table input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; }
+.route-plan-table input[type="date"] { min-height: 34px; }
+.route-plan-table small { display: block; color: var(--muted); }
+.route-plan-table .route-missing td { color: #9f3030; }

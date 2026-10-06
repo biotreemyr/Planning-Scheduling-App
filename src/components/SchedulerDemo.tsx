@@ -178,7 +178,7 @@ function PlannerBoard({
   onPlanJob?: (id: string, startDate: string) => string[];
   flow: FlowWarning[];
   // Returns an error to show; a new job order, when given, is created with the activity.
-  onAddLine: (line: PlanLine, newJob?: ManualJob) => string | void;
+  onAddLine: (lines: PlanLine[], newJob?: ManualJob) => string | void;
   onMoveLine: (id: string, date: string) => string;
   canPlan: boolean;
   canCreate: boolean;
@@ -218,8 +218,8 @@ function PlannerBoard({
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
         <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} onPlan={onPlanJob} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onCreate={({ newJob, ...activity }) => {
-          const error = onAddLine({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" }, newJob);
+        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onCreate={(activities, newJob) => {
+          const error = onAddLine(activities.map((activity) => ({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" as const })), newJob);
           if (error) return error;
           setQuery(""); setPriorityFilter(""); setStatusFilter("");
         }} />
@@ -854,17 +854,21 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   }
   // Add activity: the job order is keyed in by number. An unknown number becomes a new job order
   // for the chosen PO item, saved together with its first activity.
-  function addLine(line: PlanLine, newJob?: ManualJob) {
-    if (!canCreate || !visibleCalendars.some((item) => item.id === line.calendarId)) return "You cannot add activities to this process.";
-    if (!products.some((item) => item.id === line.productId && item.active === "Active")) return "Choose an active product.";
-    if (!Number.isFinite(line.quantity) || line.quantity <= 0) return "Quantity must be greater than zero.";
-    let job = data.jobOrders.find((item) => item.id === line.jobOrderId);
+  function addLine(lines: PlanLine[], newJob?: ManualJob) {
+    if (!canCreate || !lines.length) return "You cannot add activities here.";
+    for (const line of lines) {
+      if (!visibleCalendars.some((item) => item.id === line.calendarId)) return "You cannot add activities to this process.";
+      if (!products.some((item) => item.id === line.productId && item.active === "Active")) return "Choose an active product.";
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0) return "Quantity must be greater than zero.";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(line.plannedDate)) return "Choose a date for every process.";
+    }
+    let job = data.jobOrders.find((item) => item.id === lines[0].jobOrderId);
     const created = newJob ? createManualJobOrder(newJob, data.orders, data.jobOrders, products, { today: new Date(), userName: member.name, newId: () => newId("job") }) : undefined;
     if (created && "error" in created) return created.error;
     if (created) job = created;
-    if (!job || data.orders.find((order) => order.id === job.orderId)?.productId !== line.productId) return "Key in a job order for this product.";
-    const linked = { ...line, jobOrderId: job.id, productionOrderId: job.orderId, orderReference: job.number };
-    setData((current) => ({ ...current, ...(created ? { jobOrders: [...current.jobOrders, created] } : {}), lines: [...current.lines, linked] }));
+    if (!job || lines.some((line) => data.orders.find((order) => order.id === job.orderId)?.productId !== line.productId)) return "Key in a job order for this product.";
+    const linked = lines.map((line) => ({ ...line, jobOrderId: job.id, productionOrderId: job.orderId, orderReference: job.number }));
+    setData((current) => ({ ...current, ...(created ? { jobOrders: [...current.jobOrders, created] } : {}), lines: [...current.lines, ...linked] }));
   }
   // Job orders: one per batch of a PO item, split by the allowable batch quantity.
   function createJobOrders(orderId: string, allowableQuantity: number, batchSizeKg?: number) {

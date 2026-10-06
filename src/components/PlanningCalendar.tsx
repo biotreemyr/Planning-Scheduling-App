@@ -13,6 +13,8 @@ import { MeasurementFields } from "./MeasurementSettings";
 import { readMeasurement } from "@/lib/services/measurements";
 import { ORDER_COLORS, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
 import { findJobByNumber, type JobOrder, type ManualJob } from "@/lib/services/jobOrders";
+import { routeDrafts } from "@/lib/services/planChanges";
+import { inferFormat, routeLabel } from "@/lib/services/processRules";
 
 type View = "month" | "week" | "day";
 const NO_ORDER = "#ffffff";
@@ -20,10 +22,7 @@ const NO_ORDER = "#ffffff";
 const tint = (hex: string, amount = 0.12) => { const [r, g, b] = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16)); return `rgb(${[r, g, b].map((value) => Math.round(255 - (255 - value) * amount)).join(", ")})`; };
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 
-type NewActivity = Pick<PlanLine, "calendarId" | "productId" | "plannedDate" | "quantity" | "priority" | "notes" | "orderReference" | "uom" | "activityType" | "unitWeightMg" | "batchSizeKg" | "productionOrderId" | "jobOrderId"> & {
-  // A job order number not known yet: created with the activity, for the PO item chosen.
-  newJob?: ManualJob;
-};
+type NewActivity = Pick<PlanLine, "calendarId" | "productId" | "plannedDate" | "quantity" | "priority" | "notes" | "orderReference" | "uom" | "activityType" | "unitWeightMg" | "batchSizeKg" | "productionOrderId" | "jobOrderId">;
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
 export default function PlanningCalendar({ orders = [], jobOrders = [], warnings, processNames, planningView = "calendar", planLines, products, initialDate, onCreate, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
@@ -36,8 +35,9 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
   calendars?: UnitCalendar[];
   calendarTitle?: string; allPrintLines?: PlanLine[]; entries?: ScheduleEntry[]; machines?: Machine[];
   planLines: PlanLine[]; products: Product[]; initialDate: string;
-  // Returns an error to show, or nothing when the activity was added.
-  onCreate: (activity: NewActivity) => string | void;
+  // One activity, or one per process of the route. A job order number not known yet (newJob) is
+  // created with them, for the PO item chosen. Returns an error to show, or nothing when added.
+  onCreate: (activities: NewActivity[], newJob?: ManualJob) => string | void;
   onMove: (id: string, date: string) => string;
   canPlan?: boolean;
   // Adding needs Core's planning.create; moving needs planning.edit. Defaults to canPlan.
@@ -59,6 +59,16 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
   const draftJob = job?.id ?? "";
   const creatingJob = !job && !!jobText.trim();
   const jobOrder = orders.find((item) => item.id === (job ? job.orderId : creatingJob ? newJobOrder : ""));
+  // Plan the whole route at once (default), so no process is missed, or a single process.
+  const [planMode, setPlanMode] = useState<"route" | "single">("route");
+  const [routeStart, setRouteStart] = useState(initialDate);
+  const [routeDates, setRouteDates] = useState<Record<string, string>>({});
+  const [routeOn, setRouteOn] = useState<Record<string, boolean>>({});
+  const routeFormat = jobOrder ? jobOrder.format ?? inferFormat(products.find((product) => product.id === jobOrder.productId)) : "Other";
+  const drafts = routeDrafts(routeFormat, calendars, (id) => processNames[id] ?? calendars.find((item) => item.id === id)?.name ?? "", routeStart);
+  const alreadyPlanned = (calendarId?: string) => !!job && !!calendarId && allPrintLines.some((line) => line.jobOrderId === job.id && line.calendarId === calendarId);
+  const routeRows = drafts.map((draft) => ({ ...draft, date: routeDates[draft.step] ?? draft.date, planned: alreadyPlanned(draft.calendarId), on: !!draft.calendarId && (routeOn[draft.step] ?? !alreadyPlanned(draft.calendarId)) }));
+  const useRoute = planMode === "route" && routeRows.length > 0;
   const [formVersion, setFormVersion] = useState(0);
   const [notice, setNotice] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -68,6 +78,7 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
     if (!callbacks.current.canCreate) return;
     setDraftCalendar(calendarId);
     setJobText(""); setNewJobOrder(""); setFormError("");
+    setPlanMode(calendarId ? "single" : "route"); setRouteStart(value); setRouteDates({}); setRouteOn({});
     setFormVersion((version) => version + 1);
     setHover(null);
     setDraftDate(value);
@@ -224,17 +235,22 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
         if (!Number.isFinite(quantity) || quantity <= 0 || !products.some((item) => item.id === productId)) return;
         // Every activity carries out a job order, which decides its product, PO and batch.
         if (!jobOrder || jobOrder.productId !== productId) { setFormError(creatingJob ? `Choose the PO item for job order ${jobText.trim()}.` : "Key in the job order number."); return; }
-        // The process is the activity type: the process chosen above names it.
+        // The process is the activity type: each activity is named after its process.
+        const measured = readMeasurement(data);
+        const shared = { ...measured, productId, quantity, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""), productionOrderId: jobOrder.id, orderReference: job?.number ?? jobText.trim(), ...(job ? { jobOrderId: job.id } : {}) };
+        const nameOf = (calendarId: string) => processNames[calendarId] ?? calendars.find((item) => item.id === calendarId)?.name ?? "";
+        const chosen = useRoute ? routeRows.filter((row) => row.on && row.calendarId) : [];
+        if (useRoute && !chosen.length) { setFormError("Tick at least one process to plan."); return; }
         const calendarId = String(data.get("calendar") ?? "");
-        const measured = { ...readMeasurement(data), activityType: processNames[calendarId] ?? calendars.find((item) => item.id === calendarId)?.name ?? "" };
-        const activity = { ...measured, calendarId: String(data.get("calendar") ?? ""), productId, plannedDate: String(data.get("date")), quantity, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""), productionOrderId: jobOrder.id };
-        const error = callbacks.current.onCreate(job ? { ...activity, orderReference: job.number, jobOrderId: job.id }
-          : { ...activity, orderReference: jobText.trim(), newJob: { number: jobText.trim(), orderId: jobOrder.id, quantity, uom: measured.uom, ...(measured.batchSizeKg ? { batchSizeKg: measured.batchSizeKg } : {}) } });
+        const activities: NewActivity[] = useRoute ? chosen.map((row) => ({ ...shared, calendarId: row.calendarId!, activityType: nameOf(row.calendarId!), plannedDate: row.date }))
+          : [{ ...shared, calendarId, activityType: nameOf(calendarId), plannedDate: String(data.get("date")) }];
+        const error = callbacks.current.onCreate(activities, job ? undefined : { number: jobText.trim(), orderId: jobOrder.id, quantity, uom: measured.uom, ...(measured.batchSizeKg ? { batchSizeKg: measured.batchSizeKg } : {}) });
         if (error) { setFormError(error); return; }
-        setDate(String(data.get("date")));
+        setDate(activities[0].plannedDate);
         event.currentTarget.reset();
         dialog.current?.close();
-        setNotice(creatingJob ? `Job order ${jobText.trim()} created and its activity added to the plan.` : "Activity added to the current team plan.");
+        const what = activities.length === 1 ? "1 activity" : `${activities.length} activities (${activities.map((item) => item.activityType).join(", ")})`;
+        setNotice(creatingJob ? `Job order ${jobText.trim()} created; ${what} added to the plan.` : `${what[0].toUpperCase()}${what.slice(1)} added to the plan.`);
       }}>
         <div className="panel-title"><h2>Add activity</h2><button className="icon-button" type="button" aria-label="Close activity form" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
         <label>Job order<input name="jobNumber" required maxLength={60} autoComplete="off" list="job-order-numbers" placeholder="Key in the job order number" value={jobText} onChange={(event) => { setJobText(event.target.value); setFormError(""); }} /></label>
@@ -245,14 +261,36 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
         </> : null}
         <p className="orders-help">Product: <strong>{jobOrder ? products.find((product) => product.id === jobOrder.productId)?.name ?? "Unknown product" : "set by the job order"}</strong></p>
         <input type="hidden" name="product" value={jobOrder?.productId ?? ""} />
-        <label>Process<select name="calendar" required defaultValue={draftCalendar || undefined}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label>Planned date<input name="date" type="date" required defaultValue={draftDate} /></label>
+        {routeRows.length ? <fieldset className="plan-mode"><legend>Plan</legend>
+          <label><input type="radio" name="planMode" checked={planMode === "route"} onChange={() => setPlanMode("route")} />All processes of the route</label>
+          <label><input type="radio" name="planMode" checked={planMode === "single"} onChange={() => setPlanMode("single")} />One process</label>
+        </fieldset> : jobOrder ? <p className="orders-help">{routeFormat === "Other" ? "This PO item's format has no fixed route, so plan one process at a time." : null}</p> : null}
+        {useRoute ? <div className="route-plan">
+          <label>Start date<input type="date" required value={routeStart} onChange={(event) => { setRouteStart(event.target.value); setRouteDates({}); }} /></label>
+          <p className="orders-help">{routeFormat}: {routeLabel(routeFormat)}. One working day each from the start date; change any date or untick a process.</p>
+          <table className="route-plan-table"><thead><tr><th scope="col">Plan</th><th scope="col">Process</th><th scope="col">Date</th></tr></thead>
+            <tbody>{routeRows.map((row) => <tr key={row.step} className={row.calendarId ? undefined : "route-missing"}>
+              <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId} checked={row.on} onChange={(event) => setRouteOn({ ...routeOn, [row.step]: event.target.checked })} /></td>
+              <td>{row.processName ?? row.label}{!row.calendarId ? <small>Not set up in this unit (or filtered out)</small> : row.planned ? <small>Already planned for this job order</small> : null}</td>
+              <td>{row.calendarId ? <input type="date" aria-label={`${row.label} date`} value={row.date} onChange={(event) => {
+                // Later processes follow on the working days after, so the route keeps its order.
+                const value = event.target.value;
+                const index = routeRows.findIndex((item) => item.step === row.step);
+                const following = routeDrafts(routeFormat, calendars, (id) => processNames[id] ?? calendars.find((item) => item.id === id)?.name ?? "", value);
+                setRouteDates({ ...routeDates, ...Object.fromEntries(routeRows.slice(index).map((item, offset) => [item.step, offset ? following[offset]?.date ?? item.date : value])) });
+              }} /> : "-"}</td>
+            </tr>)}</tbody>
+          </table>
+        </div> : <>
+          <label>Process<select name="calendar" required defaultValue={draftCalendar || undefined}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label>Planned date<input name="date" type="date" required defaultValue={draftDate} /></label>
+        </>}
         <MeasurementFields key={`measure-${draftJob || newJobOrder}`} defaultQuantity={job?.quantity ?? products.find((product) => product.id === jobOrder?.productId)?.batchQuantity} defaultUom={job?.uom ?? jobOrder?.uom} />
         <label>Priority<select name="priority" defaultValue="Normal">{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
         {jobOrder ? <p className="orders-help">PO number: <strong>{poLabel(jobOrder, orders)}</strong>{jobOrder.customerName ? ` · ${jobOrder.customerName}` : ""}<br />Batch reference: <strong>{job?.number ?? jobText.trim()}</strong>{job?.batchNumber ? ` · Batch no. ${job.batchNumber}` : " · production keys in the batch number"}</p> : null}
         <label>Remarks<textarea name="notes" /></label>
         {formError ? <p role="alert">{formError}</p> : null}
-        <button className="primary-button" type="submit" disabled={!jobOrder}><Plus size={17} />{creatingJob ? "Create job order and add" : "Add to plan"}</button>
+        <button className="primary-button" type="submit" disabled={!jobOrder}><Plus size={17} />{useRoute ? `${creatingJob ? "Create job order and plan" : "Plan"} ${routeRows.filter((row) => row.on).length} process${routeRows.filter((row) => row.on).length === 1 ? "" : "es"}` : creatingJob ? "Create job order and add" : "Add to plan"}</button>
       </form>
     </dialog>
     <div className="order-legend" aria-label="Legend">

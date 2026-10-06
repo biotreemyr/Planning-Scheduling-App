@@ -23,6 +23,8 @@ const ALIASES: Record<string, Step> = {
   packing: "packing", packaging: "packing"
 };
 export const stepOf = (processName: string): Step | undefined => ALIASES[processName.trim().toLowerCase()];
+export const stepLabel = (step: Step) => STEP_LABEL[step];
+export type RouteStepName = Step;
 export const routeLabel = (format: ProductFormat) => format === "Other" ? "No fixed route" : ROUTES[format].map((step) => STEP_LABEL[step]).join(" → ");
 
 // A sensible default from the product's unit or name; the order's own format always wins.

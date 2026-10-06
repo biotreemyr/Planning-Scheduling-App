@@ -3,7 +3,7 @@ import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import { daysBetween, shiftTimestamp } from "./scheduling";
 import { batchKilograms } from "./measurements";
 import type { PurchaseOrder } from "./orders";
-import { ROUTES, routeLabel, stepOf, type ProductFormat } from "./processRules";
+import { ROUTES, routeLabel, stepLabel, stepOf, type ProductFormat, type RouteStepName } from "./processRules";
 
 /**
  * Move an activity to a new date. Its open machine bookings move by the same number of
@@ -68,4 +68,22 @@ export function createBatchLines(batch: NewBatch, context: BatchContext): { line
       ...(sample?.unitWeightMg ? { unitWeightMg: sample.unitWeightMg } : {}), batchSizeKg: batchKilograms(batch.quantity, context.uom, sample?.unitWeightMg)
     };
   }) };
+}
+
+export type RouteDraft = { step: RouteStepName; label: string; calendarId?: string; processName?: string; date: string };
+
+/**
+ * The format's route as one row per process, for planning a job order in one go: the process in
+ * this unit that does each step (if any) and a default date, one working day after the other
+ * from the start date (a weekend start moves to Monday).
+ */
+export function routeDrafts(format: ProductFormat, calendars: { id: string; name: string }[], processName: (calendarId: string) => string, startDate: string): RouteDraft[] {
+  if (format === "Other" || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return [];
+  const day = new Date(`${startDate}T12:00:00`);
+  if (day.getDay() === 0 || day.getDay() === 6) nextWorkday(day);
+  return ROUTES[format].map((step, index) => {
+    if (index) nextWorkday(day);
+    const calendar = calendars.find((item) => stepOf(processName(item.id)) === step);
+    return { step, label: stepLabel(step), ...(calendar ? { calendarId: calendar.id, processName: processName(calendar.id) } : {}), date: key(day) };
+  });
 }
