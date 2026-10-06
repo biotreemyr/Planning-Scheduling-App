@@ -6,7 +6,7 @@ import { addSampleData } from "../src/lib/domain/sampleData";
 
 const initial = { revision: 3, snapshot: addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state! };
 // The toolbar button that opens the plan form.
-const addButton = /<button class="primary-button" type="button"[^>]*>(?:(?!<\/button>).)*Plan job order<\/button>/;
+const addButton = /<button class="primary-button" type="button"[^>]*>(?:(?!<\/button>).)*Production Planning<\/button>/;
 const render = (permissions: string[]) => renderToString(<SchedulerDemo initial={initial} writeToken="t" identity={{ id: "u1", name: "Angeline Tan", permissions: permissions.map((key) => `scheduler.${key}`) }} />);
 
 describe("workspace for a signed-in Core user", () => {

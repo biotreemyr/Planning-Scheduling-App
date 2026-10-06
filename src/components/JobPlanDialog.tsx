@@ -126,7 +126,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       dialog.current?.close();
       onDone(result.message, planned.filter((row) => row.on).map((row) => row.plannedDate).sort()[0] ?? start);
     }}>
-      <div className="panel-title"><h2 id="job-plan-title">{editing ? `Edit planning · ${job?.number ?? ""}` : "Plan job order"}</h2><button className="icon-button" type="button" aria-label="Close" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
+      <div className="panel-title"><h2 id="job-plan-title">{editing ? `Edit planning · ${job?.number ?? ""}` : "Production Planning"}</h2><button className="icon-button" type="button" aria-label="Close" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
       {editing ? null : choices.length ? <label>Job order<select required value={jobId} onChange={(event) => choose(event.target.value)}>
         <option value="" disabled>Choose a job order to plan</option>
         {choices.map((item) => { const itemOrder = orders.find((entry) => entry.id === item.orderId); return <option key={item.id} value={item.id}>{item.number} · {products.find((entry) => entry.id === itemOrder?.productId)?.name ?? "Unknown product"} · {item.quantity.toLocaleString()} {item.uom}{itemOrder ? ` · ${itemOrder.poNumber}` : ""}</option>; })}

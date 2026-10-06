@@ -174,7 +174,7 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], allLines
         <h3 aria-live="polite">{range}</h3>
       </div>
       <div className="calendar-navigation">
-        {canCreate ? <button className="primary-button" type="button" disabled={!ready || !products.length} onClick={() => openCreate(date)}><Plus size={17} />Plan job order</button> : null}
+        {canCreate ? <button className="primary-button" type="button" disabled={!ready || !products.length} onClick={() => openCreate(date)}><Plus size={17} />Production Planning</button> : null}
         <input aria-label="Calendar date" type="date" value={date} onChange={(event) => { if (event.target.value) setDate(event.target.value); }} />
         {planningView === "calendar" ? <div className="view-switch" aria-label="Calendar period">
           {(["month", "week", "day"] as const).map((item) => <button type="button" key={item} aria-pressed={view === item} onClick={() => setView(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
