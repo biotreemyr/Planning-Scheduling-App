@@ -178,7 +178,7 @@ function PlannerBoard({
   onPlanJob?: (id: string, startDate: string) => string[];
   flow: FlowWarning[];
   // Returns an error to show; a new job order, when given, is created with the activity.
-  onAddLine: (lines: PlanLine[], newJob?: ManualJob) => string | void;
+  onAddLine: (lines: PlanLine[], newJob?: ManualJob, batchNumber?: string) => string | void;
   onMoveLine: (id: string, date: string) => string;
   canPlan: boolean;
   canCreate: boolean;
@@ -218,8 +218,8 @@ function PlannerBoard({
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
         <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} onPlan={onPlanJob} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onCreate={(activities, newJob) => {
-          const error = onAddLine(activities.map((activity) => ({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" as const })), newJob);
+        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onCreate={(activities, newJob, batchNumber) => {
+          const error = onAddLine(activities.map((activity) => ({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" as const })), newJob, batchNumber);
           if (error) return error;
           setQuery(""); setPriorityFilter(""); setStatusFilter("");
         }} />
@@ -854,7 +854,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   }
   // Add activity: the job order is keyed in by number. An unknown number becomes a new job order
   // for the chosen PO item, saved together with its first activity.
-  function addLine(lines: PlanLine[], newJob?: ManualJob) {
+  // The batch number keyed in while planning is stored on the job order and shows on every process.
+  function addLine(lines: PlanLine[], newJob?: ManualJob, batchNumber?: string) {
     if (!canCreate || !lines.length) return "You cannot add activities here.";
     for (const line of lines) {
       if (!visibleCalendars.some((item) => item.id === line.calendarId)) return "You cannot add activities to this process.";
@@ -867,8 +868,18 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     if (created && "error" in created) return created.error;
     if (created) job = created;
     if (!job || lines.some((line) => data.orders.find((order) => order.id === job.orderId)?.productId !== line.productId)) return "Key in a job order for this product.";
-    const linked = lines.map((line) => ({ ...line, jobOrderId: job.id, productionOrderId: job.orderId, orderReference: job.number }));
-    setData((current) => ({ ...current, ...(created ? { jobOrders: [...current.jobOrders, created] } : {}), lines: [...current.lines, ...linked] }));
+    const batch = batchNumber?.trim() ?? "";
+    const batchChanged = batchNumber !== undefined && batch !== (job.batchNumber ?? "");
+    if (batchChanged && batch) {
+      const problem = validateBatchNumber(batch, job, created ? [...data.jobOrders, created] : data.jobOrders);
+      if (problem) return problem;
+    }
+    const withBatch: JobOrder = !batchChanged ? job : batch ? { ...job, batchNumber: batch, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
+      : (({ batchNumber: _b, batchNumberBy: _by, batchNumberAt: _at, ...rest }) => rest)(job);
+    const linked = lines.map((line) => ({ ...line, jobOrderId: withBatch.id, productionOrderId: withBatch.orderId, orderReference: withBatch.number }));
+    setData((current) => ({ ...current,
+      jobOrders: created ? [...current.jobOrders, withBatch] : batchChanged ? current.jobOrders.map((item) => item.id === withBatch.id ? withBatch : item) : current.jobOrders,
+      lines: [...current.lines, ...linked] }));
   }
   // Job orders: keyed in on the PO item, one per batch, each with its own number.
   function addJobOrder(input: ManualJob) {

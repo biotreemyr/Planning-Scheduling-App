@@ -463,7 +463,8 @@
 .route-plan-table select { width: 104px; min-height: 34px; }
 .activity-dialog.activity-dialog-wide { width: min(720px, calc(100vw - 24px)); }
 /* Job orders keyed in and edited inside a PO item. */
-.job-order-form { grid-template-columns: minmax(160px, 1.2fr) minmax(120px, 0.8fr) minmax(100px, 0.6fr) minmax(130px, 0.8fr) auto; }
+.job-order-form { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.job-order-form > .primary-button { align-self: end; }
 .job-order-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 4px 0; }
 .job-order-edit label { min-width: 130px; flex: 1 1 130px; }
 .job-order-edit > small { flex-basis: 100%; }

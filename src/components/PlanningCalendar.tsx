@@ -37,7 +37,8 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
   planLines: PlanLine[]; products: Product[]; initialDate: string;
   // One activity, or one per process of the route. A job order number not known yet (newJob) is
   // created with them, for the PO item chosen. Returns an error to show, or nothing when added.
-  onCreate: (activities: NewActivity[], newJob?: ManualJob) => string | void;
+  // batchNumber: keyed in while planning; saved on the job order.
+  onCreate: (activities: NewActivity[], newJob?: ManualJob, batchNumber?: string) => string | void;
   onMove: (id: string, date: string) => string;
   canPlan?: boolean;
   // Adding needs Core's planning.create; moving needs planning.edit. Defaults to canPlan.
@@ -76,8 +77,14 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
   const alreadyPlanned = (calendarId?: string) => !!job && !!calendarId && allPrintLines.some((line) => line.jobOrderId === job.id && line.calendarId === calendarId);
   const defaultQuantity = job?.quantity ?? products.find((product) => product.id === jobOrder?.productId)?.batchQuantity;
   const defaultUom = job?.uom ?? jobOrder?.uom ?? uoms.find((item) => item.active)?.name ?? "";
+  // Each process starts from the job order's matching measure: dispensing weighs the batch in kg,
+  // filling and packing count packs, the rest count units.
+  const stepDefault = (step: string): [number | undefined, string] =>
+    step === "dispensing" && job?.batchSizeKg ? [job.batchSizeKg, "kg"]
+    : (step === "filling" || step === "packing") && job?.packQuantity && job.packUom ? [job.packQuantity, job.packUom]
+    : [defaultQuantity, defaultUom];
   const routeRows = drafts.map((draft) => ({ ...draft, date: routeDates[draft.step] ?? draft.date, planned: alreadyPlanned(draft.calendarId), on: !!draft.calendarId && (routeOn[draft.step] ?? !alreadyPlanned(draft.calendarId)),
-    quantity: routeQty[draft.step] ?? (defaultQuantity ? String(defaultQuantity) : ""), uom: routeUom[draft.step] ?? defaultUom }));
+    quantity: routeQty[draft.step] ?? (stepDefault(draft.step)[0] ? String(stepDefault(draft.step)[0]) : ""), uom: routeUom[draft.step] ?? stepDefault(draft.step)[1] }));
   const useRoute = planMode === "route" && routeRows.length > 0;
   const [formVersion, setFormVersion] = useState(0);
   const [notice, setNotice] = useState("");
@@ -268,7 +275,7 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
         }
         // A new job order holds the batch in the PO's unit (e.g. tablets), else the first process's quantity.
         const first = activities.find((item) => item.uom === jobOrder.uom) ?? activities[0];
-        const error = callbacks.current.onCreate(activities, job ? undefined : { number: jobText.trim(), orderId: jobOrder.id, quantity: first.quantity, uom: first.uom ?? "", ...(first.batchSizeKg ? { batchSizeKg: first.batchSizeKg } : {}) });
+        const error = callbacks.current.onCreate(activities, job ? undefined : { number: jobText.trim(), orderId: jobOrder.id, quantity: first.quantity, uom: first.uom ?? "", ...(first.batchSizeKg ? { batchSizeKg: first.batchSizeKg } : {}) }, String(data.get("batchNumber") ?? ""));
         if (error) { setFormError(error); return; }
         setDate(activities[0].plannedDate);
         event.currentTarget.reset();
@@ -314,7 +321,8 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
         </>}
         {useRoute ? null : <MeasurementFields key={`measure-${draftJob || newJobOrder}`} defaultQuantity={defaultQuantity} defaultUom={job?.uom ?? jobOrder?.uom} />}
         <label>Priority<select name="priority" defaultValue="Normal">{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-        {jobOrder ? <p className="orders-help">PO number: <strong>{poLabel(jobOrder, orders)}</strong>{jobOrder.customerName ? ` · ${jobOrder.customerName}` : ""}<br />Batch reference: <strong>{job?.number ?? jobText.trim()}</strong>{job?.batchNumber ? ` · Batch no. ${job.batchNumber}` : " · production keys in the batch number"}</p> : null}
+        {jobOrder ? <p className="orders-help">PO number: <strong>{poLabel(jobOrder, orders)}</strong>{jobOrder.customerName ? ` · ${jobOrder.customerName}` : ""}<br />Job order: <strong>{job?.number ?? jobText.trim()}</strong></p> : null}
+        {jobOrder ? <label>Batch number<input key={`batch-${draftJob}`} name="batchNumber" maxLength={60} autoComplete="off" defaultValue={job?.batchNumber ?? ""} placeholder={`Batch number for ${job?.number ?? jobText.trim()}`} /></label> : null}
         <label>Remarks<textarea name="notes" /></label>
         {formError ? <p role="alert">{formError}</p> : null}
         <button className="primary-button" type="submit" disabled={!jobOrder}><Plus size={17} />{useRoute ? `${creatingJob ? "Create job order and plan" : "Plan"} ${routeRows.filter((row) => row.on).length} process${routeRows.filter((row) => row.on).length === 1 ? "" : "es"}` : creatingJob ? "Create job order and add" : "Add to plan"}</button>

@@ -49,7 +49,8 @@ export const workspaceSchema = z.object({
     // Customer master and job orders came later still; older snapshots load with none.
     customers: z.array(z.object({ id, code: name, name, contactNotes: text.optional(), active })).default([]),
     jobOrders: z.array(z.object({ id, number: name, orderId: id, sequence: number.int().positive(), quantity: number.positive(), uom: name,
-      batchSizeKg: number.positive().optional(), batchNumber: z.string().trim().max(60).optional(), batchNumberBy: text.optional(), batchNumberAt: timestamp.optional(),
+      batchSizeKg: number.positive().optional(), packQuantity: number.positive().optional(), packUom: name.optional(), packSize: number.positive().optional(),
+      batchNumber: z.string().trim().max(60).optional(), batchNumberBy: text.optional(), batchNumberAt: timestamp.optional(),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([])
   })
 }).strict();

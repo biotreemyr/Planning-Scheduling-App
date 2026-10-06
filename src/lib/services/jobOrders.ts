@@ -14,8 +14,10 @@ export type JobOrder = {
   // 1, 2, 3... within its PO item.
   sequence: number;
   quantity: number; uom: string;
-  // Kilograms for this job, from the product's batch size scaled to its quantity.
+  // Batch quantity in kilograms (what dispensing weighs out).
   batchSizeKg?: number;
+  // Packed output: how many boxes, bottles or cartons, and how many units go in each.
+  packQuantity?: number; packUom?: string; packSize?: number;
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;
@@ -52,7 +54,9 @@ export function updateJobOrder(next: JobOrder, jobs: JobOrder[], orders: Purchas
   if (!order) return { error: "This job order's PO no longer exists." };
   if (!Number.isFinite(next.quantity) || next.quantity <= 0) return { error: "Quantity must be greater than zero." };
   if (!next.uom.trim()) return { error: "Choose a UOM." };
-  if (next.batchSizeKg !== undefined && !(next.batchSizeKg > 0)) return { error: "Batch size must be greater than zero." };
+  if (next.batchSizeKg !== undefined && !(next.batchSizeKg > 0)) return { error: "Batch quantity must be greater than zero." };
+  const packIssue = packProblem(next);
+  if (packIssue) return { error: packIssue };
   const allowable = products.find((product) => product.id === order.productId)?.batchQuantity;
   if (allowable && next.uom === order.uom && next.quantity > allowable) return { error: `One job order holds at most the allowable batch quantity of ${allowable.toLocaleString()} ${order.uom}.` };
   const saved: JobOrder = { ...next, number };
@@ -77,7 +81,20 @@ export const findJobByNumber = (value: string, jobs: JobOrder[]) => {
   return number ? jobs.find((job) => job.number.trim().toLowerCase() === number) : undefined;
 };
 
-export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number };
+export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number; packQuantity?: number; packUom?: string; packSize?: number };
+
+// Pack fields: optional, but a pack quantity needs its UOM and every number must be positive.
+export function packProblem(job: Pick<ManualJob, "packQuantity" | "packUom" | "packSize">) {
+  if (job.packSize !== undefined && !(job.packSize > 0)) return "Pack size must be greater than zero.";
+  if (job.packQuantity !== undefined && !(job.packQuantity > 0)) return "Pack quantity must be greater than zero.";
+  if (job.packQuantity !== undefined && !job.packUom?.trim()) return "Choose the pack UOM (boxes, bottles, carton...).";
+  return "";
+}
+// How many packs a quantity fills, rounded up: 125,000 capsules at 30 per bottle is 4,167 bottles.
+export const packsFor = (quantity: number, packSize?: number) => packSize && packSize > 0 && quantity > 0 ? Math.ceil(Number((quantity / packSize).toPrecision(12))) : undefined;
+const packFields = (job: Pick<ManualJob, "packQuantity" | "packUom" | "packSize">) => ({
+  ...(job.packQuantity ? { packQuantity: job.packQuantity } : {}), ...(job.packQuantity && job.packUom?.trim() ? { packUom: job.packUom.trim() } : {}), ...(job.packSize ? { packSize: job.packSize } : {})
+});
 
 /**
  * A job order keyed in by its number while planning, for job orders numbered outside the
@@ -91,11 +108,13 @@ export function createManualJobOrder(input: ManualJob, orders: PurchaseOrder[], 
   const order = orders.find((item) => item.id === input.orderId);
   if (!order) return { error: `Choose the PO item job order ${number} belongs to.` };
   if (!Number.isFinite(input.quantity) || input.quantity <= 0) return { error: "Quantity must be greater than zero." };
+  const packIssue = packProblem(input);
+  if (packIssue) return { error: packIssue };
   const allowable = products.find((product) => product.id === order.productId)?.batchQuantity;
   if (allowable && input.uom === order.uom && input.quantity > allowable) return { error: `One job order holds at most the allowable batch quantity of ${allowable.toLocaleString()} ${order.uom}.` };
   const created: JobOrder = {
     id: context.newId(), number, orderId: order.id, sequence: Math.max(0, ...jobsFor(order.id, jobs).map((job) => job.sequence)) + 1,
-    quantity: input.quantity, uom: input.uom, ...(input.batchSizeKg ? { batchSizeKg: input.batchSizeKg } : {}), createdAt: context.today.toISOString(), createdBy: context.userName
+    quantity: input.quantity, uom: input.uom, ...(input.batchSizeKg ? { batchSizeKg: input.batchSizeKg } : {}), ...packFields(input), createdAt: context.today.toISOString(), createdBy: context.userName
   };
   const over = overOrdered(order, [...jobs, created]);
   return over ? { error: over } : created;

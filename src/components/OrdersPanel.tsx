@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
-import { type ManualJob, jobsFor, linesForJob, type JobOrder } from "@/lib/services/jobOrders";
+import { type ManualJob, jobsFor, linesForJob, packsFor, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
@@ -314,28 +314,43 @@ function JobOrders({ order, product, jobOrders, lines, actions }: { order: Purch
   // Kilograms for a quantity, from the product's batch size when the quantity is in the PO's unit.
   const kgFor = (quantity: number, uom: string) => product?.batchSizeKg && product.batchQuantity && uom === order.uom ? Number((product.batchSizeKg * quantity / product.batchQuantity).toPrecision(6)) : undefined;
   const number = (value: FormDataEntryValue | null) => { const text = String(value ?? "").trim(); return text ? Number(text) : undefined; };
+  // Packs: boxes, bottles, cartons... (not weights or the product's own unit).
+  const packUoms = (current?: string) => [...new Set([current ?? "", ...uoms.filter((item) => item.active && !["kg", "g", "mg"].includes(item.name) && item.name !== order.uom).map((item) => item.name)].filter(Boolean))];
+  // The fields shared by adding and editing; a blank pack quantity is worked out from the pack size.
+  function readJob(data: FormData) {
+    const quantity = Number(data.get("quantity")), uom = String(data.get("uom") ?? order.uom), packSize = number(data.get("packSize"));
+    const packQuantity = number(data.get("packQuantity")) ?? packsFor(quantity, packSize), packUom = String(data.get("packUom") ?? "").trim();
+    return { number: String(data.get("number") ?? "").trim(), quantity, uom, batchSizeKg: number(data.get("kg")), packQuantity, packUom: packUom || undefined, packSize };
+  }
+  const fields = (job?: JobOrder) => <>
+    <label>Job order no.<input name="number" required maxLength={60} autoComplete="off" placeholder="e.g. JO0010" defaultValue={job?.number} /></label>
+    <label>Quantity<input name="quantity" type="number" min="0" step="any" required defaultValue={job ? job.quantity : remaining ? Math.min(remaining, allowable ?? remaining) : undefined} /></label>
+    <label>UOM<select name="uom" defaultValue={job?.uom ?? order.uom}>{uomOptions(job?.uom ?? order.uom).map((name) => <option key={name}>{name}</option>)}</select></label>
+    <label>Batch quantity (kg)<input name="kg" type="number" min="0" step="any" defaultValue={job?.batchSizeKg} placeholder={!job && product?.batchSizeKg ? "From the product if blank" : "Optional"} /></label>
+    <label>Pack quantity<input name="packQuantity" type="number" min="0" step="any" defaultValue={job?.packQuantity} placeholder="Auto from pack size" /></label>
+    <label>Pack UOM<select name="packUom" defaultValue={job?.packUom ?? ""}><option value="">None</option>{packUoms(job?.packUom).map((name) => <option key={name}>{name}</option>)}</select></label>
+    <label title={`How many ${order.uom} go in one pack`}>Pack size ({order.uom} per pack)<input name="packSize" type="number" min="0" step="any" defaultValue={job?.packSize} placeholder="e.g. 30" /></label>
+  </>;
   return <section className="job-orders" aria-label={`Job orders for ${order.poNumber}`}>
     <div className="order-detail-head"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
       <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span></div>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
-      <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Quantity</th><th scope="col" className="numeric">Batch size</th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
+      <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Quantity</th><th scope="col" className="numeric">Batch quantity</th><th scope="col">Packs</th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
       <tbody>{jobs.map((job) => {
         const planned = linesForJob(job.id, lines).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate));
         const done = planned.length > 0 && planned.every((line) => line.completedAt);
-        if (editing === job.id) return <tr key={job.id} className="job-order-editing"><td colSpan={6}>
+        if (editing === job.id) return <tr key={job.id} className="job-order-editing"><td colSpan={7}>
           <form className="job-order-edit" onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
-            const batchSizeKg = number(data.get("kg")), batchNumber = String(data.get("batchNumber") ?? "").trim();
-            const { batchSizeKg: _k, batchNumber: _b, ...rest } = job;
-            const next: JobOrder = { ...rest, number: String(data.get("number") ?? ""), quantity: Number(data.get("quantity")), uom: String(data.get("uom") ?? ""), ...(batchSizeKg ? { batchSizeKg } : {}), ...(batchNumber ? { batchNumber } : {}) };
+            // The batch number is keyed in on the Planner Board; editing here keeps it.
+            const read = readJob(data);
+            const { batchSizeKg: _k, packQuantity: _pq, packUom: _pu, packSize: _ps, ...rest } = job;
+            const next: JobOrder = { ...rest, number: read.number, quantity: read.quantity, uom: read.uom,
+              ...(read.batchSizeKg ? { batchSizeKg: read.batchSizeKg } : {}), ...(read.packQuantity ? { packQuantity: read.packQuantity } : {}), ...(read.packUom ? { packUom: read.packUom } : {}), ...(read.packSize ? { packSize: read.packSize } : {}) };
             if (report(actions.onUpdate(next), `${next.number.trim()} saved.`)) setEditing(null);
           }}>
-            <label>Job order no.<input name="number" required maxLength={60} defaultValue={job.number} /></label>
-            <label>Quantity<input name="quantity" type="number" min="0" step="any" required defaultValue={job.quantity} /></label>
-            <label>UOM<select name="uom" defaultValue={job.uom}>{uomOptions(job.uom).map((name) => <option key={name}>{name}</option>)}</select></label>
-            <label>Batch size (kg)<input name="kg" type="number" min="0" step="any" defaultValue={job.batchSizeKg} placeholder="Optional" /></label>
-            <label>Batch number<input name="batchNumber" maxLength={60} defaultValue={job.batchNumber ?? ""} placeholder="Keyed in by production" /></label>
+            {fields(job)}
             <button type="submit" className="primary-button">Save</button>
             <button type="button" className="calendar-button" onClick={() => { setEditing(null); setErrors([]); }}>Cancel</button>
             {planned.length ? <small className="route-muted">Renaming it also relabels its {planned.length} planned activit{planned.length === 1 ? "y" : "ies"}.</small> : null}
@@ -345,7 +360,8 @@ function JobOrders({ order, product, jobOrders, lines, actions }: { order: Purch
           <th scope="row"><strong>{job.number}</strong><small>Batch {job.sequence} of PO item</small></th>
           <td className="numeric">{job.quantity.toLocaleString()} {job.uom}</td>
           <td className="numeric">{job.batchSizeKg !== undefined ? `${job.batchSizeKg.toLocaleString("en-MY", { maximumFractionDigits: 3 })} kg` : "-"}</td>
-          <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Production keys it in</span>}</td>
+          <td>{job.packQuantity ? <>{job.packQuantity.toLocaleString()} {job.packUom}{job.packSize ? <small>{job.packSize.toLocaleString()} {order.uom} per {(job.packUom ?? "pack").replace(/s$/, "")}</small> : null}</> : job.packSize ? <small>{job.packSize.toLocaleString()} per pack</small> : "-"}</td>
+          <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
           <td>{planned.length ? <><span className={`badge ${done ? "success" : "info"}`}>{done ? "Done" : "Planned"}</span> <small>{shortDate(planned[0].plannedDate)} – {shortDate(planned.at(-1)!.plannedDate)} · {planned.length} activit{planned.length === 1 ? "y" : "ies"}</small></>
             : actions.canPlan ? <span className="job-plan"><input type="date" aria-label={`Start date for ${job.number}`} value={starts[job.id] ?? today} onChange={(event) => setStarts({ ...starts, [job.id]: event.target.value })} />
               <button type="button" className="calendar-button" onClick={() => report(actions.onPlan(job.id, starts[job.id] ?? today), `${job.number} planned: one activity per process from ${shortDate(starts[job.id] ?? today)}. Drag them in the planner to adjust.`)}>Plan route</button></span>
@@ -360,14 +376,11 @@ function JobOrders({ order, product, jobOrders, lines, actions }: { order: Purch
     {actions.canCreate ? <form key={addVersion} className="job-order-form" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
-      const quantity = Number(data.get("quantity")), uom = String(data.get("uom") ?? order.uom), keyed = String(data.get("number") ?? "").trim();
-      const batchSizeKg = number(data.get("kg")) ?? kgFor(quantity, uom);
-      if (report(actions.onCreate({ number: keyed, orderId: order.id, quantity, uom, ...(batchSizeKg ? { batchSizeKg } : {}) }), `Job order ${keyed} added to ${order.poNumber}.`)) setAddVersion((value) => value + 1);
+      const read = readJob(data);
+      const batchSizeKg = read.batchSizeKg ?? kgFor(read.quantity, read.uom);
+      if (report(actions.onCreate({ ...read, orderId: order.id, batchSizeKg }), `Job order ${read.number} added to ${order.poNumber}.`)) setAddVersion((value) => value + 1);
     }}>
-      <label>Job order no.<input name="number" required maxLength={60} autoComplete="off" placeholder="e.g. JO0010" /></label>
-      <label>Quantity<input name="quantity" type="number" min="0" step="any" required defaultValue={remaining ? Math.min(remaining, allowable ?? remaining) : undefined} /></label>
-      <label>UOM<select name="uom" defaultValue={order.uom}>{uomOptions(order.uom).map((name) => <option key={name}>{name}</option>)}</select></label>
-      <label>Batch size (kg)<input name="kg" type="number" min="0" step="any" placeholder={product?.batchSizeKg ? "From the product if left blank" : "Optional"} /></label>
+      {fields()}
       <button type="submit" className="primary-button"><Plus size={16} />Add job order</button>
     </form> : null}
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}

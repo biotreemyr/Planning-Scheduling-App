@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { createManualJobOrder, findJobByNumber, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { createManualJobOrder, findJobByNumber, packsFor, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
 import { createBatchLines } from "../src/lib/services/planChanges";
@@ -91,5 +91,18 @@ describe("job orders", () => {
     expect(createManualJobOrder({ number: "JO-X", orderId: "missing", quantity: 1, uom: "tablets" }, state.data.orders, jobs, state.products, context)).toEqual({ error: "Choose the PO item job order JO-X belongs to." });
     // Folic acid's allowable batch is 300,000 tablets.
     expect(createManualJobOrder({ number: "JO-Y", orderId: order.id, quantity: 300001, uom: "tablets" }, state.data.orders, jobs, state.products, context)).toEqual({ error: "One job order holds at most the allowable batch quantity of 300,000 tablets." });
+  });
+  it("keeps the pack quantity, pack UOM and pack size, rounding packs up", () => {
+    expect(packsFor(125000, 30)).toBe(4167);
+    expect(packsFor(120000, 30)).toBe(4000);
+    expect(packsFor(1000)).toBeUndefined();
+    const context = { today, userName: "Aida", newId: () => "job-pack" };
+    const packed = createManualJobOrder({ number: "JO0030", orderId: order.id, quantity: 300000, uom: "tablets", batchSizeKg: 75, packQuantity: 10000, packUom: "bottles", packSize: 30 }, state.data.orders, state.data.jobOrders, state.products, context);
+    expect(packed).toMatchObject({ batchSizeKg: 75, packQuantity: 10000, packUom: "bottles", packSize: 30 });
+    const next = structuredClone(state);
+    next.data.jobOrders.push(packed as JobOrder);
+    expect(() => parseWorkspace(next)).not.toThrow();
+    expect(createManualJobOrder({ number: "JO0031", orderId: order.id, quantity: 1, uom: "tablets", packQuantity: 5 }, state.data.orders, state.data.jobOrders, state.products, context)).toEqual({ error: "Choose the pack UOM (boxes, bottles, carton...)." });
+    expect(updateJobOrder({ ...(packed as JobOrder), packSize: 0 }, [...state.data.jobOrders, packed as JobOrder], state.data.orders, state.products)).toEqual({ error: "Pack size must be greater than zero." });
   });
 });
