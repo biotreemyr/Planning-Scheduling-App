@@ -462,9 +462,11 @@
 .route-plan-table input[type="number"] { width: 96px; min-height: 34px; }
 .route-plan-table select { width: 104px; min-height: 34px; }
 .activity-dialog.activity-dialog-wide { width: min(720px, calc(100vw - 24px)); }
-/* New order: job order numbers per line item, one per batch. */
-.orders-form .order-item-jobs { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
-.orders-form .order-item-job { display: flex; align-items: flex-end; gap: 8px; }
-.orders-form .order-item-job label { min-width: 220px; }
-.orders-form .order-item-jobs > .calendar-button { min-height: 38px; }
-@media (max-width: 760px) { .orders-form .order-item-jobs { grid-column: auto; } }
+/* Job orders keyed in and edited inside a PO item. */
+.job-order-form { grid-template-columns: minmax(160px, 1.2fr) minmax(120px, 0.8fr) minmax(100px, 0.6fr) minmax(130px, 0.8fr) auto; }
+.job-order-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 4px 0; }
+.job-order-edit label { min-width: 130px; flex: 1 1 130px; }
+.job-order-edit > small { flex-basis: 100%; }
+.job-actions { display: inline-flex; gap: 4px; }
+.job-order-table .job-order-editing td { background: #f6faf8; }
+@media (max-width: 760px) { .job-order-form { grid-template-columns: minmax(0, 1fr); } }

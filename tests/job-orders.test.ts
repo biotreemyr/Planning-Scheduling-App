@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { buildJobOrders, createManualJobOrder, findJobByNumber, nextJobNumber, planJobOrders, validateBatchNumber, validateCustomer } from "../src/lib/services/jobOrders";
+import { createManualJobOrder, findJobByNumber, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
 import { createBatchLines } from "../src/lib/services/planChanges";
@@ -12,24 +12,26 @@ const order = state.data.orders.find((item) => item.poNumber === "PO-2610-142")!
 const today = new Date(2026, 9, 7, 10);
 
 describe("job orders", () => {
-  it("splits a PO item by the allowable batch quantity, scaling the batch size for a part batch", () => {
-    const plan = planJobOrders(order, state.data.jobOrders, 250000, 62.5);
-    expect(plan).toEqual({ remaining: 0, jobs: [{ quantity: 250000, batchSizeKg: 62.5 }, { quantity: 250000, batchSizeKg: 62.5 }, { quantity: 100000, batchSizeKg: 25 }] });
-    expect(planJobOrders(order, state.data.jobOrders, 0)).toEqual({ error: "Enter the allowable batch quantity." });
+  const keyIn = (number: string, quantity: number, jobs: JobOrder[] = state.data.jobOrders) => createManualJobOrder({ number, orderId: order.id, quantity, uom: "tablets" }, state.data.orders, jobs, state.products, { today, userName: "Aida", newId: () => `job-${number}` });
+  it("keys in several job orders on one PO item, never more than it ordered", () => {
+    const first = keyIn("JO0010", 300000) as JobOrder;
+    const second = keyIn("JO0011", 300000, [...state.data.jobOrders, first]) as JobOrder;
+    expect([first.sequence, second.sequence, second.orderId]).toEqual([1, 2, order.id]);
+    expect(keyIn("JO0012", 1, [...state.data.jobOrders, first, second])).toEqual({ error: "Job orders for PO-2610-142 would add up to 600,001 tablets, more than the 600,000 ordered." });
   });
-  it("numbers job orders by month and continues after the ones released already", () => {
-    const plan = planJobOrders(order, state.data.jobOrders, 300000);
-    if ("error" in plan) throw new Error(plan.error);
-    let id = 0;
-    const jobs = buildJobOrders(order, state.data.jobOrders, plan.jobs, { today, userName: "Aida", newId: () => `job-${++id}` });
-    expect(jobs.map((job) => [job.number, job.sequence, job.quantity])).toEqual([["JO-2610-001", 1, 300000], ["JO-2610-002", 2, 300000]]);
-    expect(nextJobNumber(jobs, today)).toBe("JO-2610-003");
-    expect(planJobOrders(order, [...state.data.jobOrders, ...jobs], 300000)).toEqual({ error: "All 600,000 tablets of this PO item are already in job orders." });
+  it("edits a job order: new number, quantity and batch number, still checked", () => {
+    const first = keyIn("JO0010", 300000) as JobOrder;
+    const second = keyIn("JO0011", 300000, [...state.data.jobOrders, first]) as JobOrder;
+    const jobs = [...state.data.jobOrders, first, second];
+    expect(updateJobOrder({ ...first, number: " JO0010-A ", quantity: 250000, batchNumber: "FA-777" }, jobs, state.data.orders, state.products)).toMatchObject({ number: "JO0010-A", quantity: 250000, batchNumber: "FA-777" });
+    expect(updateJobOrder({ ...first, number: "jo0011" }, jobs, state.data.orders, state.products)).toEqual({ error: "Job order jo0011 already exists." });
+    expect(updateJobOrder({ ...first, number: "" }, jobs, state.data.orders, state.products)).toEqual({ error: "Key in the job order number." });
+    expect(updateJobOrder({ ...first, quantity: 300001 }, jobs, state.data.orders, state.products)).toMatchObject({ error: expect.stringContaining("allowable batch quantity") });
+    const taken = state.data.jobOrders.find((job) => job.batchNumber)!.batchNumber!;
+    expect(updateJobOrder({ ...first, batchNumber: taken }, jobs, state.data.orders, state.products)).toEqual({ error: `Batch number ${taken} is already used by another job order.` });
   });
   it("plans a job order's route as activities linked to it, which the workspace accepts", () => {
-    const plan = planJobOrders(order, state.data.jobOrders, 300000);
-    if ("error" in plan) throw new Error(plan.error);
-    const [job] = buildJobOrders(order, state.data.jobOrders, plan.jobs, { today, userName: "Aida", newId: () => "job-new" });
+    const job = keyIn("JO0020", 300000) as JobOrder;
     let id = 0;
     const result = createBatchLines({ label: job.number, quantity: job.quantity, startDate: "2026-10-12", jobOrderId: job.id }, { order, format: "Tablet", lines: state.data.lines, directory: state.directory, uom: order.uom, newId: () => `line-new-${++id}` });
     if ("error" in result) throw new Error(result.error);

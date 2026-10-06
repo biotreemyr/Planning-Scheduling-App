@@ -30,7 +30,7 @@ import type { WorkspaceEnvelope, WorkspaceSnapshot } from "@/lib/domain/workspac
 import { SampleDataAdmin } from "@/components/SampleDataAdmin";
 import { useWorkspacePersistence } from "@/components/WorkspacePersistence";
 import { capabilitiesForDemoRole, capabilitiesFromPermissions } from "@/lib/auth/capabilities";
-import { OrdersPanel, type NewOrderJob } from "@/components/OrdersPanel";
+import { OrdersPanel } from "@/components/OrdersPanel";
 import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
 import { validateCompletion, type CompletionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
@@ -53,7 +53,7 @@ import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
 import { getScheduleReport } from "@/lib/services/reports";
 import { syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 import { createBatchLines, moveActivity, type NewBatch } from "@/lib/services/planChanges";
-import { buildJobOrders, createManualJobOrder, linesForJob, type ManualJob, planJobOrders, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
+import { createManualJobOrder, linesForJob, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
 type Tab = "planner" | "orders" | "master" | "reports";
@@ -836,7 +836,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   }
   // Several line items of one PO are added together, each checked against the ones before it.
   // A customer ID not seen before is added to the customer list in the same save.
-  function addOrders(items: PurchaseOrder[], customer: Customer, jobs: NewOrderJob[] = []) {
+  function addOrders(items: PurchaseOrder[], customer: Customer) {
     if (!canEditOrders) return ["Planner or administrator access is required."];
     const known = data.customers.find((item) => item.id === customer.id);
     const customerErrors = known ? [] : validateCustomer(customer, data.customers);
@@ -849,21 +849,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       return items.length > 1 ? problems.map((problem) => `Item ${index + 1}: ${problem}`) : problems;
     });
     if (errors.length) return errors;
-    // Job order numbers keyed in with the PO: one per batch, each within the line's quantity.
-    const created: JobOrder[] = [];
-    for (const [index, order] of accepted.entries()) {
-      const prefix = accepted.length > 1 ? `Item ${index + 1}: ` : "";
-      const mine = jobs.filter((job) => job.orderIndex === index);
-      const total = mine.reduce((sum, job) => sum + job.quantity, 0);
-      if (total > order.quantity) return [`${prefix}the job orders add up to ${total.toLocaleString()} ${order.uom}, more than the ${order.quantity.toLocaleString()} ordered.`];
-      for (const job of mine) {
-        const result = createManualJobOrder({ ...job, orderId: order.id }, [...data.orders, ...accepted], [...data.jobOrders, ...created], products, { today: new Date(), userName: member.name, newId: () => newId("job") });
-        // Over one allowable batch: point to splitting the line into more job orders.
-        if ("error" in result) return [`${prefix}${result.error}${result.error.startsWith("One job order holds") ? " Split it with “Another job order (batch)”." : ""}`];
-        created.push(result);
-      }
-    }
-    setData((current) => ({ ...current, customers: known ? current.customers : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted], jobOrders: [...current.jobOrders, ...created] }));
+    setData((current) => ({ ...current, customers: known ? current.customers : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted] }));
     return [];
   }
   // Add activity: the job order is keyed in by number. An unknown number becomes a new job order
@@ -884,15 +870,26 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     const linked = lines.map((line) => ({ ...line, jobOrderId: job.id, productionOrderId: job.orderId, orderReference: job.number }));
     setData((current) => ({ ...current, ...(created ? { jobOrders: [...current.jobOrders, created] } : {}), lines: [...current.lines, ...linked] }));
   }
-  // Job orders: one per batch of a PO item, split by the allowable batch quantity.
-  function createJobOrders(orderId: string, allowableQuantity: number, batchSizeKg?: number) {
-    if (!caps.createPlan && !caps.manage) return ["Planning access is required to create job orders."];
-    const order = data.orders.find((item) => item.id === orderId);
-    if (!order) return ["This order no longer exists."];
-    const plan = planJobOrders(order, data.jobOrders, allowableQuantity, batchSizeKg);
-    if ("error" in plan) return [plan.error];
-    const jobs = buildJobOrders(order, data.jobOrders, plan.jobs, { today: new Date(), userName: member.name, newId: () => newId("job") });
-    setData((current) => ({ ...current, jobOrders: [...current.jobOrders, ...jobs] }));
+  // Job orders: keyed in on the PO item, one per batch, each with its own number.
+  function addJobOrder(input: ManualJob) {
+    if (!caps.createPlan && !caps.manage) return ["Planning access is required to add job orders."];
+    const created = createManualJobOrder(input, data.orders, data.jobOrders, products, { today: new Date(), userName: member.name, newId: () => newId("job") });
+    if ("error" in created) return [created.error];
+    setData((current) => ({ ...current, jobOrders: [...current.jobOrders, created] }));
+    return [];
+  }
+  // Editing a job order; a new number relabels the batch reference of its activities too.
+  function editJobOrder(next: JobOrder) {
+    if (!caps.createPlan && !caps.manage) return ["Planning access is required to edit job orders."];
+    const current = data.jobOrders.find((job) => job.id === next.id);
+    if (!current) return ["This job order no longer exists."];
+    const result = updateJobOrder(next, data.jobOrders, data.orders, products);
+    if ("error" in result) return [result.error];
+    const batchChanged = (result.batchNumber ?? "") !== (current.batchNumber ?? "");
+    const saved: JobOrder = batchChanged && result.batchNumber ? { ...result, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
+      : batchChanged ? (({ batchNumberBy: _by, batchNumberAt: _at, ...rest }) => rest)(result) : result;
+    setData((state) => ({ ...state, jobOrders: state.jobOrders.map((job) => job.id === saved.id ? saved : job),
+      lines: saved.number === current.number ? state.lines : state.lines.map((line) => line.jobOrderId === saved.id ? { ...line, orderReference: saved.number } : line) }));
     return [];
   }
   function deleteJobOrder(id: string) {
@@ -1036,7 +1033,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "orders" ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} jobActions={{ canCreate: caps.createPlan || caps.manage, canPlan: caps.createPlan, onCreate: createJobOrders, onDelete: deleteJobOrder, onPlan: planJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
+      {activeTab === "orders" ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} jobActions={{ canCreate: caps.createPlan || caps.manage, canPlan: caps.createPlan, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder, onPlan: planJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />

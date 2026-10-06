@@ -1,10 +1,10 @@
 "use client";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Plus, Printer, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
-import { type ManualJob, customerLabel, jobsFor, linesForJob, planJobOrders, productBatch, type JobOrder } from "@/lib/services/jobOrders";
+import { type ManualJob, jobsFor, linesForJob, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
@@ -18,7 +18,9 @@ const statusBadge: Record<OrderStatus, string> = { "Not scheduled": "neutral", S
 
 export type JobActions = {
   canCreate: boolean; canPlan: boolean;
-  onCreate: (orderId: string, allowableQuantity: number, batchSizeKg?: number) => string[];
+  // Job order numbers are keyed in; a PO item takes as many job orders as it has batches.
+  onCreate: (job: ManualJob) => string[];
+  onUpdate: (job: JobOrder) => string[];
   onDelete: (id: string) => string[];
   onPlan: (id: string, startDate: string) => string[];
 };
@@ -26,7 +28,7 @@ export type JobActions = {
 export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, lines, products, directory, visibleCalendarIds, editable, userName, onSave, onAdd, onDelete, flow = [] }: {
   orders: PurchaseOrder[]; customers?: Customer[]; jobOrders?: JobOrder[]; jobActions?: JobActions;
   lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[]; flow?: FlowWarning[];
-  editable: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer, jobs: NewOrderJob[]) => string[]; onDelete: (id: string) => string[];
+  editable: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer) => string[]; onDelete: (id: string) => string[];
 }) {
   const customerNames = [...new Set(orders.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
   return <section className="orders-layout">
@@ -35,16 +37,12 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
   </section>;
 }
 
-// A line item's job orders: one per batch. A single job order with no quantity covers the whole line.
-type DraftJob = { key: string; number: string; quantity: string };
-type DraftItem = { key: string; productId: string; uom: string; format: ProductFormat | ""; jobs: DraftJob[] };
-const draftJob = (): DraftJob => ({ key: crypto.randomUUID(), number: "", quantity: "" });
-const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", uom: "", format: "", jobs: [draftJob()] });
-export type NewOrderJob = Omit<ManualJob, "orderId"> & { orderIndex: number };
+type DraftItem = { key: string; productId: string; uom: string; format: ProductFormat | "" };
+const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", uom: "", format: "" });
 
 // One PO keyed in once: customer and PO number, then as many product line items as it lists.
 // Typing an existing PO number of the same customer adds further items to that PO.
-function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer, jobs: NewOrderJob[]) => string[] }) {
+function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer) => string[] }) {
   const uoms = useUoms();
   const [items, setItems] = useState<DraftItem[]>(() => [draftItem()]);
   const [poNumber, setPoNumber] = useState("");
@@ -57,7 +55,6 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
   const [version, setVersion] = useState(0);
   const existing = poNumber.trim() ? poItems(poNumber, orders) : [];
   const firstItem = nextPoItem(poNumber, orders);
-  const updateJob = (itemKey: string, jobKey: string, change: Partial<DraftJob>) => setItems((current) => current.map((item) => item.key !== itemKey ? item : { ...item, jobs: item.jobs.map((job) => job.key === jobKey ? { ...job, ...change } : job) }));
   const update = (key: string, change: Partial<DraftItem>) => setItems((current) => current.map((item) => item.key === key ? { ...item, ...change } : item));
   const formatOf = (item: DraftItem) => item.format || inferFormat(products.find((product) => product.id === item.productId));
   return <form key={version} className="workspace-panel orders-form" onSubmit={(event) => {
@@ -72,17 +69,11 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
       quantity: Number(data.get(`quantity-${item.key}`)), uom: item.uom || (products.find((product) => product.id === item.productId)?.uom ?? ""),
       expectedDates: {}, createdAt, createdBy: userName
     }));
-    // Job order numbers keyed in per line; blank ones are left for later (Orders tab or Add activity).
-    const jobs: NewOrderJob[] = items.flatMap((item, index) => {
-      const keyed = item.jobs.filter((job) => job.number.trim());
-      return keyed.map((job) => ({ orderIndex: index, number: job.number.trim(), uom: built[index].uom,
-        quantity: keyed.length === 1 && !job.quantity.trim() ? built[index].quantity : Number(job.quantity) }));
-    });
-    const result = onAdd(built, customer, jobs);
+    const result = onAdd(built, customer);
     setErrors(result);
     if (!result.length) {
       const range = built.length === 1 ? `order ${built[0].number}` : `orders ${built[0].number}-${built.at(-1)!.number}`;
-      setNotice(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}${jobs.length ? `, with job order${jobs.length === 1 ? "" : "s"} ${jobs.map((job) => job.number).join(", ")}` : ""}.`);
+      setNotice(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}. Open it below to key in its job orders.`);
       setItems([draftItem()]); setPoNumber(""); setCustomerCode(""); setCustomerName(""); setVersion((value) => value + 1);
     }
   }}>
@@ -113,14 +104,6 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
           <div className="quantity-fields"><label>Quantity<input name={`quantity-${item.key}`} type="number" min="1" step="any" required /></label>
             <label>UOM<select value={item.uom || productUom} onChange={(event) => update(item.key, { uom: event.target.value })} required>{!productUom && !item.uom ? <option value="">Select</option> : null}{[...new Set([productUom, ...uoms.filter((unit) => unit.active).map((unit) => unit.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select></label></div>
           <small className="route-muted">Route: {routeLabel(format)}</small>
-          <div className="order-item-jobs">
-            {item.jobs.map((job, jobIndex) => <div className="order-item-job" key={job.key}>
-              <label>{item.jobs.length > 1 ? `Job order no. ${jobIndex + 1}` : "Job order no."}<input maxLength={60} autoComplete="off" placeholder="e.g. JO0009 (can be added later)" value={job.number} onChange={(event) => updateJob(item.key, job.key, { number: event.target.value })} /></label>
-              {item.jobs.length > 1 ? <label>Quantity ({item.uom || productUom || "UOM"})<input type="number" min="0" step="any" required={!!job.number.trim()} value={job.quantity} onChange={(event) => updateJob(item.key, job.key, { quantity: event.target.value })} /></label> : null}
-              {item.jobs.length > 1 ? <button type="button" className="icon-button" aria-label={`Remove job order ${jobIndex + 1}`} title="Remove this job order" onClick={() => update(item.key, { jobs: item.jobs.filter((other) => other.key !== job.key) })}><Trash2 size={15} /></button> : null}
-            </div>)}
-            <button type="button" className="calendar-button" onClick={() => update(item.key, { jobs: [...item.jobs, draftJob()] })} title="One job order per batch: add one for each batch this line needs"><Plus size={15} />Another job order (batch)</button>
-          </div>
         </div>;
       })}
       <button type="button" className="calendar-button" onClick={() => setItems((current) => [...current, draftItem()])}><Plus size={16} />Add another product</button>
@@ -128,7 +111,7 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
     <button type="submit" className="primary-button"><Plus size={17} />{items.length > 1 ? `Add PO with ${items.length} items` : "Add order"}</button>
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
     {notice && !errors.length ? <p role="status">{notice}</p> : null}
-    <p className="orders-help">Each product on the PO becomes its own numbered order with its own colour and route. Open it below to create its job orders from the allowable batch quantity; planning then schedules each job order.</p>
+    <p className="orders-help">Each product on the PO becomes its own numbered order with its own colour and route. Open it below to key in its job orders, one per batch; planning then schedules each job order.</p>
   </form>;
 }
 
@@ -303,27 +286,51 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
   </>;
 }
 
-// The PO item's job orders: one per batch, created from the allowable batch quantity, then planned.
+// The PO item's job orders: one per batch, each keyed in with its own number, editable, then planned.
 function JobOrders({ order, product, jobOrders, lines, actions }: { order: PurchaseOrder; product?: Product; jobOrders: JobOrder[]; lines: PlanLine[]; actions: JobActions }) {
-  const defaults = productBatch(product);
-  const [allowable, setAllowable] = useState(defaults.quantity ? String(defaults.quantity) : "");
-  const [kg, setKg] = useState(defaults.kg ? String(defaults.kg) : "");
+  const uoms = useUoms();
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [starts, setStarts] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<string | null>(null);
+  const [addVersion, setAddVersion] = useState(0);
   const jobs = jobsFor(order.id, jobOrders);
-  const released = jobs.reduce((sum, job) => sum + job.quantity, 0);
-  const preview = planJobOrders(order, jobOrders, Number(allowable), kg.trim() ? Number(kg) : undefined);
+  const released = jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + job.quantity, 0);
+  const remaining = Math.max(0, Number((order.quantity - released).toPrecision(12)));
+  const allowable = product?.batchQuantity;
   const today = localDateKey(new Date());
-  const describe = (sizes: number[]) => [...sizes.reduce((counts, size) => counts.set(size, (counts.get(size) ?? 0) + 1), new Map<number, number>())].map(([size, count]) => `${count} × ${size.toLocaleString()}`).join(" + ");
+  const uomOptions = (current: string) => [...new Set([current, order.uom, ...uoms.filter((item) => item.active).map((item) => item.name)].filter(Boolean))];
+  const report = (result: string[], success: string) => { setErrors(result); setNotice(result.length ? "" : success); return !result.length; };
+  // Kilograms for a quantity, from the product's batch size when the quantity is in the PO's unit.
+  const kgFor = (quantity: number, uom: string) => product?.batchSizeKg && product.batchQuantity && uom === order.uom ? Number((product.batchSizeKg * quantity / product.batchQuantity).toPrecision(6)) : undefined;
+  const number = (value: FormDataEntryValue | null) => { const text = String(value ?? "").trim(); return text ? Number(text) : undefined; };
   return <section className="job-orders" aria-label={`Job orders for ${order.poNumber}`}>
     <div className="order-detail-head"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
-      <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} released{released < order.quantity ? ` · ${(order.quantity - released).toLocaleString()} still to release` : ""}</span></div>
+      <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span></div>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
-      <thead><tr><th scope="col">Job order</th><th scope="col" className="numeric">Quantity</th><th scope="col" className="numeric">Batch size</th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
+      <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Quantity</th><th scope="col" className="numeric">Batch size</th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
       <tbody>{jobs.map((job) => {
         const planned = linesForJob(job.id, lines).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate));
         const done = planned.length > 0 && planned.every((line) => line.completedAt);
+        if (editing === job.id) return <tr key={job.id} className="job-order-editing"><td colSpan={6}>
+          <form className="job-order-edit" onSubmit={(event) => {
+            event.preventDefault();
+            const data = new FormData(event.currentTarget);
+            const batchSizeKg = number(data.get("kg")), batchNumber = String(data.get("batchNumber") ?? "").trim();
+            const { batchSizeKg: _k, batchNumber: _b, ...rest } = job;
+            const next: JobOrder = { ...rest, number: String(data.get("number") ?? ""), quantity: Number(data.get("quantity")), uom: String(data.get("uom") ?? ""), ...(batchSizeKg ? { batchSizeKg } : {}), ...(batchNumber ? { batchNumber } : {}) };
+            if (report(actions.onUpdate(next), `${next.number.trim()} saved.`)) setEditing(null);
+          }}>
+            <label>Job order no.<input name="number" required maxLength={60} defaultValue={job.number} /></label>
+            <label>Quantity<input name="quantity" type="number" min="0" step="any" required defaultValue={job.quantity} /></label>
+            <label>UOM<select name="uom" defaultValue={job.uom}>{uomOptions(job.uom).map((name) => <option key={name}>{name}</option>)}</select></label>
+            <label>Batch size (kg)<input name="kg" type="number" min="0" step="any" defaultValue={job.batchSizeKg} placeholder="Optional" /></label>
+            <label>Batch number<input name="batchNumber" maxLength={60} defaultValue={job.batchNumber ?? ""} placeholder="Keyed in by production" /></label>
+            <button type="submit" className="primary-button">Save</button>
+            <button type="button" className="calendar-button" onClick={() => { setEditing(null); setErrors([]); }}>Cancel</button>
+            {planned.length ? <small className="route-muted">Renaming it also relabels its {planned.length} planned activit{planned.length === 1 ? "y" : "ies"}.</small> : null}
+          </form>
+        </td></tr>;
         return <tr key={job.id}>
           <th scope="row"><strong>{job.number}</strong><small>Batch {job.sequence} of PO item</small></th>
           <td className="numeric">{job.quantity.toLocaleString()} {job.uom}</td>
@@ -331,22 +338,27 @@ function JobOrders({ order, product, jobOrders, lines, actions }: { order: Purch
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Production keys it in</span>}</td>
           <td>{planned.length ? <><span className={`badge ${done ? "success" : "info"}`}>{done ? "Done" : "Planned"}</span> <small>{shortDate(planned[0].plannedDate)} – {shortDate(planned.at(-1)!.plannedDate)} · {planned.length} activit{planned.length === 1 ? "y" : "ies"}</small></>
             : actions.canPlan ? <span className="job-plan"><input type="date" aria-label={`Start date for ${job.number}`} value={starts[job.id] ?? today} onChange={(event) => setStarts({ ...starts, [job.id]: event.target.value })} />
-              <button type="button" className="calendar-button" onClick={() => { const result = actions.onPlan(job.id, starts[job.id] ?? today); setErrors(result); setNotice(result.length ? "" : `${job.number} planned: one activity per process from ${shortDate(starts[job.id] ?? today)}. Drag them in the planner to adjust.`); }}>Plan route</button></span>
+              <button type="button" className="calendar-button" onClick={() => report(actions.onPlan(job.id, starts[job.id] ?? today), `${job.number} planned: one activity per process from ${shortDate(starts[job.id] ?? today)}. Drag them in the planner to adjust.`)}>Plan route</button></span>
             : <span className="badge neutral">Not planned</span>}</td>
-          <td>{!planned.length && actions.canCreate ? <button type="button" className="icon-button danger" title={`Remove ${job.number}`} aria-label={`Remove ${job.number}`} onClick={() => { const result = actions.onDelete(job.id); setErrors(result); setNotice(result.length ? "" : `${job.number} removed.`); }}><Trash2 size={15} /></button> : null}</td>
+          <td><span className="job-actions">
+            {actions.canCreate ? <button type="button" className="icon-button" title={`Edit ${job.number}`} aria-label={`Edit ${job.number}`} onClick={() => { setEditing(job.id); setErrors([]); setNotice(""); }}><Pencil size={15} /></button> : null}
+            {!planned.length && actions.canCreate ? <button type="button" className="icon-button danger" title={`Remove ${job.number}`} aria-label={`Remove ${job.number}`} onClick={() => report(actions.onDelete(job.id), `${job.number} removed.`)}><Trash2 size={15} /></button> : null}
+          </span></td>
         </tr>;
       })}</tbody>
-    </table></div> : <p className="order-empty">No job orders yet.</p>}
-    {actions.canCreate && released < order.quantity ? <form className="job-order-form" onSubmit={(event) => {
+    </table></div> : <p className="order-empty">No job orders yet. Key in one for each batch of this PO item.</p>}
+    {actions.canCreate ? <form key={addVersion} className="job-order-form" onSubmit={(event) => {
       event.preventDefault();
-      const result = actions.onCreate(order.id, Number(allowable), kg.trim() ? Number(kg) : undefined);
-      setErrors(result);
-      setNotice(result.length || "error" in preview ? "" : `${preview.jobs.length} job order${preview.jobs.length === 1 ? "" : "s"} created (${describe(preview.jobs.map((job) => job.quantity))} ${order.uom}).`);
+      const data = new FormData(event.currentTarget);
+      const quantity = Number(data.get("quantity")), uom = String(data.get("uom") ?? order.uom), keyed = String(data.get("number") ?? "").trim();
+      const batchSizeKg = number(data.get("kg")) ?? kgFor(quantity, uom);
+      if (report(actions.onCreate({ number: keyed, orderId: order.id, quantity, uom, ...(batchSizeKg ? { batchSizeKg } : {}) }), `Job order ${keyed} added to ${order.poNumber}.`)) setAddVersion((value) => value + 1);
     }}>
-      <label>Allowable batch quantity ({order.uom})<input type="number" min="0" step="any" required value={allowable} onChange={(event) => setAllowable(event.target.value)} placeholder={product?.batchQuantity ? undefined : "Set it on the product to fill this in"} /></label>
-      <label>Batch size (kg, full batch)<input type="number" min="0" step="any" value={kg} onChange={(event) => setKg(event.target.value)} placeholder="Optional" /></label>
-      <button type="submit" className="primary-button" disabled={"error" in preview}><Plus size={16} />{"error" in preview ? "Create job orders" : `Create ${preview.jobs.length} job order${preview.jobs.length === 1 ? "" : "s"}`}</button>
-      <small className="route-muted">{"error" in preview ? allowable ? preview.error : "Enter the allowable batch quantity to see the split." : `Splits ${(order.quantity - released).toLocaleString()} ${order.uom} into ${describe(preview.jobs.map((job) => job.quantity))}${preview.jobs[0].batchSizeKg ? `, ${preview.jobs[0].batchSizeKg.toLocaleString()} kg for a full batch` : ""}.`}</small>
+      <label>Job order no.<input name="number" required maxLength={60} autoComplete="off" placeholder="e.g. JO0010" /></label>
+      <label>Quantity<input name="quantity" type="number" min="0" step="any" required defaultValue={remaining ? Math.min(remaining, allowable ?? remaining) : undefined} /></label>
+      <label>UOM<select name="uom" defaultValue={order.uom}>{uomOptions(order.uom).map((name) => <option key={name}>{name}</option>)}</select></label>
+      <label>Batch size (kg)<input name="kg" type="number" min="0" step="any" placeholder={product?.batchSizeKg ? "From the product if left blank" : "Optional"} /></label>
+      <button type="submit" className="primary-button"><Plus size={16} />Add job order</button>
     </form> : null}
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
     {notice && !errors.length ? <p role="status">{notice}</p> : null}
