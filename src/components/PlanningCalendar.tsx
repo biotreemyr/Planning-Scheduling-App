@@ -224,7 +224,9 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
         if (!Number.isFinite(quantity) || quantity <= 0 || !products.some((item) => item.id === productId)) return;
         // Every activity carries out a job order, which decides its product, PO and batch.
         if (!jobOrder || jobOrder.productId !== productId) { setFormError(creatingJob ? `Choose the PO item for job order ${jobText.trim()}.` : "Key in the job order number."); return; }
-        const measured = readMeasurement(data);
+        // The process is the activity type: the process chosen above names it.
+        const calendarId = String(data.get("calendar") ?? "");
+        const measured = { ...readMeasurement(data), activityType: processNames[calendarId] ?? calendars.find((item) => item.id === calendarId)?.name ?? "" };
         const activity = { ...measured, calendarId: String(data.get("calendar") ?? ""), productId, plannedDate: String(data.get("date")), quantity, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""), productionOrderId: jobOrder.id };
         const error = callbacks.current.onCreate(job ? { ...activity, orderReference: job.number, jobOrderId: job.id }
           : { ...activity, orderReference: jobText.trim(), newJob: { number: jobText.trim(), orderId: jobOrder.id, quantity, uom: measured.uom, ...(measured.batchSizeKg ? { batchSizeKg: measured.batchSizeKg } : {}) } });
