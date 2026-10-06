@@ -30,7 +30,7 @@ import type { WorkspaceEnvelope, WorkspaceSnapshot } from "@/lib/domain/workspac
 import { SampleDataAdmin } from "@/components/SampleDataAdmin";
 import { useWorkspacePersistence } from "@/components/WorkspacePersistence";
 import { capabilitiesForDemoRole, capabilitiesFromPermissions } from "@/lib/auth/capabilities";
-import { OrdersPanel } from "@/components/OrdersPanel";
+import { OrdersPanel, type NewOrderJob } from "@/components/OrdersPanel";
 import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
 import { validateCompletion, type CompletionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
@@ -836,7 +836,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   }
   // Several line items of one PO are added together, each checked against the ones before it.
   // A customer ID not seen before is added to the customer list in the same save.
-  function addOrders(items: PurchaseOrder[], customer: Customer) {
+  function addOrders(items: PurchaseOrder[], customer: Customer, jobs: NewOrderJob[] = []) {
     if (!canEditOrders) return ["Planner or administrator access is required."];
     const known = data.customers.find((item) => item.id === customer.id);
     const customerErrors = known ? [] : validateCustomer(customer, data.customers);
@@ -849,7 +849,21 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       return items.length > 1 ? problems.map((problem) => `Item ${index + 1}: ${problem}`) : problems;
     });
     if (errors.length) return errors;
-    setData((current) => ({ ...current, customers: known ? current.customers : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted] }));
+    // Job order numbers keyed in with the PO: one per batch, each within the line's quantity.
+    const created: JobOrder[] = [];
+    for (const [index, order] of accepted.entries()) {
+      const prefix = accepted.length > 1 ? `Item ${index + 1}: ` : "";
+      const mine = jobs.filter((job) => job.orderIndex === index);
+      const total = mine.reduce((sum, job) => sum + job.quantity, 0);
+      if (total > order.quantity) return [`${prefix}the job orders add up to ${total.toLocaleString()} ${order.uom}, more than the ${order.quantity.toLocaleString()} ordered.`];
+      for (const job of mine) {
+        const result = createManualJobOrder({ ...job, orderId: order.id }, [...data.orders, ...accepted], [...data.jobOrders, ...created], products, { today: new Date(), userName: member.name, newId: () => newId("job") });
+        // Over one allowable batch: point to splitting the line into more job orders.
+        if ("error" in result) return [`${prefix}${result.error}${result.error.startsWith("One job order holds") ? " Split it with “Another job order (batch)”." : ""}`];
+        created.push(result);
+      }
+    }
+    setData((current) => ({ ...current, customers: known ? current.customers : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted], jobOrders: [...current.jobOrders, ...created] }));
     return [];
   }
   // Add activity: the job order is keyed in by number. An unknown number becomes a new job order

@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Plus, Printer, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
-import { customerLabel, jobsFor, linesForJob, planJobOrders, productBatch, type JobOrder } from "@/lib/services/jobOrders";
+import { type ManualJob, customerLabel, jobsFor, linesForJob, planJobOrders, productBatch, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
@@ -26,7 +26,7 @@ export type JobActions = {
 export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, lines, products, directory, visibleCalendarIds, editable, userName, onSave, onAdd, onDelete, flow = [] }: {
   orders: PurchaseOrder[]; customers?: Customer[]; jobOrders?: JobOrder[]; jobActions?: JobActions;
   lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[]; flow?: FlowWarning[];
-  editable: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer) => string[]; onDelete: (id: string) => string[];
+  editable: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer, jobs: NewOrderJob[]) => string[]; onDelete: (id: string) => string[];
 }) {
   const customerNames = [...new Set(orders.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
   return <section className="orders-layout">
@@ -35,12 +35,16 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
   </section>;
 }
 
-type DraftItem = { key: string; productId: string; uom: string; format: ProductFormat | "" };
-const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", uom: "", format: "" });
+// A line item's job orders: one per batch. A single job order with no quantity covers the whole line.
+type DraftJob = { key: string; number: string; quantity: string };
+type DraftItem = { key: string; productId: string; uom: string; format: ProductFormat | ""; jobs: DraftJob[] };
+const draftJob = (): DraftJob => ({ key: crypto.randomUUID(), number: "", quantity: "" });
+const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", uom: "", format: "", jobs: [draftJob()] });
+export type NewOrderJob = Omit<ManualJob, "orderId"> & { orderIndex: number };
 
 // One PO keyed in once: customer and PO number, then as many product line items as it lists.
 // Typing an existing PO number of the same customer adds further items to that PO.
-function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer) => string[] }) {
+function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer, jobs: NewOrderJob[]) => string[] }) {
   const uoms = useUoms();
   const [items, setItems] = useState<DraftItem[]>(() => [draftItem()]);
   const [poNumber, setPoNumber] = useState("");
@@ -53,6 +57,7 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
   const [version, setVersion] = useState(0);
   const existing = poNumber.trim() ? poItems(poNumber, orders) : [];
   const firstItem = nextPoItem(poNumber, orders);
+  const updateJob = (itemKey: string, jobKey: string, change: Partial<DraftJob>) => setItems((current) => current.map((item) => item.key !== itemKey ? item : { ...item, jobs: item.jobs.map((job) => job.key === jobKey ? { ...job, ...change } : job) }));
   const update = (key: string, change: Partial<DraftItem>) => setItems((current) => current.map((item) => item.key === key ? { ...item, ...change } : item));
   const formatOf = (item: DraftItem) => item.format || inferFormat(products.find((product) => product.id === item.productId));
   return <form key={version} className="workspace-panel orders-form" onSubmit={(event) => {
@@ -67,11 +72,17 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
       quantity: Number(data.get(`quantity-${item.key}`)), uom: item.uom || (products.find((product) => product.id === item.productId)?.uom ?? ""),
       expectedDates: {}, createdAt, createdBy: userName
     }));
-    const result = onAdd(built, customer);
+    // Job order numbers keyed in per line; blank ones are left for later (Orders tab or Add activity).
+    const jobs: NewOrderJob[] = items.flatMap((item, index) => {
+      const keyed = item.jobs.filter((job) => job.number.trim());
+      return keyed.map((job) => ({ orderIndex: index, number: job.number.trim(), uom: built[index].uom,
+        quantity: keyed.length === 1 && !job.quantity.trim() ? built[index].quantity : Number(job.quantity) }));
+    });
+    const result = onAdd(built, customer, jobs);
     setErrors(result);
     if (!result.length) {
       const range = built.length === 1 ? `order ${built[0].number}` : `orders ${built[0].number}-${built.at(-1)!.number}`;
-      setNotice(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}.`);
+      setNotice(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}${jobs.length ? `, with job order${jobs.length === 1 ? "" : "s"} ${jobs.map((job) => job.number).join(", ")}` : ""}.`);
       setItems([draftItem()]); setPoNumber(""); setCustomerCode(""); setCustomerName(""); setVersion((value) => value + 1);
     }
   }}>
@@ -102,6 +113,14 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
           <div className="quantity-fields"><label>Quantity<input name={`quantity-${item.key}`} type="number" min="1" step="any" required /></label>
             <label>UOM<select value={item.uom || productUom} onChange={(event) => update(item.key, { uom: event.target.value })} required>{!productUom && !item.uom ? <option value="">Select</option> : null}{[...new Set([productUom, ...uoms.filter((unit) => unit.active).map((unit) => unit.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select></label></div>
           <small className="route-muted">Route: {routeLabel(format)}</small>
+          <div className="order-item-jobs">
+            {item.jobs.map((job, jobIndex) => <div className="order-item-job" key={job.key}>
+              <label>{item.jobs.length > 1 ? `Job order no. ${jobIndex + 1}` : "Job order no."}<input maxLength={60} autoComplete="off" placeholder="e.g. JO0009 (can be added later)" value={job.number} onChange={(event) => updateJob(item.key, job.key, { number: event.target.value })} /></label>
+              {item.jobs.length > 1 ? <label>Quantity ({item.uom || productUom || "UOM"})<input type="number" min="0" step="any" required={!!job.number.trim()} value={job.quantity} onChange={(event) => updateJob(item.key, job.key, { quantity: event.target.value })} /></label> : null}
+              {item.jobs.length > 1 ? <button type="button" className="icon-button" aria-label={`Remove job order ${jobIndex + 1}`} title="Remove this job order" onClick={() => update(item.key, { jobs: item.jobs.filter((other) => other.key !== job.key) })}><Trash2 size={15} /></button> : null}
+            </div>)}
+            <button type="button" className="calendar-button" onClick={() => update(item.key, { jobs: [...item.jobs, draftJob()] })} title="One job order per batch: add one for each batch this line needs"><Plus size={15} />Another job order (batch)</button>
+          </div>
         </div>;
       })}
       <button type="button" className="calendar-button" onClick={() => setItems((current) => [...current, draftItem()])}><Plus size={16} />Add another product</button>
