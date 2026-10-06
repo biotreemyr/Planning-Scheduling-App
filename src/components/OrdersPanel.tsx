@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
@@ -31,9 +31,18 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
   editable: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer) => string[]; onDelete: (id: string) => string[];
 }) {
   const customerNames = [...new Set(orders.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
+  // New order opens in a pop-up from the orders header, so the page shows just the orders.
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [formVersion, setFormVersion] = useState(0);
+  const [added, setAdded] = useState("");
+  const newOrderButton = editable ? <button type="button" className="primary-button" onClick={() => { setFormVersion((value) => value + 1); setAdded(""); dialog.current?.showModal(); }}><Plus size={17} />New order</button> : null;
   return <section className="orders-layout">
-    {editable ? <NewOrderForm orders={orders} customers={customers} products={products} userName={userName} onAdd={onAdd} /> : null}
-    <OrdersTable orders={orders} customerRecords={customers} jobOrders={jobOrders} jobActions={jobActions} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
+    {editable ? <dialog ref={dialog} className="activity-dialog order-dialog" aria-labelledby="new-order-title">
+      <NewOrderForm key={formVersion} orders={orders} customers={customers} products={products} userName={userName} onAdd={onAdd}
+        onClose={() => dialog.current?.close()} onDone={(message) => { setAdded(message); dialog.current?.close(); }} />
+    </dialog> : null}
+    {added ? <p role="status" className="calendar-notice">{added}</p> : null}
+    <OrdersTable action={newOrderButton} orders={orders} customerRecords={customers} jobOrders={jobOrders} jobActions={jobActions} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
   </section>;
 }
 
@@ -42,7 +51,10 @@ const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", u
 
 // One PO keyed in once: customer and PO number, then as many product line items as it lists.
 // Typing an existing PO number of the same customer adds further items to that PO.
-function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer) => string[] }) {
+function NewOrderForm({ orders, products, customers, userName, onAdd, onClose, onDone }: {
+  orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer) => string[];
+  onClose: () => void; onDone: (message: string) => void;
+}) {
   const uoms = useUoms();
   const [items, setItems] = useState<DraftItem[]>(() => [draftItem()]);
   const [poNumber, setPoNumber] = useState("");
@@ -51,13 +63,12 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
   // A known customer ID fills in its name; a new one is added to the customer list with this PO.
   const known = customers.find((item) => item.code.trim().toLowerCase() === customerCode.trim().toLowerCase() && customerCode.trim());
   const [errors, setErrors] = useState<string[]>([]);
-  const [notice, setNotice] = useState("");
   const [version, setVersion] = useState(0);
   const existing = poNumber.trim() ? poItems(poNumber, orders) : [];
   const firstItem = nextPoItem(poNumber, orders);
   const update = (key: string, change: Partial<DraftItem>) => setItems((current) => current.map((item) => item.key === key ? { ...item, ...change } : item));
   const formatOf = (item: DraftItem) => item.format || inferFormat(products.find((product) => product.id === item.productId));
-  return <form key={version} className="workspace-panel orders-form" onSubmit={(event) => {
+  return <form key={version} className="form-panel orders-form" onSubmit={(event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const createdAt = new Date().toISOString();
@@ -73,11 +84,11 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
     setErrors(result);
     if (!result.length) {
       const range = built.length === 1 ? `order ${built[0].number}` : `orders ${built[0].number}-${built.at(-1)!.number}`;
-      setNotice(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}. Open it below to key in its job orders.`);
+      onDone(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}. Open it in the list to key in its job orders.`);
       setItems([draftItem()]); setPoNumber(""); setCustomerCode(""); setCustomerName(""); setVersion((value) => value + 1);
     }
   }}>
-    <h2>New order</h2>
+    <div className="panel-title"><h2 id="new-order-title">New order</h2><button className="icon-button" type="button" aria-label="Close new order" title="Close" onClick={onClose}><X size={18} /></button></div>
     <label>Customer ID<input name="customerId" required maxLength={40} list="order-customers" placeholder="Type or choose, e.g. C0012" value={customerCode} onChange={(event) => setCustomerCode(event.target.value)} /></label>
     <datalist id="order-customers">{customers.filter((item) => item.active === "Active").map((item) => <option key={item.id} value={item.code}>{item.name}</option>)}</datalist>
     <label>Customer name<input name="customer" required maxLength={120} placeholder={known ? "" : "New customer's name"} readOnly={!!known} value={known ? known.name : customerName} onChange={(event) => setCustomerName(event.target.value)} /></label>
@@ -110,8 +121,7 @@ function NewOrderForm({ orders, products, customers, userName, onAdd }: { orders
     </fieldset>
     <button type="submit" className="primary-button"><Plus size={17} />{items.length > 1 ? `Add PO with ${items.length} items` : "Add order"}</button>
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
-    {notice && !errors.length ? <p role="status">{notice}</p> : null}
-    <p className="orders-help">Each product on the PO becomes its own numbered order with its own colour and route. Open it below to key in its job orders, one per batch; planning then schedules each job order.</p>
+    <p className="orders-help">Each product becomes its own numbered order. After saving, open it in the list to key in its job orders, one per batch.</p>
   </form>;
 }
 
@@ -123,8 +133,8 @@ type Column = {
 };
 const COLUMN_STORAGE = "scheduler.orderColumns";
 
-function OrdersTable({ orders, customerRecords, jobOrders, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
-  customerRecords: Customer[]; jobOrders: JobOrder[]; jobActions?: JobActions;
+function OrdersTable({ action, orders, customerRecords, jobOrders, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
+  customerRecords: Customer[]; jobOrders: JobOrder[]; jobActions?: JobActions; action?: ReactNode;
   flow: FlowWarning[];
   orders: PurchaseOrder[]; lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[];
   editable: boolean; customers: string[]; onSave: (order: PurchaseOrder) => string[]; onDelete: (id: string) => string[];
@@ -181,7 +191,7 @@ function OrdersTable({ orders, customerRecords, jobOrders, jobActions, lines, pr
   });
   const filtering = !!month || Object.values(filters).some((value) => value.trim());
   return <div className="workspace-panel orders-list">
-    <div className="panel-title"><h2>Customer orders <span className="badge neutral">{orders.length}</span></h2></div>
+    <div className="panel-title"><h2>Customer orders <span className="badge neutral">{orders.length}</span></h2>{action}</div>
     <div className="orders-toolbar">
       <fieldset className="orders-month"><legend>Month</legend>
         <select aria-label="Month based on" value={basis} onChange={(event) => setBasis(event.target.value as MonthBasis)}>

@@ -470,3 +470,9 @@
 .job-actions { display: inline-flex; gap: 4px; }
 .job-order-table .job-order-editing td { background: #f6faf8; }
 @media (max-width: 760px) { .job-order-form { grid-template-columns: minmax(0, 1fr); } }
+/* New order pop-up. */
+.activity-dialog.order-dialog { width: min(1040px, calc(100vw - 24px)); }
+.order-dialog .orders-form > .panel-title { grid-column: 1 / -1; margin: 0; }
+.orders-list .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.order-dialog .orders-form { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 18px 20px 20px; }
+@media (max-width: 760px) { .order-dialog .orders-form { grid-template-columns: minmax(0, 1fr); } }
