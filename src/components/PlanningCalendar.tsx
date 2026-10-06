@@ -9,8 +9,8 @@ import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { priorities } from "@/lib/domain/types";
 import type { PlanLine, Product, Machine, ScheduleEntry } from "@/lib/domain/types";
 import { StatusBadge } from "./StatusBadge";
-import { MeasurementFields } from "./MeasurementSettings";
-import { readMeasurement } from "@/lib/services/measurements";
+import { MeasurementFields, useUoms } from "./MeasurementSettings";
+import { batchKilograms, readMeasurement } from "@/lib/services/measurements";
 import { ORDER_COLORS, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
 import { findJobByNumber, type JobOrder, type ManualJob } from "@/lib/services/jobOrders";
 import { routeDrafts } from "@/lib/services/planChanges";
@@ -64,10 +64,20 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
   const [routeStart, setRouteStart] = useState(initialDate);
   const [routeDates, setRouteDates] = useState<Record<string, string>>({});
   const [routeOn, setRouteOn] = useState<Record<string, boolean>>({});
+  // Each process has its own quantity and UOM (kg at dispensing, tablets at compression, boxes at
+  // packing...), starting from the job order's; one weight per unit gives each row's kilograms.
+  const [routeQty, setRouteQty] = useState<Record<string, string>>({});
+  const [routeUom, setRouteUom] = useState<Record<string, string>>({});
+  const [routeWeight, setRouteWeight] = useState("");
+  const uoms = useUoms();
+  const productUnit = products.find((product) => product.id === jobOrder?.productId)?.uom ?? "";
   const routeFormat = jobOrder ? jobOrder.format ?? inferFormat(products.find((product) => product.id === jobOrder.productId)) : "Other";
   const drafts = routeDrafts(routeFormat, calendars, (id) => processNames[id] ?? calendars.find((item) => item.id === id)?.name ?? "", routeStart);
   const alreadyPlanned = (calendarId?: string) => !!job && !!calendarId && allPrintLines.some((line) => line.jobOrderId === job.id && line.calendarId === calendarId);
-  const routeRows = drafts.map((draft) => ({ ...draft, date: routeDates[draft.step] ?? draft.date, planned: alreadyPlanned(draft.calendarId), on: !!draft.calendarId && (routeOn[draft.step] ?? !alreadyPlanned(draft.calendarId)) }));
+  const defaultQuantity = job?.quantity ?? products.find((product) => product.id === jobOrder?.productId)?.batchQuantity;
+  const defaultUom = job?.uom ?? jobOrder?.uom ?? uoms.find((item) => item.active)?.name ?? "";
+  const routeRows = drafts.map((draft) => ({ ...draft, date: routeDates[draft.step] ?? draft.date, planned: alreadyPlanned(draft.calendarId), on: !!draft.calendarId && (routeOn[draft.step] ?? !alreadyPlanned(draft.calendarId)),
+    quantity: routeQty[draft.step] ?? (defaultQuantity ? String(defaultQuantity) : ""), uom: routeUom[draft.step] ?? defaultUom }));
   const useRoute = planMode === "route" && routeRows.length > 0;
   const [formVersion, setFormVersion] = useState(0);
   const [notice, setNotice] = useState("");
@@ -78,7 +88,7 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
     if (!callbacks.current.canCreate) return;
     setDraftCalendar(calendarId);
     setJobText(""); setNewJobOrder(""); setFormError("");
-    setPlanMode(calendarId ? "single" : "route"); setRouteStart(value); setRouteDates({}); setRouteOn({});
+    setPlanMode(calendarId ? "single" : "route"); setRouteStart(value); setRouteDates({}); setRouteOn({}); setRouteQty({}); setRouteUom({}); setRouteWeight("");
     setFormVersion((version) => version + 1);
     setHover(null);
     setDraftDate(value);
@@ -226,25 +236,39 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
       {hoverLine.orderReference ? <p>{hoverLine.orderReference}{(() => { const batch = jobOrders.find((item) => item.id === hoverLine.jobOrderId)?.batchNumber; return batch ? ` · Batch no. ${batch}` : ""; })()}</p> : null}
       {hoverLine.notes ? <p>{hoverLine.notes}</p> : null}
     </div> : null}
-    <dialog ref={dialog} className="activity-dialog" onClose={() => { calendar.current?.clearGridSelections(); }}>
+    <dialog ref={dialog} className={`activity-dialog${useRoute ? " activity-dialog-wide" : ""}`} onClose={() => { calendar.current?.clearGridSelections(); }}>
       <form key={formVersion} className="form-panel" onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
-        const quantity = Number(data.get("quantity"));
         const productId = String(data.get("product"));
-        if (!Number.isFinite(quantity) || quantity <= 0 || !products.some((item) => item.id === productId)) return;
+        if (!products.some((item) => item.id === productId)) return;
         // Every activity carries out a job order, which decides its product, PO and batch.
         if (!jobOrder || jobOrder.productId !== productId) { setFormError(creatingJob ? `Choose the PO item for job order ${jobText.trim()}.` : "Key in the job order number."); return; }
         // The process is the activity type: each activity is named after its process.
-        const measured = readMeasurement(data);
-        const shared = { ...measured, productId, quantity, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""), productionOrderId: jobOrder.id, orderReference: job?.number ?? jobText.trim(), ...(job ? { jobOrderId: job.id } : {}) };
         const nameOf = (calendarId: string) => processNames[calendarId] ?? calendars.find((item) => item.id === calendarId)?.name ?? "";
-        const chosen = useRoute ? routeRows.filter((row) => row.on && row.calendarId) : [];
-        if (useRoute && !chosen.length) { setFormError("Tick at least one process to plan."); return; }
-        const calendarId = String(data.get("calendar") ?? "");
-        const activities: NewActivity[] = useRoute ? chosen.map((row) => ({ ...shared, calendarId: row.calendarId!, activityType: nameOf(row.calendarId!), plannedDate: row.date }))
-          : [{ ...shared, calendarId, activityType: nameOf(calendarId), plannedDate: String(data.get("date")) }];
-        const error = callbacks.current.onCreate(activities, job ? undefined : { number: jobText.trim(), orderId: jobOrder.id, quantity, uom: measured.uom, ...(measured.batchSizeKg ? { batchSizeKg: measured.batchSizeKg } : {}) });
+        const shared = { productId, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""), productionOrderId: jobOrder.id, orderReference: job?.number ?? jobText.trim(), ...(job ? { jobOrderId: job.id } : {}) };
+        let activities: NewActivity[];
+        if (useRoute) {
+          const chosen = routeRows.filter((row) => row.on && row.calendarId);
+          if (!chosen.length) { setFormError("Tick at least one process to plan."); return; }
+          const bad = chosen.find((row) => !(Number(row.quantity) > 0) || !row.uom);
+          if (bad) { setFormError(`Enter a quantity and UOM for ${bad.processName ?? bad.label}.`); return; }
+          const weight = Number(routeWeight) > 0 ? Number(routeWeight) : undefined;
+          activities = chosen.map((row) => {
+            const quantity = Number(row.quantity);
+            // The weight is per unit of the product (per tablet, per capsule); bottles or cartons hold many.
+            const unitWeightMg = row.uom === productUnit ? weight : undefined;
+            return { ...shared, calendarId: row.calendarId!, activityType: nameOf(row.calendarId!), plannedDate: row.date, quantity, uom: row.uom, unitWeightMg, batchSizeKg: batchKilograms(quantity, row.uom, unitWeightMg) };
+          });
+        } else {
+          const quantity = Number(data.get("quantity"));
+          if (!Number.isFinite(quantity) || quantity <= 0) return;
+          const calendarId = String(data.get("calendar") ?? "");
+          activities = [{ ...readMeasurement(data), ...shared, quantity, calendarId, activityType: nameOf(calendarId), plannedDate: String(data.get("date")) }];
+        }
+        // A new job order holds the batch in the PO's unit (e.g. tablets), else the first process's quantity.
+        const first = activities.find((item) => item.uom === jobOrder.uom) ?? activities[0];
+        const error = callbacks.current.onCreate(activities, job ? undefined : { number: jobText.trim(), orderId: jobOrder.id, quantity: first.quantity, uom: first.uom ?? "", ...(first.batchSizeKg ? { batchSizeKg: first.batchSizeKg } : {}) });
         if (error) { setFormError(error); return; }
         setDate(activities[0].plannedDate);
         event.currentTarget.reset();
@@ -268,7 +292,7 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
         {useRoute ? <div className="route-plan">
           <label>Start date<input type="date" required value={routeStart} onChange={(event) => { setRouteStart(event.target.value); setRouteDates({}); }} /></label>
           <p className="orders-help">{routeFormat}: {routeLabel(routeFormat)}. One working day each from the start date; change any date or untick a process.</p>
-          <table className="route-plan-table"><thead><tr><th scope="col">Plan</th><th scope="col">Process</th><th scope="col">Date</th></tr></thead>
+          <div className="route-plan-scroll"><table className="route-plan-table"><thead><tr><th scope="col">Plan</th><th scope="col">Process</th><th scope="col">Date</th><th scope="col">Quantity</th><th scope="col">UOM</th></tr></thead>
             <tbody>{routeRows.map((row) => <tr key={row.step} className={row.calendarId ? undefined : "route-missing"}>
               <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId} checked={row.on} onChange={(event) => setRouteOn({ ...routeOn, [row.step]: event.target.checked })} /></td>
               <td>{row.processName ?? row.label}{!row.calendarId ? <small>Not set up in this unit (or filtered out)</small> : row.planned ? <small>Already planned for this job order</small> : null}</td>
@@ -279,13 +303,16 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
                 const following = routeDrafts(routeFormat, calendars, (id) => processNames[id] ?? calendars.find((item) => item.id === id)?.name ?? "", value);
                 setRouteDates({ ...routeDates, ...Object.fromEntries(routeRows.slice(index).map((item, offset) => [item.step, offset ? following[offset]?.date ?? item.date : value])) });
               }} /> : "-"}</td>
+              <td>{row.calendarId ? <input type="number" min="0" step="any" aria-label={`${row.label} quantity`} value={row.quantity} onChange={(event) => setRouteQty({ ...routeQty, [row.step]: event.target.value })} /> : null}</td>
+              <td>{row.calendarId ? <select aria-label={`${row.label} UOM`} value={row.uom} onChange={(event) => setRouteUom({ ...routeUom, [row.step]: event.target.value })}>{[...new Set([row.uom, ...uoms.filter((item) => item.active).map((item) => item.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select> : null}</td>
             </tr>)}</tbody>
-          </table>
+          </table></div>
+          {productUnit && !["kg", "g", "mg"].includes(productUnit) && routeRows.some((row) => row.on && row.uom === productUnit) ? <label>Weight per {productUnit.replace(/s$/, "")} (mg, optional)<input type="number" min="0" step="any" placeholder={`e.g. 332, to show kilograms for the rows in ${productUnit}`} value={routeWeight} onChange={(event) => setRouteWeight(event.target.value)} /></label> : null}
         </div> : <>
           <label>Process<select name="calendar" required defaultValue={draftCalendar || undefined}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label>Planned date<input name="date" type="date" required defaultValue={draftDate} /></label>
         </>}
-        <MeasurementFields key={`measure-${draftJob || newJobOrder}`} defaultQuantity={job?.quantity ?? products.find((product) => product.id === jobOrder?.productId)?.batchQuantity} defaultUom={job?.uom ?? jobOrder?.uom} />
+        {useRoute ? null : <MeasurementFields key={`measure-${draftJob || newJobOrder}`} defaultQuantity={defaultQuantity} defaultUom={job?.uom ?? jobOrder?.uom} />}
         <label>Priority<select name="priority" defaultValue="Normal">{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
         {jobOrder ? <p className="orders-help">PO number: <strong>{poLabel(jobOrder, orders)}</strong>{jobOrder.customerName ? ` · ${jobOrder.customerName}` : ""}<br />Batch reference: <strong>{job?.number ?? jobText.trim()}</strong>{job?.batchNumber ? ` · Batch no. ${job.batchNumber}` : " · production keys in the batch number"}</p> : null}
         <label>Remarks<textarea name="notes" /></label>

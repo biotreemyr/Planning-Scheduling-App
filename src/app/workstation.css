@@ -458,3 +458,7 @@
 .route-plan-table input[type="date"] { min-height: 34px; }
 .route-plan-table small { display: block; color: var(--muted); }
 .route-plan-table .route-missing td { color: #9f3030; }
+.route-plan-scroll { overflow-x: auto; }
+.route-plan-table input[type="number"] { width: 96px; min-height: 34px; }
+.route-plan-table select { width: 104px; min-height: 34px; }
+.activity-dialog.activity-dialog-wide { width: min(720px, calc(100vw - 24px)); }
