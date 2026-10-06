@@ -83,3 +83,30 @@ export function validateCustomer(customer: Pick<Customer, "id" | "code" | "name"
   return errors;
 }
 export const customerLabel = (customer?: Pick<Customer, "code" | "name">, fallbackName?: string) => customer ? `${customer.code} · ${customer.name}` : fallbackName ?? "";
+
+export const findJobByNumber = (value: string, jobs: JobOrder[]) => {
+  const number = value.trim().toLowerCase();
+  return number ? jobs.find((job) => job.number.trim().toLowerCase() === number) : undefined;
+};
+
+export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number };
+
+/**
+ * A job order keyed in by its number while planning, for job orders numbered outside the
+ * scheduler. It still belongs to one PO item and holds no more than one allowable batch.
+ */
+export function createManualJobOrder(input: ManualJob, orders: PurchaseOrder[], jobs: JobOrder[], products: Product[], context: { today: Date; userName: string; newId: () => string }): JobOrder | { error: string } {
+  const number = input.number.trim();
+  if (!number) return { error: "Key in the job order number." };
+  if (number.length > 60) return { error: "Keep the job order number to 60 characters." };
+  if (findJobByNumber(number, jobs)) return { error: `Job order ${number} already exists.` };
+  const order = orders.find((item) => item.id === input.orderId);
+  if (!order) return { error: `Choose the PO item job order ${number} belongs to.` };
+  if (!Number.isFinite(input.quantity) || input.quantity <= 0) return { error: "Quantity must be greater than zero." };
+  const allowable = products.find((product) => product.id === order.productId)?.batchQuantity;
+  if (allowable && input.uom === order.uom && input.quantity > allowable) return { error: `One job order holds at most the allowable batch quantity of ${allowable.toLocaleString()} ${order.uom}.` };
+  return {
+    id: context.newId(), number, orderId: order.id, sequence: Math.max(0, ...jobsFor(order.id, jobs).map((job) => job.sequence)) + 1,
+    quantity: input.quantity, uom: input.uom, ...(input.batchSizeKg ? { batchSizeKg: input.batchSizeKg } : {}), createdAt: context.today.toISOString(), createdBy: context.userName
+  };
+}

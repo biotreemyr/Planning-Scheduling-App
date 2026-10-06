@@ -53,7 +53,7 @@ import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
 import { getScheduleReport } from "@/lib/services/reports";
 import { syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 import { createBatchLines, moveActivity, type NewBatch } from "@/lib/services/planChanges";
-import { buildJobOrders, linesForJob, planJobOrders, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
+import { buildJobOrders, createManualJobOrder, linesForJob, type ManualJob, planJobOrders, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
 type Tab = "planner" | "orders" | "master" | "reports";
@@ -177,7 +177,8 @@ function PlannerBoard({
   // Present when this person may plan job orders.
   onPlanJob?: (id: string, startDate: string) => string[];
   flow: FlowWarning[];
-  onAddLine: (line: PlanLine) => void;
+  // Returns an error to show; a new job order, when given, is created with the activity.
+  onAddLine: (line: PlanLine, newJob?: ManualJob) => string | void;
   onMoveLine: (id: string, date: string) => string;
   canPlan: boolean;
   canCreate: boolean;
@@ -217,8 +218,9 @@ function PlannerBoard({
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
         <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} onPlan={onPlanJob} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onCreate={(activity) => {
-          onAddLine({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" });
+        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onCreate={({ newJob, ...activity }) => {
+          const error = onAddLine({ ...activity, id: newId("line"), planId: "production-plan", status: "Unscheduled" }, newJob);
+          if (error) return error;
           setQuery(""); setPriorityFilter(""); setStatusFilter("");
         }} />
       </div>
@@ -850,6 +852,20 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     setData((current) => ({ ...current, customers: known ? current.customers : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted] }));
     return [];
   }
+  // Add activity: the job order is keyed in by number. An unknown number becomes a new job order
+  // for the chosen PO item, saved together with its first activity.
+  function addLine(line: PlanLine, newJob?: ManualJob) {
+    if (!canCreate || !visibleCalendars.some((item) => item.id === line.calendarId)) return "You cannot add activities to this process.";
+    if (!products.some((item) => item.id === line.productId && item.active === "Active")) return "Choose an active product.";
+    if (!Number.isFinite(line.quantity) || line.quantity <= 0) return "Quantity must be greater than zero.";
+    let job = data.jobOrders.find((item) => item.id === line.jobOrderId);
+    const created = newJob ? createManualJobOrder(newJob, data.orders, data.jobOrders, products, { today: new Date(), userName: member.name, newId: () => newId("job") }) : undefined;
+    if (created && "error" in created) return created.error;
+    if (created) job = created;
+    if (!job || data.orders.find((order) => order.id === job.orderId)?.productId !== line.productId) return "Key in a job order for this product.";
+    const linked = { ...line, jobOrderId: job.id, productionOrderId: job.orderId, orderReference: job.number };
+    setData((current) => ({ ...current, ...(created ? { jobOrders: [...current.jobOrders, created] } : {}), lines: [...current.lines, linked] }));
+  }
   // Job orders: one per batch of a PO item, split by the allowable batch quantity.
   function createJobOrders(orderId: string, allowableQuantity: number, batchSizeKg?: number) {
     if (!caps.createPlan && !caps.manage) return ["Planning access is required to create job orders."];
@@ -977,7 +993,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} onPlanJob={canCreate ? planJobOrder : undefined} flow={flow}
         onMoveLine={moveLine}
-        onAddLine={(line) => { if (canCreate && visibleCalendars.some((item) => item.id === line.calendarId) && products.some((item) => item.id === line.productId && item.active === "Active") && Number.isFinite(line.quantity) && line.quantity > 0 && data.jobOrders.some((job) => job.id === line.jobOrderId && job.orderId === line.productionOrderId && data.orders.find((order) => order.id === job.orderId)?.productId === line.productId)) setData((current) => ({ ...current, lines: [...current.lines, line] })); }} /> : null}
+        onAddLine={addLine} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} machines={activityMachines} entries={entries.filter((item) => item.planLineId === selectedLine.id)} canPlan={canPlan && !selectedLine.completedAt} canProduce={canProduce && !selectedLine.completedAt} onClose={() => setSelectedActivity(null)} onProduction={saveProduction}
         orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} statuses={statuses} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
         onPlan={savePlanning} jobOrders={data.jobOrders} canBatchNumber={caps.produce || caps.editPlan} onBatchNumber={saveBatchNumber}>

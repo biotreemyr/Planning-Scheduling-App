@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { buildJobOrders, nextJobNumber, planJobOrders, validateBatchNumber, validateCustomer } from "../src/lib/services/jobOrders";
+import { buildJobOrders, createManualJobOrder, findJobByNumber, nextJobNumber, planJobOrders, validateBatchNumber, validateCustomer } from "../src/lib/services/jobOrders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
 import { createBatchLines } from "../src/lib/services/planChanges";
@@ -78,5 +78,16 @@ describe("job orders", () => {
     const line = unlinked.data.lines.find((item) => item.id === linked.id)!;
     delete line.jobOrderId;
     expect(reviewWorkspaceChange(state, unlinked, planner).denied).toContain("unlink activities from their job order");
+  });
+  it("creates a keyed-in job order number for a PO item, once, within one allowable batch", () => {
+    const context = { today, userName: "Aida", newId: () => "job-typed" };
+    const typed = createManualJobOrder({ number: " JO/BT/0457 ", orderId: order.id, quantity: 250000, uom: "tablets" }, state.data.orders, state.data.jobOrders, state.products, context);
+    expect(typed).toMatchObject({ id: "job-typed", number: "JO/BT/0457", orderId: order.id, sequence: 1, quantity: 250000 });
+    const jobs = [...state.data.jobOrders, typed as never];
+    expect(findJobByNumber("jo/bt/0457", jobs)?.id).toBe("job-typed");
+    expect(createManualJobOrder({ number: "jo/bt/0457", orderId: order.id, quantity: 1, uom: "tablets" }, state.data.orders, jobs, state.products, context)).toEqual({ error: "Job order jo/bt/0457 already exists." });
+    expect(createManualJobOrder({ number: "JO-X", orderId: "missing", quantity: 1, uom: "tablets" }, state.data.orders, jobs, state.products, context)).toEqual({ error: "Choose the PO item job order JO-X belongs to." });
+    // Folic acid's allowable batch is 300,000 tablets.
+    expect(createManualJobOrder({ number: "JO-Y", orderId: order.id, quantity: 300001, uom: "tablets" }, state.data.orders, jobs, state.products, context)).toEqual({ error: "One job order holds at most the allowable batch quantity of 300,000 tablets." });
   });
 });

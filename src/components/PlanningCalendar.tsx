@@ -12,7 +12,7 @@ import { StatusBadge } from "./StatusBadge";
 import { MeasurementFields } from "./MeasurementSettings";
 import { readMeasurement } from "@/lib/services/measurements";
 import { ORDER_COLORS, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
-import { jobLabel, type JobOrder } from "@/lib/services/jobOrders";
+import { findJobByNumber, type JobOrder, type ManualJob } from "@/lib/services/jobOrders";
 
 type View = "month" | "week" | "day";
 const NO_ORDER = "#ffffff";
@@ -20,7 +20,10 @@ const NO_ORDER = "#ffffff";
 const tint = (hex: string, amount = 0.12) => { const [r, g, b] = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16)); return `rgb(${[r, g, b].map((value) => Math.round(255 - (255 - value) * amount)).join(", ")})`; };
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 
-type NewActivity = Pick<PlanLine, "calendarId" | "productId" | "plannedDate" | "quantity" | "priority" | "notes" | "orderReference" | "uom" | "activityType" | "unitWeightMg" | "batchSizeKg" | "productionOrderId" | "jobOrderId">;
+type NewActivity = Pick<PlanLine, "calendarId" | "productId" | "plannedDate" | "quantity" | "priority" | "notes" | "orderReference" | "uom" | "activityType" | "unitWeightMg" | "batchSizeKg" | "productionOrderId" | "jobOrderId"> & {
+  // A job order number not known yet: created with the activity, for the PO item chosen.
+  newJob?: ManualJob;
+};
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
 export default function PlanningCalendar({ orders = [], jobOrders = [], warnings, processNames, planningView = "calendar", planLines, products, initialDate, onCreate, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
@@ -33,7 +36,8 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
   calendars?: UnitCalendar[];
   calendarTitle?: string; allPrintLines?: PlanLine[]; entries?: ScheduleEntry[]; machines?: Machine[];
   planLines: PlanLine[]; products: Product[]; initialDate: string;
-  onCreate: (activity: NewActivity) => void;
+  // Returns an error to show, or nothing when the activity was added.
+  onCreate: (activity: NewActivity) => string | void;
   onMove: (id: string, date: string) => string;
   canPlan?: boolean;
   // Adding needs Core's planning.create; moving needs planning.edit. Defaults to canPlan.
@@ -46,10 +50,15 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
   const dialog = useRef<HTMLDialogElement>(null);
   const [draftDate, setDraftDate] = useState(initialDate);
   const [draftCalendar, setDraftCalendar] = useState("");
-  // Choosing a job order fills in its product, PO, quantity and batch reference.
-  const [draftJob, setDraftJob] = useState("");
-  const job = jobOrders.find((item) => item.id === draftJob);
-  const jobOrder = orders.find((item) => item.id === job?.orderId);
+  // The job order number is keyed in. A known number fills in its product, PO, quantity and batch
+  // reference; a new one is created with the activity once its PO item is chosen.
+  const [jobText, setJobText] = useState("");
+  const [newJobOrder, setNewJobOrder] = useState("");
+  const [formError, setFormError] = useState("");
+  const job = findJobByNumber(jobText, jobOrders);
+  const draftJob = job?.id ?? "";
+  const creatingJob = !job && !!jobText.trim();
+  const jobOrder = orders.find((item) => item.id === (job ? job.orderId : creatingJob ? newJobOrder : ""));
   const [formVersion, setFormVersion] = useState(0);
   const [notice, setNotice] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -58,7 +67,7 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
   function openCreate(value: string, calendarId = "") {
     if (!callbacks.current.canCreate) return;
     setDraftCalendar(calendarId);
-    setDraftJob("");
+    setJobText(""); setNewJobOrder(""); setFormError("");
     setFormVersion((version) => version + 1);
     setHover(null);
     setDraftDate(value);
@@ -214,28 +223,34 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], warnings
         const productId = String(data.get("product"));
         if (!Number.isFinite(quantity) || quantity <= 0 || !products.some((item) => item.id === productId)) return;
         // Every activity carries out a job order, which decides its product, PO and batch.
-        const picked = jobOrders.find((item) => item.id === String(data.get("job") ?? ""));
-        const pickedOrder = orders.find((item) => item.id === picked?.orderId);
-        if (!picked || pickedOrder?.productId !== productId) return;
-        callbacks.current.onCreate({ ...readMeasurement(data), calendarId: String(data.get("calendar") ?? ""), productId, plannedDate: String(data.get("date")), quantity, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""),
-          orderReference: picked.number, productionOrderId: picked.orderId, jobOrderId: picked.id });
+        if (!jobOrder || jobOrder.productId !== productId) { setFormError(creatingJob ? `Choose the PO item for job order ${jobText.trim()}.` : "Key in the job order number."); return; }
+        const measured = readMeasurement(data);
+        const activity = { ...measured, calendarId: String(data.get("calendar") ?? ""), productId, plannedDate: String(data.get("date")), quantity, priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes") ?? ""), productionOrderId: jobOrder.id };
+        const error = callbacks.current.onCreate(job ? { ...activity, orderReference: job.number, jobOrderId: job.id }
+          : { ...activity, orderReference: jobText.trim(), newJob: { number: jobText.trim(), orderId: jobOrder.id, quantity, uom: measured.uom, ...(measured.batchSizeKg ? { batchSizeKg: measured.batchSizeKg } : {}) } });
+        if (error) { setFormError(error); return; }
         setDate(String(data.get("date")));
         event.currentTarget.reset();
         dialog.current?.close();
-        setNotice("Activity added to the current team plan.");
+        setNotice(creatingJob ? `Job order ${jobText.trim()} created and its activity added to the plan.` : "Activity added to the current team plan.");
       }}>
         <div className="panel-title"><h2>Add activity</h2><button className="icon-button" type="button" aria-label="Close activity form" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
-        {jobOrders.length ? null : <p role="alert">No job orders yet. Create them from a PO on the Orders tab first.</p>}
-        <label>Job order<select name="job" required value={draftJob} onChange={(event) => setDraftJob(event.target.value)}><option value="" disabled>Choose a job order</option>{jobOrders.map((item) => { const order = orders.find((entry) => entry.id === item.orderId); return <option key={item.id} value={item.id}>{jobLabel(item)} · {products.find((product) => product.id === order?.productId)?.name ?? "Unknown product"} · {item.quantity.toLocaleString()} {item.uom}{order ? ` · ${order.poNumber}` : ""}</option>; })}</select></label>
-        <p className="orders-help">Product: <strong>{job ? products.find((product) => product.id === jobOrder?.productId)?.name ?? "Unknown product" : "set by the job order"}</strong></p>
+        <label>Job order<input name="jobNumber" required maxLength={60} autoComplete="off" list="job-order-numbers" placeholder="Key in the job order number" value={jobText} onChange={(event) => { setJobText(event.target.value); setFormError(""); }} /></label>
+        <datalist id="job-order-numbers">{jobOrders.map((item) => { const order = orders.find((entry) => entry.id === item.orderId); return <option key={item.id} value={item.number}>{[products.find((product) => product.id === order?.productId)?.name, `${item.quantity.toLocaleString()} ${item.uom}`, order?.poNumber, item.batchNumber ? `Batch no. ${item.batchNumber}` : ""].filter(Boolean).join(" · ")}</option>; })}</datalist>
+        {creatingJob ? <>
+          <p className="orders-help">New job order <strong>{jobText.trim()}</strong>: choose its PO item. It is created with this activity, for the quantity below.</p>
+          <label>PO item<select required value={newJobOrder} onChange={(event) => { setNewJobOrder(event.target.value); setFormError(""); }}><option value="" disabled>Choose the PO item</option>{orders.map((item) => <option key={item.id} value={item.id}>{orderNumbers(orders).get(item.id)} · {poLabel(item, orders)}{item.customerName ? ` · ${item.customerName}` : ""} · {products.find((product) => product.id === item.productId)?.name ?? "Unknown product"}</option>)}</select></label>
+        </> : null}
+        <p className="orders-help">Product: <strong>{jobOrder ? products.find((product) => product.id === jobOrder.productId)?.name ?? "Unknown product" : "set by the job order"}</strong></p>
         <input type="hidden" name="product" value={jobOrder?.productId ?? ""} />
         <label>Process<select name="calendar" required defaultValue={draftCalendar || undefined}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label>Planned date<input name="date" type="date" required defaultValue={draftDate} /></label>
-        <MeasurementFields key={`measure-${draftJob}`} defaultQuantity={job?.quantity} defaultUom={job?.uom} />
+        <MeasurementFields key={`measure-${draftJob || newJobOrder}`} defaultQuantity={job?.quantity ?? products.find((product) => product.id === jobOrder?.productId)?.batchQuantity} defaultUom={job?.uom ?? jobOrder?.uom} />
         <label>Priority<select name="priority" defaultValue="Normal">{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-        {job && jobOrder ? <p className="orders-help">PO number: <strong>{poLabel(jobOrder, orders)}</strong>{jobOrder.customerName ? ` · ${jobOrder.customerName}` : ""}<br />Batch reference: <strong>{job.number}</strong>{job.batchNumber ? ` · Batch no. ${job.batchNumber}` : " · production keys in the batch number"}</p> : null}
+        {jobOrder ? <p className="orders-help">PO number: <strong>{poLabel(jobOrder, orders)}</strong>{jobOrder.customerName ? ` · ${jobOrder.customerName}` : ""}<br />Batch reference: <strong>{job?.number ?? jobText.trim()}</strong>{job?.batchNumber ? ` · Batch no. ${job.batchNumber}` : " · production keys in the batch number"}</p> : null}
         <label>Remarks<textarea name="notes" /></label>
-        <button className="primary-button" type="submit" disabled={!job}><Plus size={17} />Add to plan</button>
+        {formError ? <p role="alert">{formError}</p> : null}
+        <button className="primary-button" type="submit" disabled={!jobOrder}><Plus size={17} />{creatingJob ? "Create job order and add" : "Add to plan"}</button>
       </form>
     </dialog>
     <div className="order-legend" aria-label="Legend">
