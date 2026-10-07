@@ -22,8 +22,8 @@ export function buildCalendarPdf(input: CalendarPdfInput) {
   for (let offset = 0; offset < dates.length; offset += columns) {
     const days = dates.slice(offset, offset + columns);
     const contents = days.map((day) => input.lines.filter((line) => line.plannedDate === day).flatMap((line) => {
-      const activity = printedActivity(line, input.products);
-      const text = [activity.productName, activity.quantity, ""];
+      const activity = printedActivity(line, input.products, input.orders, input.jobOrders);
+      const text = [activity.productName, activity.batch, activity.quantity, ""].filter((part, index, all) => part || index === all.length - 1);
       return text.flatMap((part) => doc.splitTextToSize(part.replace(/[\x00-\x08\x0b-\x1f]/g, ""), width - 5) as string[]);
     }));
     let continuation = false;
@@ -85,10 +85,10 @@ export function buildListPdf(input: ListPrintInput) {
   header();
   for (const day of dates) {
     const cells = listPrintCells(day, input.lines, columns).map((lines) => lines.flatMap((line) => {
-      const activity = printedListActivity(line, input.products, input.orders);
+      const activity = printedListActivity(line, input.products, input.orders, input.jobOrders);
       // Measure at the same font and size used to draw, or text spills into the next column.
       const name = doc.setFont("helvetica", "bold").setFontSize(7.5).splitTextToSize(clean(activity.productName), width - 3) as string[];
-      const detail = doc.setFont("helvetica", "normal").setFontSize(7).splitTextToSize(clean(activity.detail), width - 3) as string[];
+      const detail = doc.setFont("helvetica", "normal").setFontSize(7).splitTextToSize(clean([activity.batch, activity.detail].filter(Boolean).join(" · ")), width - 3) as string[];
       return [...name, ...detail.map((text) => `\u0000${text}`)];
     }));
     const weekend = [0, 6].includes(new Date(`${day}T12:00`).getDay());

@@ -183,7 +183,10 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                     const order = orders.find((item) => item.id === line.productionOrderId);
                     const number = order ? numbers.get(order.id) : undefined;
                     const job = jobOrders.find((item) => item.id === line.jobOrderId);
-                    const detail = [order?.poNumber, line.orderReference, job?.batchNumber ? `Batch no. ${job.batchNumber}` : "", `${line.quantity.toLocaleString()} ${line.uom ?? product?.uom ?? ""}`.trim()].filter(Boolean).join(" · ");
+                    // Easy to read at a glance: product, then batch number and batch quantity, then PO and this process's quantity.
+                    const batchKg = job?.batchSizeKg ?? line.batchSizeKg;
+                    const batch = [job ? job.batchNumber ? `Batch no. ${job.batchNumber}` : job.number : line.orderReference, batchKg !== undefined ? `${batchKg.toLocaleString("en-MY", { maximumFractionDigits: 3 })} kg` : ""].filter(Boolean).join(" · ");
+                    const detail = [order?.poNumber, `${line.quantity.toLocaleString()} ${line.uom ?? product?.uom ?? ""}`.trim()].filter(Boolean).join(" · ");
                     return <div key={line.id} data-movable={movable || undefined} className={`plan-grid-item${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
                       style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
                       onPointerDown={(event) => pointerDown(event, line, name)} onContextMenu={(event) => { if (drag.current?.touch) event.preventDefault(); }}>
@@ -194,8 +197,9 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                           else if (moving?.id === line.id && event.key === "Enter") { event.preventDefault(); finish(line.id, moving.target); }
                           else if (event.key === "Escape") setMoving(null);
                         }}><GripVertical size={14} /></button> : null}
-                      <button className="plan-list-product" type="button" title={`${line.completedAt ? "Completed: " : ""}${name}\n${detail}${warnings?.get(line.id) ? `\n⚠ ${warnings.get(line.id)!.join("\n⚠ ")}` : ""}`} onClick={() => { if (!suppressClick.current) onSelect(line.id); }}>
+                      <button className="plan-list-product" type="button" title={`${line.completedAt ? "Completed: " : ""}${name}\n${batch}\n${detail}${warnings?.get(line.id) ? `\n⚠ ${warnings.get(line.id)!.join("\n⚠ ")}` : ""}`} onClick={() => { if (!suppressClick.current) onSelect(line.id); }}>
                         <strong><OrderBadge number={number} poNumber={order?.poNumber} /><PriorityMark priority={line.priority} />{warnings?.get(line.id) ? <span className="flow-mark" aria-label="Process-flow warning">⚠</span> : null}{line.completedAt ? <CheckCircle2 size={12} aria-label="Completed" /> : null}{name}</strong>
+                        {batch ? <span className="plan-list-batch">{batch}</span> : null}
                         <small>{detail}</small>
                       </button>
                     </div>;

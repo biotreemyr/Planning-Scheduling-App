@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type Calendar from "@toast-ui/calendar";
-import { ChevronLeft, ChevronRight, X, Plus, Printer, Download } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, Plus, Printer, Download, FileSpreadsheet } from "lucide-react";
 import { CalendarPrint, ListPrint } from "./CalendarPrint";
 import { PlanningList } from "./PlanningList";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
@@ -162,12 +162,24 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], allLines
           try {
             const { buildCalendarPdf, buildListPdf } = await import("@/lib/services/calendarPdf");
             const fileName = calendarTitle.replace(/[^a-z0-9-]+/gi, "-");
-            if (planningView === "list") buildListPdf({ title: calendarTitle, date, lines: allPrintLines, products, columns: calendars, orders }).save(`${fileName}-list-${date.slice(0, 7)}.pdf`);
-            else buildCalendarPdf({ title: calendarTitle, date, view: displayView, lines: allPrintLines, products, processNames }).save(`${fileName}-${displayView}-${date}.pdf`);
+            if (planningView === "list") buildListPdf({ title: calendarTitle, date, lines: allPrintLines, products, columns: calendars, orders, jobOrders }).save(`${fileName}-list-${date.slice(0, 7)}.pdf`);
+            else buildCalendarPdf({ title: calendarTitle, date, view: displayView, lines: allPrintLines, products, processNames, orders, jobOrders }).save(`${fileName}-${displayView}-${date}.pdf`);
             setNotice(`${planningView === "list" ? "List" : "Calendar"} PDF downloaded.`);
           } catch { setNotice("PDF could not be generated. Please try again."); }
           finally { setExporting(false); }
         }}><Download size={18} /></button>
+        <button type="button" className="icon-button" aria-label={`Download ${printName} Excel`} title={`Download ${printName} Excel`} disabled={!ready || exporting} onClick={async () => {
+          setExporting(true);
+          try {
+            const [{ buildCalendarWorkbook, buildListWorkbook, downloadWorkbook }, excel] = await Promise.all([import("@/lib/services/calendarExcel"), import("exceljs")]);
+            const module = (excel as unknown as { default?: typeof excel }).default ?? excel;
+            const fileName = calendarTitle.replace(/[^a-z0-9-]+/gi, "-");
+            if (planningView === "list") await downloadWorkbook(buildListWorkbook(module, { title: calendarTitle, date, lines: allPrintLines, products, columns: calendars, orders, jobOrders }), `${fileName}-list-${date.slice(0, 7)}.xlsx`);
+            else await downloadWorkbook(buildCalendarWorkbook(module, { title: calendarTitle, date, view: displayView, lines: allPrintLines, products, processNames, orders, jobOrders }), `${fileName}-${displayView}-${date}.xlsx`);
+            setNotice(`${planningView === "list" ? "List" : "Calendar"} Excel downloaded.`);
+          } catch { setNotice("Excel could not be generated. Please try again."); }
+          finally { setExporting(false); }
+        }}><FileSpreadsheet size={18} /></button>
         <button type="button" className="icon-button" title="Previous period" aria-label="Previous period" disabled={!ready} onClick={() => navigate("prev")}><ChevronLeft size={18} /></button>
         <button type="button" className="icon-button" title="Next period" aria-label="Next period" disabled={!ready} onClick={() => navigate("next")}><ChevronRight size={18} /></button>
         <button type="button" className="calendar-button" disabled={!ready} onClick={() => navigate("today")}>Today</button>
@@ -207,8 +219,8 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], allLines
       <span><span className="priority-mark high">!</span>High</span><span><span className="priority-mark urgent">!</span>Urgent</span>
       <span><i className="order-legend-swatch no-order" />No PO linked</span><span>✓ Completed</span>
     </div>
-    {ready && planningView === "list" ? <ListPrint title={calendarTitle} date={date} lines={allPrintLines} products={products} columns={calendars} orders={orders} /> : null}
-    {ready && planningView === "calendar" ? <CalendarPrint title={calendarTitle} date={date} view={displayView} lines={allPrintLines} products={products} processNames={processNames} /> : null}
+    {ready && planningView === "list" ? <ListPrint title={calendarTitle} date={date} lines={allPrintLines} products={products} columns={calendars} orders={orders} jobOrders={jobOrders} /> : null}
+    {ready && planningView === "calendar" ? <CalendarPrint title={calendarTitle} date={date} view={displayView} lines={allPrintLines} products={products} processNames={processNames} orders={orders} jobOrders={jobOrders} /> : null}
     {selected ? <section className="calendar-detail" aria-label="Plan line details">
       <button type="button" className="icon-button detail-close" aria-label="Close plan details" title="Close plan details" onClick={() => setSelectedId(null)}><X size={18} /></button>
       <h3>{product?.name ?? "Unknown product"}</h3>
