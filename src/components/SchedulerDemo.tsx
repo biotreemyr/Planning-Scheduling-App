@@ -743,7 +743,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     const now = new Date();
     const completedAt = input.completedDate && input.completedDate !== localDateKey(now) ? new Date(`${input.completedDate}T17:00`).toISOString() : now.toISOString();
     const line = selectedLine;
-    const uom = line.uom ?? products.find((product) => product.id === line.productId)?.uom ?? "";
+    // The unit production reported in (kg at dispensing, boxes at packing...), else the planned one.
+    const uom = input.uom || (line.uom ?? products.find((product) => product.id === line.productId)?.uom ?? "");
     const transfer: WipTransfer | undefined = input.destinationId ? {
       id: newId("wip"), sourceLineId: line.id, sourceCalendarId: line.calendarId!, calendarId: input.destinationId,
       productId: line.productId, quantity: input.quantity, uom, orderReference: line.orderReference,
@@ -755,7 +756,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       const actual: ProductionActual = { ...existingActual, planLineId: line.id, calendarId: line.calendarId, teamId: "", actualQuantity: input.quantity, plannedQuantity: line.quantity, uom, productionDate: input.completedDate || localDateKey(new Date(completedAt)), hasDeviation: existingActual?.hasDeviation ?? false, deviation: existingActual?.deviation ?? "", correctiveAction: existingActual?.correctiveAction ?? "", updatedAt: completedAt, updatedBy: member.name };
       return {
         ...current,
-        lines: current.lines.map((item) => item.id === line.id ? { ...item, completedAt, yieldQuantity: input.quantity, startedAt: item.startedAt ?? localDateKey(new Date(completedAt)) } : item),
+        lines: current.lines.map((item) => item.id === line.id ? { ...item, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), startedAt: item.startedAt ?? localDateKey(new Date(completedAt)) } : item),
         entries: current.entries.map((item) => item.planLineId === line.id && item.status !== "Cancelled" ? { ...item, status: "Completed" as const, changedBy: member.name } : item),
         actuals: [...current.actuals.filter((item) => item.planLineId !== line.id), actual],
         transfers: transfer ? [...current.transfers, transfer] : current.transfers

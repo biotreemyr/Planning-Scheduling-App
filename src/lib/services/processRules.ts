@@ -24,6 +24,18 @@ const ALIASES: Record<string, Step> = {
 };
 export const stepOf = (processName: string): Step | undefined => ALIASES[processName.trim().toLowerCase()];
 export const stepLabel = (step: Step) => STEP_LABEL[step];
+
+// The units production reports each process's actual quantity in: dispensing weighs or measures,
+// compression and coating count tablets, capsulation counts capsules, filling counts the primary
+// pack and packing counts boxes. Other processes report in their planned unit.
+const ACTUAL_UOMS: Record<Step, string[]> = {
+  dispensing: ["kg", "g", "L", "mL"], tableting: ["tablets"], coating: ["tablets"], capsulation: ["capsules"],
+  filling: ["bottles", "blisters", "sachets", "pouches"], packing: ["boxes"]
+};
+export function actualUoms(processName: string, plannedUom?: string) {
+  const step = stepOf(processName);
+  return step ? ACTUAL_UOMS[step] : plannedUom ? [plannedUom] : [];
+}
 export type RouteStepName = Step;
 export const routeLabel = (format: ProductFormat) => format === "Other" ? "No fixed route" : ROUTES[format].map((step) => STEP_LABEL[step]).join(" → ");
 

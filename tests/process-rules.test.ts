@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { checkProcessFlow, inferFormat, routeLabel, stepOf } from "../src/lib/services/processRules";
+import { checkProcessFlow, inferFormat, routeLabel, stepOf, actualUoms } from "../src/lib/services/processRules";
 
 const state = addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state!;
 const check = (lines = state.data.lines, entries = state.data.entries, orders = state.data.orders) => checkProcessFlow(lines, entries, orders, state.products, state.directory);
@@ -59,5 +59,16 @@ describe("process routes by product format", () => {
     // One warning per wrong process per batch: Compression and Coating, for each of 3 batches.
     expect(route).toHaveLength(6);
     expect(route.find((item) => item.message.startsWith("PO-2609-125 Batch 1: Compression"))!.lineIds).toHaveLength(2);
+  });
+});
+
+describe("units for reporting actual quantities", () => {
+  it("gives each process its own reporting units", () => {
+    expect(actualUoms("Dispensing")).toEqual(["kg", "g", "L", "mL"]);
+    expect(actualUoms("Compression")).toEqual(["tablets"]);
+    expect(actualUoms("Capsulation")).toEqual(["capsules"]);
+    expect(actualUoms("Filling")).toEqual(["bottles", "blisters", "sachets", "pouches"]);
+    expect(actualUoms("Packing")).toEqual(["boxes"]);
+    expect(actualUoms("Blending", "kg")).toEqual(["kg"]);
   });
 });

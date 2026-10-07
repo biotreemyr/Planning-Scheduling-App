@@ -91,6 +91,8 @@ export type PlanLine = {
   productionNotes?: string;
   completedAt?: string;
   yieldQuantity?: number;
+  // The unit the actual quantity was reported in, when it differs by process (kg at dispensing...).
+  yieldUom?: string;
   incomingWipId?: string;
   uom?: string;
   activityType?: string;

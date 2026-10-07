@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { CompletionInput, WipTransfer } from "@/lib/services/productionFlow";
+import { actualUoms } from "@/lib/services/processRules";
 
 // Today as YYYY-MM-DD in local time.
 const today = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
@@ -25,12 +26,16 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const [saved, setSaved] = useState("");
   const source = d.calendars.find((calendar) => calendar.id === line.calendarId);
   const processName = (id?: string) => d.processes.find((process) => process.id === d.calendars.find((calendar) => calendar.id === id)?.processId)?.name ?? d.calendars.find((calendar) => calendar.id === id)?.name ?? "";
+  // The units this process reports in; the planned unit first when it is one of them.
+  const reportUoms = actualUoms(processName(line.calendarId), uom);
+  const defaultUom = reportUoms.includes(uom) ? uom : reportUoms[0] ?? uom;
+  const doneUom = line.yieldUom ?? uom;
   const others = d.calendars.filter((calendar) => calendar.processId !== source?.processId && calendar.unitId === source?.unitId && calendar.id !== nextCalendarId);
   if (line.completedAt) return <section className="production-update"><h3>Production update</h3>
     <dl className="production-facts">
       <div><dt>Started</dt><dd>{line.startedAt ? display(line.startedAt) : "-"}</dd></div>
       <div><dt>Completed</dt><dd>{display(new Date(line.completedAt).toISOString())}</dd></div>
-      <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {uom} <small>({line.quantity > 0 ? ((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1) : "0"}% of plan)</small></dd></div>
+      <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {doneUom}{doneUom === uom && line.quantity > 0 ? <small> ({((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1)}% of plan)</small> : <small> (planned {line.quantity.toLocaleString()} {uom})</small>}</dd></div>
       <div><dt>Output</dt><dd>{outgoing ? `${outgoing.wipRoom ? "WIP room, for " : "Transferred to "}${processName(outgoing.calendarId)} · ${outgoing.receivedAt ? `received by ${outgoing.receivedBy}` : "awaiting receipt"}` : "Final output - no transfer"}</dd></div>
     </dl>
     {line.productionNotes ? <p><strong>Notes:</strong> {line.productionNotes}</p> : null}
@@ -47,11 +52,12 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       const [kind, destinationId = ""] = String(data.get("destination") ?? "final").split(":");
       const progress = startedAt !== (line.startedAt ?? "") || notes !== (line.productionNotes ?? "") ? onProgress(startedAt || completedDate, notes) : [];
       if (progress.length) { setErrors(progress); return; }
-      setErrors(onComplete({ quantity: Number(quantityText), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip" }));
+      setErrors(onComplete({ quantity: Number(quantityText), uom: String(data.get("yieldUom") ?? "") || uom, completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip" }));
     }}>
       <label>Date started<input name="startedAt" type="date" defaultValue={line.startedAt ?? ""} /></label>
       <label>Date completed<input name="completedAt" type="date" defaultValue="" max={today()} /></label>
-      <label>Actual quantity ({uom})<input name="quantity" type="number" min="0" step="any" placeholder={`Planned ${line.quantity.toLocaleString()}`} /></label>
+      <div className="quantity-fields"><label>Actual quantity<input name="quantity" type="number" min="0" step="any" placeholder={`Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
+        <label>UOM<select name="yieldUom" defaultValue={defaultUom}>{reportUoms.map((name) => <option key={name}>{name}</option>)}</select></label></div>
       <label className="production-notes">Notes<textarea name="notes" defaultValue={line.productionNotes ?? ""} placeholder="Anything that happened during production: issues, stoppages, deviations" /></label>
       <label className="production-destination">After completion, send to<select name="destination" defaultValue={nextCalendarId ? `next:${nextCalendarId}` : "final"}>
         {nextCalendarId ? <option value={`next:${nextCalendarId}`}>Next process: {processName(nextCalendarId)}</option> : null}
