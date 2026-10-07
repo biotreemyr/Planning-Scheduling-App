@@ -25,4 +25,10 @@ describe("workspace for a signed-in Core user", () => {
     expect(html).toContain("Ask your Bio Tree administrator for planning access");
     expect(html).not.toContain("Switch <strong>User</strong>");
   });
+  it("shows Admin only with Core's master data permission, and the audit trail after Reports", () => {
+    const without = render(["planning.view", "planning.create", "reports.view"]);
+    expect(without).not.toMatch(/<span>Admin<\/span>/);
+    const withAdmin = render(["planning.view", "reports.view", "master_data.manage"]);
+    expect(withAdmin).toMatch(/<span>Admin<\/span>[\s\S]*<span>Reports<\/span>[\s\S]*<span>Audit trail<\/span>/);
+  });
 });

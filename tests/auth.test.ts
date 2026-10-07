@@ -115,8 +115,11 @@ describe("Core contract", () => {
 
 describe("open access while Core roles are not set up", async () => {
   const { effectivePermissions, permissions } = await import("../src/lib/auth/permissions");
-  it("gives every scheduler permission only when SCHEDULER_OPEN_ACCESS is true", () => {
-    expect(effectivePermissions(["scheduler.planning.view"], { SCHEDULER_OPEN_ACCESS: "true" }).sort()).toEqual([...new Set(Object.values(permissions))].sort());
+  it("gives every everyday permission when SCHEDULER_OPEN_ACCESS is true, but Admin only from Core", () => {
+    const open = { SCHEDULER_OPEN_ACCESS: "true" };
+    const everyday = [...new Set(Object.values(permissions))].filter((key) => key !== permissions.manageMasterData).sort();
+    expect(effectivePermissions(["scheduler.planning.view"], open).sort()).toEqual(everyday);
+    expect(effectivePermissions(["scheduler.planning.view", permissions.manageMasterData], open)).toContain(permissions.manageMasterData);
     expect(effectivePermissions(["scheduler.planning.view"], {})).toEqual(["scheduler.planning.view"]);
     expect(effectivePermissions(["scheduler.planning.view"], { SCHEDULER_OPEN_ACCESS: "false" })).toEqual(["scheduler.planning.view"]);
   });

@@ -54,12 +54,12 @@ export function HistoryPanel({ refreshKey }: { refreshKey: string }) {
     sheet.pageSetup = { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "1:1" };
     const url = URL.createObjectURL(new Blob([await book.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     const anchor = document.createElement("a");
-    anchor.href = url; anchor.download = `scheduler-history-${new Date().toISOString().slice(0, 10)}.xlsx`; anchor.click();
+    anchor.href = url; anchor.download = `scheduler-audit-trail-${new Date().toISOString().slice(0, 10)}.xlsx`; anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   return <section className="workspace-panel history-panel">
-    <div className="panel-title"><h2>Transaction history <span className="badge neutral">{rows.length}</span></h2>
+    <div className="panel-title"><h2>Audit trail <span className="badge neutral">{rows.length}</span></h2>
       <div className="calendar-navigation">
         <button type="button" className="calendar-button" onClick={() => setLoads((value) => value + 1)}><RotateCw size={15} />Refresh</button>
         <button type="button" className="calendar-button" disabled={!shown.length} onClick={() => void download()}><FileSpreadsheet size={15} />Download Excel</button>
@@ -75,7 +75,7 @@ export function HistoryPanel({ refreshKey }: { refreshKey: string }) {
     </div>
     {error ? <p role="alert">{error}</p> : null}
     {!entries && !error ? <p role="status">Loading history…</p> : null}
-    {entries ? <div className="orders-table-scroll" tabIndex={0} role="region" aria-label="Transaction history">
+    {entries ? <div className="orders-table-scroll" tabIndex={0} role="region" aria-label="Audit trail">
       <table className="orders-table history-table">
         <thead><tr><th scope="col">Date &amp; time</th><th scope="col">By</th><th scope="col">Type</th><th scope="col">PO number</th><th scope="col">Job order</th><th scope="col">Batch no.</th><th scope="col">Change</th></tr></thead>
         <tbody>

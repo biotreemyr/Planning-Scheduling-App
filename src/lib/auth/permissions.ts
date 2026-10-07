@@ -26,11 +26,14 @@ export const boardPermissions = [permissions.viewPlanning, permissions.viewSched
 
 /**
  * What a signed-in user may do in the scheduler. While SCHEDULER_OPEN_ACCESS is "true", anyone who
- * can open the scheduler from Core may do everything here, so roles need not be set up yet; Core
- * still decides who can open it. Otherwise their Core permissions apply as granted.
+ * can open the scheduler from Core may plan, edit orders and record production without roles being
+ * set up; Admin (master data) still follows Core: tick "Manage scheduler master data" for a person
+ * in Core to give them the Admin tab. Otherwise their Core permissions apply as granted.
  */
 export function effectivePermissions(granted: readonly string[], env: Record<string, string | undefined> = process.env) {
-  return env.SCHEDULER_OPEN_ACCESS === "true" ? [...new Set<string>(Object.values(permissions))] : [...granted];
+  if (env.SCHEDULER_OPEN_ACCESS !== "true") return [...granted];
+  const everyday = Object.values(permissions).filter((key) => key !== permissions.manageMasterData);
+  return [...new Set<string>([...everyday, ...granted.filter((key) => key === permissions.manageMasterData)])];
 }
 
 export type Permission = (typeof permissions)[keyof typeof permissions];

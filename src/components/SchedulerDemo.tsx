@@ -43,15 +43,15 @@ import { createBatchLines, moveActivity, type NewBatch } from "@/lib/services/pl
 import { createManualJobOrder, linesForJob, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
-type Tab = "planner" | "orders" | "history" | "master" | "reports";
+type Tab = "planner" | "orders" | "master" | "reports" | "audit";
 type PlanningView = "calendar" | "list";
 
 const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: "planner", label: "Planner Board", icon: CalendarDays },
   { id: "orders", label: "Orders", icon: FileText },
-  { id: "history", label: "History", icon: History },
   { id: "master", label: "Admin", icon: LayoutGrid },
-  { id: "reports", label: "Reports", icon: ClipboardList }
+  { id: "reports", label: "Reports", icon: ClipboardList },
+  { id: "audit", label: "Audit trail", icon: History }
 ];
 
 const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
@@ -79,12 +79,15 @@ function AppHeader({
   activeTab,
   onTabChange,
   conflictCount,
-  showReports
+  showReports,
+  showAdmin
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
   conflictCount: number;
   showReports: boolean;
+  // Signed-in Core users see Admin only with Core's "Manage scheduler master data".
+  showAdmin: boolean;
 }) {
   return (
     <aside className="app-header">
@@ -93,7 +96,7 @@ function AppHeader({
         <p>Production workspace</p>
       </div>
       <nav className="tab-list" aria-label="Scheduler sections">
-        {tabs.filter((tab) => showReports || tab.id !== "reports").map((tab) => {
+        {tabs.filter((tab) => (showReports || tab.id !== "reports") && (showAdmin || tab.id !== "master")).map((tab) => {
           const Icon = tab.icon;
           return (
             <button
@@ -993,7 +996,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     </fieldset>
   </div>;
   return <main className="workstation">
-    <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} />
+    <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAdmin={!identity || canManage} />
     <div className="workstation-content">
       <header className="workstation-topbar"><span>Bio Tree / Production</span>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
       {persistenceStatus}
@@ -1028,7 +1031,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
       {activeTab === "orders" ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} jobActions={{ canCreate: caps.createPlan || caps.manage, canPlan: caps.createPlan, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder, onPlan: planJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
-      {activeTab === "history" ? <HistoryPanel refreshKey={activeTab} /> : null}
+      {activeTab === "audit" ? <HistoryPanel refreshKey={activeTab} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />
