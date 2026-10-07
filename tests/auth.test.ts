@@ -112,3 +112,12 @@ describe("Core contract", () => {
     expect(getCoreDirectoryConfig({ BIO_TREE_CORE_DATABASE_URL: "postgres://x/y", BIO_TREE_CORE_CACHE_TTL_MS: "0" })?.cacheTtlMs).toBe(0);
   });
 });
+
+describe("open access while Core roles are not set up", async () => {
+  const { effectivePermissions, permissions } = await import("../src/lib/auth/permissions");
+  it("gives every scheduler permission only when SCHEDULER_OPEN_ACCESS is true", () => {
+    expect(effectivePermissions(["scheduler.planning.view"], { SCHEDULER_OPEN_ACCESS: "true" }).sort()).toEqual([...new Set(Object.values(permissions))].sort());
+    expect(effectivePermissions(["scheduler.planning.view"], {})).toEqual(["scheduler.planning.view"]);
+    expect(effectivePermissions(["scheduler.planning.view"], { SCHEDULER_OPEN_ACCESS: "false" })).toEqual(["scheduler.planning.view"]);
+  });
+});

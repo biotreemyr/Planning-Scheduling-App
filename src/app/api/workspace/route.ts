@@ -6,7 +6,7 @@ import { parseWorkspace } from "@/lib/domain/workspace";
 import { ensureDailyBackup } from "@/lib/persistence/backup";
 import { getAppUrl, getAuthMode } from "@/lib/auth/config";
 import { AccessError, requireAnyPermission } from "@/lib/auth/guards";
-import { boardPermissions } from "@/lib/auth/permissions";
+import { boardPermissions, effectivePermissions } from "@/lib/auth/permissions";
 import { capabilitiesFromPermissions } from "@/lib/auth/capabilities";
 import { reviewWorkspaceChange } from "@/lib/auth/workspaceAccess";
 
@@ -26,7 +26,7 @@ async function coreAccess(request: NextRequest): Promise<{ actor: SaveActor; rev
   try { expected = getAppUrl()?.origin; } catch { expected = undefined; }
   const origin = request.headers.get("origin");
   if (!expected || origin !== expected || !validWriteToken(request.headers.get("x-scheduler-token"))) return response({ error: "This save did not come from the scheduler page. Reload and try again." }, 403);
-  const granted = user.apps.find((app) => app.appKey === "scheduler")?.permissions ?? [];
+  const granted = effectivePermissions(user.apps.find((app) => app.appKey === "scheduler")?.permissions ?? []);
   const can = capabilitiesFromPermissions(granted);
   return { actor: { id: user.id, clerkId: user.clerkUserId, name: user.name ?? "Bio Tree user" }, review: (before, after) => reviewWorkspaceChange(before, after, can) };
 }

@@ -3,7 +3,7 @@ import type { Route } from "next";
 import SchedulerDemo from "@/components/SchedulerDemo";
 import { AccessError, requireAnyPermission } from "@/lib/auth/guards";
 import { getAuthMode, getSignInUrl } from "@/lib/auth/config";
-import { APP_KEY, boardPermissions, type BioTreeUser } from "@/lib/auth/permissions";
+import { APP_KEY, boardPermissions, effectivePermissions, type BioTreeUser } from "@/lib/auth/permissions";
 import { headers } from "next/headers";
 import { localPersistenceAllowed } from "@/lib/persistence/access";
 import { db, writeToken } from "@/lib/persistence/database";
@@ -42,7 +42,7 @@ export default async function Home() {
   try {
     if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
     const initial = await workspaceRepository(db).load();
-    const identity = { id: user.id, name: user.name ?? "Bio Tree user", permissions: user.apps.find((app) => app.appKey === APP_KEY)?.permissions ?? [] };
+    const identity = { id: user.id, name: user.name ?? "Bio Tree user", permissions: effectivePermissions(user.apps.find((app) => app.appKey === APP_KEY)?.permissions ?? []) };
     return <SchedulerDemo initial={initial} writeToken={writeToken()} identity={identity} />;
   } catch {
     return <AccessMessage title="Scheduler unavailable" message="The scheduling database could not be reached. No data has been changed. Contact your administrator." />;

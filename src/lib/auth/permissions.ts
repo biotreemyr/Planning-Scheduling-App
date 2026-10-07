@@ -24,6 +24,15 @@ export const permissions = {
 // Opening the workspace at all needs at least one of these.
 export const boardPermissions = [permissions.viewPlanning, permissions.viewSchedule] as const;
 
+/**
+ * What a signed-in user may do in the scheduler. While SCHEDULER_OPEN_ACCESS is "true", anyone who
+ * can open the scheduler from Core may do everything here, so roles need not be set up yet; Core
+ * still decides who can open it. Otherwise their Core permissions apply as granted.
+ */
+export function effectivePermissions(granted: readonly string[], env: Record<string, string | undefined> = process.env) {
+  return env.SCHEDULER_OPEN_ACCESS === "true" ? [...new Set<string>(Object.values(permissions))] : [...granted];
+}
+
 export type Permission = (typeof permissions)[keyof typeof permissions];
 export type BioTreeUser = {
   id: string;
