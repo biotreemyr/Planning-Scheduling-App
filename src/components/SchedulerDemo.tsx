@@ -1,21 +1,6 @@
 "use client";
 
-import {
-  AlertTriangle,
-  ArrowUpDown,
-  CalendarDays,
-  CheckCircle2,
-  ClipboardList,
-  Copy,
-  Factory,
-  FileText,
-  LayoutGrid,
-  Plus,
-  Search,
-  SlidersHorizontal,
-  Users,
-  XCircle
-} from "lucide-react";
+import { AlertTriangle, ArrowUpDown, CalendarDays, CheckCircle2, ClipboardList, Copy, Factory, FileText, LayoutGrid, Plus, Search, SlidersHorizontal, Users, XCircle, History } from "lucide-react";
 import { FormEvent, useMemo, useState, type ReactNode } from "react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -31,6 +16,7 @@ import { SampleDataAdmin } from "@/components/SampleDataAdmin";
 import { useWorkspacePersistence } from "@/components/WorkspacePersistence";
 import { capabilitiesForDemoRole, capabilitiesFromPermissions } from "@/lib/auth/capabilities";
 import { OrdersPanel } from "@/components/OrdersPanel";
+import { HistoryPanel } from "@/components/HistoryPanel";
 import type { JobPlan } from "@/components/JobPlanDialog";
 import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
 import { validateCompletion, type CompletionInput, type WipTransfer } from "@/lib/services/productionFlow";
@@ -57,12 +43,13 @@ import { createBatchLines, moveActivity, type NewBatch } from "@/lib/services/pl
 import { createManualJobOrder, linesForJob, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
-type Tab = "planner" | "orders" | "master" | "reports";
+type Tab = "planner" | "orders" | "history" | "master" | "reports";
 type PlanningView = "calendar" | "list";
 
 const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: "planner", label: "Planner Board", icon: CalendarDays },
   { id: "orders", label: "Orders", icon: FileText },
+  { id: "history", label: "History", icon: History },
   { id: "master", label: "Admin", icon: LayoutGrid },
   { id: "reports", label: "Reports", icon: ClipboardList }
 ];
@@ -1041,6 +1028,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
       {activeTab === "orders" ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} jobActions={{ canCreate: caps.createPlan || caps.manage, canPlan: caps.createPlan, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder, onPlan: planJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
+      {activeTab === "history" ? <HistoryPanel refreshKey={activeTab} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />

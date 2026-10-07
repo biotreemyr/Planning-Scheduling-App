@@ -489,3 +489,7 @@
 .production-update-form .production-notes, .production-update-form .production-destination, .production-update-form > p, .production-update-form .production-actions { grid-column: 1 / -1; }
 .production-update-form .production-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 760px) { .production-update-form { grid-template-columns: minmax(0, 1fr); } }
+/* Transaction history. */
+.history-table td { vertical-align: top; }
+.history-table .history-when { white-space: nowrap; }
+.history-link { padding: 0; min-height: 0; border: 0; background: none; color: #1971c2; font: inherit; text-decoration: underline; cursor: pointer; text-align: left; }
