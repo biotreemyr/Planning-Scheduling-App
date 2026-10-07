@@ -2,13 +2,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
-import { priorities } from "@/lib/domain/types";
 import { orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
 import { ROUTES, routeLabel, stepOf, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
 import { OrderBadge } from "./OrderBadge";
-import { findJobByNumber, type JobOrder } from "@/lib/services/jobOrders";
+import type { JobOrder } from "@/lib/services/jobOrders";
 
-export function ActivityWorkspace({ onEditJobPlanning, line, product, canPlan, onClose, onPlan, children, jobOrders = [], format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
+export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, children, jobOrders = [], format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
   children?: ReactNode;
   // Opens the plan form for this activity's job order, to correct its whole route.
   onEditJobPlanning?: () => void;
@@ -17,46 +16,18 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, canPlan, o
   format?: ProductFormat; warnings?: FlowWarning[];
   orders?: PurchaseOrder[]; route?: RouteStep[]; routeMachines?: Machine[]; routeEntries?: ScheduleEntry[];
   canAssign?: boolean; onAssignMachine?: (lineIds: string[], machineId: string) => string[]; onOpenLine?: (id: string) => void;
-  line: PlanLine; product?: Product;
-  canPlan: boolean; onClose: () => void;
-  // Edits an activity planned before job orders existed.
-  onPlan: (line: PlanLine) => string;
+  line: PlanLine; product?: Product; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [planNotice, setPlanNotice] = useState("");
   const order = orders.find((item) => item.id === line.productionOrderId);
   const numbers = orderNumbers(orders);
   const job = jobOrders.find((item) => item.id === line.jobOrderId);
-  // The job order is keyed in by number; it must be one of this product's job orders.
-  const [jobText, setJobText] = useState(job?.number ?? "");
-  const pickedJob = findJobByNumber(jobText, jobOrders);
-  const jobId = pickedJob?.id ?? "";
-  // Job orders of POs for this product.
-  const jobChoices = jobOrders.filter((item) => item.id === line.jobOrderId || orders.find((entry) => entry.id === item.orderId)?.productId === line.productId);
   useEffect(() => { dialog.current?.showModal(); }, []);
   return <dialog ref={dialog} className="activity-dialog unified-activity" aria-labelledby="activity-workspace-title" onClose={onClose}>
     <header className="panel-title"><div><p className="eyebrow">Activity workspace</p><h2 id="activity-workspace-title">{product?.name}</h2>
       <p className="activity-order-ref">{order?.customerName ? <span>Customer: <strong>{order.customerName}</strong></span> : null}<span>{order ? <OrderBadge number={numbers.get(order.id)} poNumber={order.poNumber} /> : null}PO number: <strong>{order ? poLabel(order, orders) : "Not linked"}</strong></span>{job ? <span>Job order: <strong>{job.number}</strong></span> : line.orderReference ? <span>{line.orderReference}</span> : null}{job ? <span>Batch no.: <strong>{job.batchNumber ?? "Not entered"}</strong></span> : null}{order ? <span>Order quantity: {order.quantity.toLocaleString()} {order.uom}</span> : null}</p>
       {job && onEditJobPlanning ? <button type="button" className="calendar-button" onClick={() => { dialog.current?.close(); onEditJobPlanning(); }}>Edit job order planning</button> : null}</div><button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></header>
     {route.length ? <ProductionRoute line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} editable={canAssign} onAssign={onAssignMachine} onOpenLine={onOpenLine} /> : null}
-    {job ? <section className="planning-summary"><h3>Part 1 - Planning</h3>
-      {/* Planned through Production Planning from the job order; corrections go through "Edit job order planning". */}
-      <dl className="production-facts">
-        <div><dt>Process</dt><dd>{line.activityType}</dd></div>
-        <div><dt>Planned date</dt><dd>{line.plannedDate.split("-").reverse().join("-")}</dd></div>
-        <div><dt>Quantity</dt><dd>{line.quantity.toLocaleString()} {line.uom ?? product?.uom}{line.batchSizeKg !== undefined && line.uom !== "kg" ? <small> · {line.batchSizeKg} kg</small> : null}</dd></div>
-        <div><dt>Priority</dt><dd>{line.priority}</dd></div>
-      </dl>
-      {line.notes ? <p><strong>Remarks:</strong> {line.notes}</p> : null}
-      {canPlan && onEditJobPlanning ? <p className="route-muted">To change dates, quantities or the batch number, use “Edit job order planning” above.</p> : null}
-    </section> : <section><h3>Part 1 - Planning</h3><form className="form-panel" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); if (jobText.trim() && !jobChoices.some((item) => item.id === jobId)) { setPlanNotice(`No job order ${jobText.trim()} for this product.`); return; } setPlanNotice(onPlan({ ...line, productionOrderId: pickedJob ? pickedJob.orderId : String(data.get("order")) || undefined, jobOrderId: pickedJob?.id, plannedDate: String(data.get("date")), quantity: Number(data.get("quantity")), priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes")) })); }}>
-      {/* Activities planned before job orders existed: link one, and edit the activity itself. */}
-      <fieldset disabled={!canPlan}><label>Job order<input maxLength={60} autoComplete="off" list={`activity-jobs-${line.id}`} placeholder="Key in the job order number" value={jobText} onChange={(event) => setJobText(event.target.value)} /></label>
-        <datalist id={`activity-jobs-${line.id}`}>{jobChoices.map((item) => <option key={item.id} value={item.number}>{[`${item.quantity.toLocaleString()} ${item.uom}`, orders.find((entry) => entry.id === item.orderId)?.poNumber, item.batchNumber ? `Batch no. ${item.batchNumber}` : ""].filter(Boolean).join(" · ")}</option>)}</datalist>
-        {jobText.trim() && !jobChoices.some((item) => item.id === jobId) ? <p role="alert">No job order {jobText.trim()} for this product. Key in one of its job orders, or create it on the Orders tab.</p> : null}<label>PO number<select name="order" key={`po-${jobId}`} defaultValue={pickedJob ? pickedJob.orderId : line.productionOrderId ?? ""} disabled={!!pickedJob} title={pickedJob ? "Set by the job order" : undefined}><option value="">Not linked</option>{orders.filter((item) => item.productId === line.productId || item.id === line.productionOrderId).map((item) => <option key={item.id} value={item.id}>{numbers.get(item.id)} · {poLabel(item, orders)}{item.customerName ? ` · ${item.customerName}` : ""} · {item.quantity.toLocaleString()} {item.uom}</option>)}</select></label><label>Planned date<input name="date" type="date" defaultValue={line.plannedDate} required /></label><label>Quantity ({line.uom ?? product?.uom})<input name="quantity" type="number" min="0.000001" step="any" defaultValue={line.quantity} required /></label><label>Priority<select name="priority" defaultValue={line.priority}>{priorities.map((value) => <option key={value}>{value}</option>)}</select></label><label>Remarks<textarea name="notes" defaultValue={line.notes} /></label></fieldset>
-      {planNotice ? <p role="status" className={planNotice.includes("Warning:") ? "flow-warning-text" : undefined}>{planNotice}</p> : null}
-      {canPlan ? <button type="submit" className="primary-button">Save planning</button> : null}
-    </form></section>}
     {children}
   </dialog>;
 }

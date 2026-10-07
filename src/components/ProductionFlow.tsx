@@ -26,7 +26,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const source = d.calendars.find((calendar) => calendar.id === line.calendarId);
   const processName = (id?: string) => d.processes.find((process) => process.id === d.calendars.find((calendar) => calendar.id === id)?.processId)?.name ?? d.calendars.find((calendar) => calendar.id === id)?.name ?? "";
   const others = d.calendars.filter((calendar) => calendar.processId !== source?.processId && calendar.unitId === source?.unitId && calendar.id !== nextCalendarId);
-  if (line.completedAt) return <section className="production-update"><h3>Part 2 - Production update</h3>
+  if (line.completedAt) return <section className="production-update"><h3>Production update</h3>
     <dl className="production-facts">
       <div><dt>Started</dt><dd>{line.startedAt ? display(line.startedAt) : "-"}</dd></div>
       <div><dt>Completed</dt><dd>{display(new Date(line.completedAt).toISOString())}</dd></div>
@@ -35,7 +35,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     </dl>
     {line.productionNotes ? <p><strong>Notes:</strong> {line.productionNotes}</p> : null}
   </section>;
-  return <section className="production-update"><h3>Part 2 - Production update</h3>
+  return <section className="production-update"><h3>Production update</h3>
     {!editable ? <p className="route-muted">{line.startedAt ? `Started ${display(line.startedAt)}. ` : "Not started yet. "}Production records progress here.</p> : <form className="production-update-form" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);

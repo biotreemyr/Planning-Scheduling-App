@@ -799,26 +799,6 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       : moved.size ? `Moved to ${when}. Its machine booking${moved.size === 1 ? "" : "s"} moved with it.` : `Moved to ${when}. No machine booked yet.`;
     return flowWarning ? `${base} Warning: ${flowWarning.message}` : base;
   }
-  // The activity panel's planning form: quantity, priority, notes and PO in one update, and a
-  // date change through moveActivity so its bookings follow, exactly like dragging.
-  function savePlanning(line: PlanLine) {
-    const current = allowedLines.find((item) => item.id === line.id);
-    if (!canPlan || !current || current.completedAt) return "This activity cannot be changed.";
-    if (!Number.isFinite(line.quantity) || line.quantity <= 0) return "Quantity must be greater than zero.";
-    // A job order decides the PO; without one the PO can be chosen directly.
-    const job = line.jobOrderId ? data.jobOrders.find((item) => item.id === line.jobOrderId) : undefined;
-    if (line.jobOrderId && (!job || data.orders.find((order) => order.id === job.orderId)?.productId !== current.productId)) return "Choose a job order for this product.";
-    if (current.jobOrderId && !job) return "Activities stay linked to a job order. Choose another job order instead of unlinking.";
-    const orderId = job ? job.orderId : line.productionOrderId;
-    if (orderId && !data.orders.some((order) => order.id === orderId)) return "Choose an existing PO.";
-    const edited = data.lines.map((item) => item.id === line.id ? { ...(({ productionOrderId: _, jobOrderId: _j, ...rest }) => rest)(item), ...(orderId ? { productionOrderId: orderId } : {}), ...(job ? { jobOrderId: job.id } : {}), quantity: line.quantity, priority: line.priority, notes: line.notes, batchSizeKg: batchKilograms(line.quantity, item.uom ?? products.find((product) => product.id === item.productId)?.uom ?? "", item.unitWeightMg) } : item);
-    const moved = moveActivity(edited, data.entries, line.id, line.plannedDate, member.name);
-    if ("error" in moved) return moved.error;
-    setData((state) => ({ ...state, lines: moved.lines, entries: moved.entries }));
-    const warning = checkProcessFlow(moved.lines, moved.entries, data.orders, products, directory).find((item) => item.lineIds.includes(line.id));
-    const bookings = moved.movedEntryIds.length ? ` Its machine booking${moved.movedEntryIds.length === 1 ? "" : "s"} moved with it.` : "";
-    return `Planning saved.${bookings}${warning ? ` Warning: ${warning.message}` : ""}`;
-  }
   // One activity per step of the order's route. Every batch comes from a job order, so it has one.
   function addBatch(orderId: string, batch: NewBatch) {
     if (!caps.createPlan) return ["Planning access is required to add batches."];
@@ -1035,9 +1015,9 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} onPlanJob={canCreate ? planJobOrder : undefined} flow={flow}
         onMoveLine={moveLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
-      {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} canPlan={canPlan && !selectedLine.completedAt} onClose={() => setSelectedActivity(null)}
+      {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
         orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
-        onPlan={savePlanning} jobOrders={data.jobOrders}>
+        jobOrders={data.jobOrders}>
         <ProductionUpdate line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} />
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
