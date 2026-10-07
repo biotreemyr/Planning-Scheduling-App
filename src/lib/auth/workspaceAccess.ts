@@ -59,8 +59,8 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   if (lines.changed.some(({ before: old, after: line }) => old.jobOrderId && !line.jobOrderId)) need(false, "unlink activities from their job order");
   if (lines.removed.length) need(can.editPlan, "remove plan activities");
   for (const { before: old, after: line } of lines.changed) {
-    // Completing production writes only the completion time and final yield.
-    if (only(changedKeys(old, line), ["completedAt", "yieldQuantity"])) need(can.produce, "record production results");
+    // Production writes only its progress: start date, notes, completion time and actual quantity.
+    if (only(changedKeys(old, line), ["completedAt", "yieldQuantity", "startedAt", "productionNotes"])) need(can.produce, "record production results");
     else need(can.editPlan, "move or edit plan activities");
   }
   count("activities added", lines.added.length); count("activities changed", lines.changed.length); count("activities removed", lines.removed.length);

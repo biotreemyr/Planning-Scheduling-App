@@ -23,4 +23,10 @@ describe("production completion", () => {
     expect(validateCompletion(line, { ...input, quantity: 0, destinationId: "" }, person, d)).toEqual([]);
     expect(validateCompletion(line, { ...input, quantity: 0 }, person, d)).not.toEqual([]);
   });
+  it("checks the completed date against the start date, and allows holding output in the WIP room", () => {
+    const started = { ...line, startedAt: "2026-10-12" };
+    expect(validateCompletion(started, { ...input, completedDate: "2026-10-13", wipRoom: true }, person, d)).toEqual([]);
+    expect(validateCompletion(started, { ...input, completedDate: "2026-10-11" }, person, d)).toEqual(["The completed date cannot be before the start date."]);
+    expect(validateCompletion(started, { ...input, completedDate: "13/10/2026" }, person, d)).toEqual(["Choose the date production completed."]);
+  });
 });

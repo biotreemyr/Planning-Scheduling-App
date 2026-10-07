@@ -86,6 +86,9 @@ export type ProductionPlan = {
 
 export type PlanLine = {
   calendarId?: string;
+  // Production's progress: the day work started (YYYY-MM-DD) and anything noted during it.
+  startedAt?: string;
+  productionNotes?: string;
   completedAt?: string;
   yieldQuantity?: number;
   incomingWipId?: string;

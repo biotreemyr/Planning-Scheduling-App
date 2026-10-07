@@ -24,7 +24,7 @@ import { ActivityWorkspace } from "@/components/ActivityWorkspace";
 import { CalendarAdmin } from "@/components/CalendarAdmin";
 import { CatalogAdmin } from "@/components/CatalogAdmin";
 import { validateDirectoryChange } from "@/lib/services/adminConfiguration";
-import { EndProduction, WipInbox } from "@/components/ProductionFlow";
+import { ProductionUpdate, WipInbox } from "@/components/ProductionFlow";
 import { accessibleCalendars, selectedUnitCalendars, scopeCalendarRecords, type CalendarDirectory, type CalendarPerson } from "@/lib/domain/calendarAccess";
 import type { WorkspaceEnvelope, WorkspaceSnapshot } from "@/lib/domain/workspace";
 import { SampleDataAdmin } from "@/components/SampleDataAdmin";
@@ -671,7 +671,6 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   const coreMember: CalendarPerson | null = identity ? { id: `core-${identity.id}`, name: identity.name, role: "admin", unitIds: directory.units.map((item) => item.id), teamIds: [], calendarIds: directory.calendars.map((item) => item.id), processIds: directory.processes.map((item) => item.id) } : null;
   const member = coreMember ?? directory.people.find((item) => item.id === memberId)!;
   const caps = identity ? capabilitiesFromPermissions(identity.permissions) : capabilitiesForDemoRole(member.role);
-  const statuses = scheduleStatuses.filter((status) => (status !== "Confirmed" || caps.approve) && (status !== "Cancelled" || caps.cancel));
   const [unitSelection, setUnitSelection] = useState("");
   const availableUnits = directory.units.filter((item) => member.role === "admin" || member.unitIds.includes(item.id));
   const allowedCalendars = accessibleCalendars(member, directory);
@@ -714,11 +713,13 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   const flowByLine = warningsByLine(flow);
   const route = selectedLine ? batchRoute(selectedLine, allowedLines, directory) : [];
   const routeLineIds = new Set(route.flatMap((step) => step.lines.map((item) => item.id)));
+  // The next process this batch is planned in after the selected activity's, for its output.
+  const stepIndex = route.findIndex((step) => step.calendar.id === selectedLine?.calendarId);
+  const nextCalendarId = stepIndex >= 0 ? route.slice(stepIndex + 1).find((step) => step.lines.length)?.calendar.id : undefined;
   const selectedOrder = data.orders.find((order) => order.id === selectedLine?.productionOrderId);
   const selectedFormat = selectedOrder?.format ?? inferFormat(products.find((item) => item.id === selectedLine?.productId));
   const calendarMachines = machines.filter((machine) => machine.unitId === calendar?.unitId && visibleCalendars.some((item) => machine.processIds?.includes(item.processId)));
   const unitMachines = machines.filter((machine) => machine.unitId === activityCalendar?.unitId);
-  const activityMachines = unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? ""));
   const conflicts = findMachineConflicts(entries, machines, products);
   const calendarTitle = unit?.name ?? "No unit assigned";
   const processNames = Object.fromEntries(visibleCalendars.map((item) => [item.id, directory.processes.find((process) => process.id === item.processId)?.name ?? "Unassigned process"]));
@@ -734,44 +735,43 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     setData((current) => ({ ...current, actuals: [...current.actuals.filter((item) => item.planLineId !== line.id), actual] }));
     return [];
   }
-  function saveProduction(entry: ScheduleEntry) {
-    const line = planLines.find((item) => item.id === entry.planLineId);
-    if (!canProduce || !line || line.completedAt) return ["Production access to an open activity is required."];
-    const existing = data.entries.find((item) => item.id === entry.id);
-    if (existing && (existing.calendarId !== line.calendarId || existing.planLineId !== line.id)) return ["Activity not available."];
-    const processId = allowedCalendars.find((item) => item.id === line.calendarId)?.processId;
-    const machine = calendarMachines.find((item) => item.id === entry.machineId && item.active === "Active" && item.processIds?.includes(processId ?? ""));
-    if (!machine) return ["Select an active machine assigned to this unit and process."];
-    const candidate = { ...entry, calendarId: line.calendarId, productId: line.productId, workCentreId: machine.workCentreId, changedBy: member.name };
-    const errors = validateScheduleEntry(candidate);
-    if (findMachineConflicts([...data.entries.filter((item) => item.id !== entry.id), candidate], machines, products).some((conflict) => conflict.entryIds.includes(entry.id))) errors.push("This machine is reserved during the selected time, including setup.");
-    if (!errors.length) setData((current) => ({ ...current, entries: [...current.entries.filter((item) => item.id !== entry.id), candidate] }));
-    return errors;
-  }
   function completeProduction(input: CompletionInput) {
     if (!selectedLine) return ["Activity not available."];
     const errors = validateCompletion(selectedLine, input, identity ? { ...member, role: "production" } : member, directory, !identity);
     if (errors.length) return errors;
-    const completedAt = new Date().toISOString();
+    // The completed day production keyed in, at the time of saving (or end of day for an earlier day).
+    const now = new Date();
+    const completedAt = input.completedDate && input.completedDate !== localDateKey(now) ? new Date(`${input.completedDate}T17:00`).toISOString() : now.toISOString();
     const line = selectedLine;
     const uom = line.uom ?? products.find((product) => product.id === line.productId)?.uom ?? "";
     const transfer: WipTransfer | undefined = input.destinationId ? {
       id: newId("wip"), sourceLineId: line.id, sourceCalendarId: line.calendarId!, calendarId: input.destinationId,
       productId: line.productId, quantity: input.quantity, uom, orderReference: line.orderReference,
-      notes: input.notes, createdAt: completedAt, createdBy: member.name
+      notes: input.notes, createdAt: completedAt, createdBy: member.name, ...(input.wipRoom ? { wipRoom: true } : {})
     } : undefined;
     setData((current) => {
       if (current.lines.find((item) => item.id === line.id)?.completedAt) return current;
       const existingActual = current.actuals.find((item) => item.planLineId === line.id);
-      const actual: ProductionActual = { ...existingActual, planLineId: line.id, calendarId: line.calendarId, teamId: "", actualQuantity: input.quantity, plannedQuantity: line.quantity, uom, productionDate: localDateKey(new Date(completedAt)), hasDeviation: existingActual?.hasDeviation ?? false, deviation: existingActual?.deviation ?? "", correctiveAction: existingActual?.correctiveAction ?? "", updatedAt: completedAt, updatedBy: member.name };
+      const actual: ProductionActual = { ...existingActual, planLineId: line.id, calendarId: line.calendarId, teamId: "", actualQuantity: input.quantity, plannedQuantity: line.quantity, uom, productionDate: input.completedDate || localDateKey(new Date(completedAt)), hasDeviation: existingActual?.hasDeviation ?? false, deviation: existingActual?.deviation ?? "", correctiveAction: existingActual?.correctiveAction ?? "", updatedAt: completedAt, updatedBy: member.name };
       return {
         ...current,
-        lines: current.lines.map((item) => item.id === line.id ? { ...item, completedAt, yieldQuantity: input.quantity } : item),
+        lines: current.lines.map((item) => item.id === line.id ? { ...item, completedAt, yieldQuantity: input.quantity, startedAt: item.startedAt ?? localDateKey(new Date(completedAt)) } : item),
         entries: current.entries.map((item) => item.planLineId === line.id && item.status !== "Cancelled" ? { ...item, status: "Completed" as const, changedBy: member.name } : item),
         actuals: [...current.actuals.filter((item) => item.planLineId !== line.id), actual],
         transfers: transfer ? [...current.transfers, transfer] : current.transfers
       };
     });
+    return [];
+  }
+  // Production's progress on an activity: the day it started and notes; its bookings go in progress.
+  function saveProgress(startedAt: string, notes: string) {
+    const line = selectedLine;
+    if (!line || !canProduce) return ["Production access to this activity is required."];
+    if (line.completedAt) return ["This activity is already complete."];
+    if (startedAt && !/^\d{4}-\d{2}-\d{2}$/.test(startedAt)) return ["Choose the date production started."];
+    setData((current) => ({ ...current,
+      lines: current.lines.map((item) => item.id !== line.id ? item : (({ startedAt: _s, productionNotes: _n, ...rest }) => ({ ...rest, ...(startedAt ? { startedAt } : {}), ...(notes ? { productionNotes: notes } : {}) }))(item)),
+      entries: startedAt ? current.entries.map((entry) => entry.planLineId === line.id && (entry.status === "Draft" || entry.status === "Confirmed") ? { ...entry, status: "In Progress" as const, changedBy: member.name } : entry) : current.entries }));
     return [];
   }
   function saveDirectory(next: CalendarDirectory) {
@@ -944,19 +944,6 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     if (linesForJob(id, data.lines).length) return [`${job.number} is already planned.`];
     return addBatch(job.orderId, { label: job.number, quantity: job.quantity, startDate, jobOrderId: job.id });
   }
-  // Production keys in the batch number; it then shows on every process activity of the job.
-  function saveBatchNumber(id: string, value: string) {
-    if (!caps.produce && !caps.editPlan) return "Production or planning access is required to enter batch numbers.";
-    const job = data.jobOrders.find((item) => item.id === id);
-    if (!job) return "This job order no longer exists.";
-    const problem = validateBatchNumber(value, job, data.jobOrders);
-    if (problem) return problem;
-    const batchNumber = value.trim();
-    setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id !== id ? item
-      : batchNumber ? { ...item, batchNumber, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
-      : (({ batchNumber: _b, batchNumberBy: _by, batchNumberAt: _at, ...rest }) => rest)(item)) }));
-    return batchNumber ? `Batch number ${batchNumber} saved for ${job.number}.` : `Batch number cleared for ${job.number}.`;
-  }
   function deleteOrder(id: string) {
     if (!canEditOrders) return ["Planner or administrator access is required."];
     if (data.lines.some((line) => line.productionOrderId === id)) return ["Activities are linked to this PO. Unlink them on the Planner Board first."];
@@ -1048,10 +1035,10 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} onPlanJob={canCreate ? planJobOrder : undefined} flow={flow}
         onMoveLine={moveLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
-      {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} machines={activityMachines} entries={entries.filter((item) => item.planLineId === selectedLine.id)} canPlan={canPlan && !selectedLine.completedAt} canProduce={canProduce && !selectedLine.completedAt} onClose={() => setSelectedActivity(null)} onProduction={saveProduction}
-        orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} statuses={statuses} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
-        onPlan={savePlanning} jobOrders={data.jobOrders} canBatchNumber={caps.produce || caps.editPlan} onBatchNumber={saveBatchNumber}>
-        <EndProduction line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} onComplete={completeProduction} />
+      {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} canPlan={canPlan && !selectedLine.completedAt} onClose={() => setSelectedActivity(null)}
+        orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
+        onPlan={savePlanning} jobOrders={data.jobOrders}>
+        <ProductionUpdate line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} />
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
         <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements", "Sample data"].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>

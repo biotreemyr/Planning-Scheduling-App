@@ -1,31 +1,28 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { X, Plus } from "lucide-react";
+import { X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
-import { priorities, scheduleStatuses } from "@/lib/domain/types";
+import { priorities } from "@/lib/domain/types";
 import { orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
 import { ROUTES, routeLabel, stepOf, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
 import { OrderBadge } from "./OrderBadge";
 import { findJobByNumber, type JobOrder } from "@/lib/services/jobOrders";
 
-export function ActivityWorkspace({ onEditJobPlanning, line, product, machines, entries, canPlan, canProduce, onClose, onPlan, onProduction, children, jobOrders = [], canBatchNumber = false, onBatchNumber, statuses = scheduleStatuses, format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
+export function ActivityWorkspace({ onEditJobPlanning, line, product, canPlan, onClose, onPlan, children, jobOrders = [], format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
   children?: ReactNode;
   // Opens the plan form for this activity's job order, to correct its whole route.
   onEditJobPlanning?: () => void;
-  // Production keys the batch number in on the job order; planning may correct it.
-  jobOrders?: JobOrder[]; canBatchNumber?: boolean; onBatchNumber?: (jobId: string, value: string) => string;
-  // Booking statuses this person may set; Confirmed and Cancelled need Core approve and cancel.
-  statuses?: readonly ScheduleEntry["status"][];
+  jobOrders?: JobOrder[];
   // The batch's product format and any process-flow warnings for its activities.
   format?: ProductFormat; warnings?: FlowWarning[];
   orders?: PurchaseOrder[]; route?: RouteStep[]; routeMachines?: Machine[]; routeEntries?: ScheduleEntry[];
   canAssign?: boolean; onAssignMachine?: (lineIds: string[], machineId: string) => string[]; onOpenLine?: (id: string) => void;
-  line: PlanLine; product?: Product; machines: Machine[]; entries: ScheduleEntry[];
-  canPlan: boolean; canProduce: boolean; onClose: () => void;
-  onPlan: (line: PlanLine) => string; onProduction: (entry: ScheduleEntry) => string[];
+  line: PlanLine; product?: Product;
+  canPlan: boolean; onClose: () => void;
+  // Edits an activity planned before job orders existed.
+  onPlan: (line: PlanLine) => string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [adding, setAdding] = useState(false);
   const [planNotice, setPlanNotice] = useState("");
   const order = orders.find((item) => item.id === line.productionOrderId);
   const numbers = orderNumbers(orders);
@@ -34,7 +31,6 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, machines, 
   const [jobText, setJobText] = useState(job?.number ?? "");
   const pickedJob = findJobByNumber(jobText, jobOrders);
   const jobId = pickedJob?.id ?? "";
-  const [batchNotice, setBatchNotice] = useState("");
   // Job orders of POs for this product.
   const jobChoices = jobOrders.filter((item) => item.id === line.jobOrderId || orders.find((entry) => entry.id === item.orderId)?.productId === line.productId);
   useEffect(() => { dialog.current?.showModal(); }, []);
@@ -43,53 +39,26 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, machines, 
       <p className="activity-order-ref">{order?.customerName ? <span>Customer: <strong>{order.customerName}</strong></span> : null}<span>{order ? <OrderBadge number={numbers.get(order.id)} poNumber={order.poNumber} /> : null}PO number: <strong>{order ? poLabel(order, orders) : "Not linked"}</strong></span>{job ? <span>Job order: <strong>{job.number}</strong></span> : line.orderReference ? <span>{line.orderReference}</span> : null}{job ? <span>Batch no.: <strong>{job.batchNumber ?? "Not entered"}</strong></span> : null}{order ? <span>Order quantity: {order.quantity.toLocaleString()} {order.uom}</span> : null}</p>
       {job && onEditJobPlanning ? <button type="button" className="calendar-button" onClick={() => { dialog.current?.close(); onEditJobPlanning(); }}>Edit job order planning</button> : null}</div><button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></header>
     {route.length ? <ProductionRoute line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} editable={canAssign} onAssign={onAssignMachine} onOpenLine={onOpenLine} /> : null}
-    <section><h3>Part 1 - Planning</h3><form className="form-panel" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); if (jobText.trim() && !jobChoices.some((item) => item.id === jobId)) { setPlanNotice(`No job order ${jobText.trim()} for this product.`); return; } setPlanNotice(onPlan({ ...line, productionOrderId: pickedJob ? pickedJob.orderId : String(data.get("order")) || undefined, jobOrderId: pickedJob?.id, plannedDate: String(data.get("date")), quantity: Number(data.get("quantity")), priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes")) })); }}>
+    {job ? <section className="planning-summary"><h3>Part 1 - Planning</h3>
+      {/* Planned through Production Planning from the job order; corrections go through "Edit job order planning". */}
+      <dl className="production-facts">
+        <div><dt>Process</dt><dd>{line.activityType}</dd></div>
+        <div><dt>Planned date</dt><dd>{line.plannedDate.split("-").reverse().join("-")}</dd></div>
+        <div><dt>Quantity</dt><dd>{line.quantity.toLocaleString()} {line.uom ?? product?.uom}{line.batchSizeKg !== undefined && line.uom !== "kg" ? <small> · {line.batchSizeKg} kg</small> : null}</dd></div>
+        <div><dt>Priority</dt><dd>{line.priority}</dd></div>
+      </dl>
+      {line.notes ? <p><strong>Remarks:</strong> {line.notes}</p> : null}
+      {canPlan && onEditJobPlanning ? <p className="route-muted">To change dates, quantities or the batch number, use “Edit job order planning” above.</p> : null}
+    </section> : <section><h3>Part 1 - Planning</h3><form className="form-panel" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); if (jobText.trim() && !jobChoices.some((item) => item.id === jobId)) { setPlanNotice(`No job order ${jobText.trim()} for this product.`); return; } setPlanNotice(onPlan({ ...line, productionOrderId: pickedJob ? pickedJob.orderId : String(data.get("order")) || undefined, jobOrderId: pickedJob?.id, plannedDate: String(data.get("date")), quantity: Number(data.get("quantity")), priority: String(data.get("priority")) as PlanLine["priority"], notes: String(data.get("notes")) })); }}>
+      {/* Activities planned before job orders existed: link one, and edit the activity itself. */}
       <fieldset disabled={!canPlan}><label>Job order<input maxLength={60} autoComplete="off" list={`activity-jobs-${line.id}`} placeholder="Key in the job order number" value={jobText} onChange={(event) => setJobText(event.target.value)} /></label>
         <datalist id={`activity-jobs-${line.id}`}>{jobChoices.map((item) => <option key={item.id} value={item.number}>{[`${item.quantity.toLocaleString()} ${item.uom}`, orders.find((entry) => entry.id === item.orderId)?.poNumber, item.batchNumber ? `Batch no. ${item.batchNumber}` : ""].filter(Boolean).join(" · ")}</option>)}</datalist>
         {jobText.trim() && !jobChoices.some((item) => item.id === jobId) ? <p role="alert">No job order {jobText.trim()} for this product. Key in one of its job orders, or create it on the Orders tab.</p> : null}<label>PO number<select name="order" key={`po-${jobId}`} defaultValue={pickedJob ? pickedJob.orderId : line.productionOrderId ?? ""} disabled={!!pickedJob} title={pickedJob ? "Set by the job order" : undefined}><option value="">Not linked</option>{orders.filter((item) => item.productId === line.productId || item.id === line.productionOrderId).map((item) => <option key={item.id} value={item.id}>{numbers.get(item.id)} · {poLabel(item, orders)}{item.customerName ? ` · ${item.customerName}` : ""} · {item.quantity.toLocaleString()} {item.uom}</option>)}</select></label><label>Planned date<input name="date" type="date" defaultValue={line.plannedDate} required /></label><label>Quantity ({line.uom ?? product?.uom})<input name="quantity" type="number" min="0.000001" step="any" defaultValue={line.quantity} required /></label><label>Priority<select name="priority" defaultValue={line.priority}>{priorities.map((value) => <option key={value}>{value}</option>)}</select></label><label>Remarks<textarea name="notes" defaultValue={line.notes} /></label></fieldset>
-      <p>{line.activityType}{line.batchSizeKg !== undefined ? ` · ${line.batchSizeKg} kg equivalent` : ""}</p>
       {planNotice ? <p role="status" className={planNotice.includes("Warning:") ? "flow-warning-text" : undefined}>{planNotice}</p> : null}
       {canPlan ? <button type="submit" className="primary-button">Save planning</button> : null}
-    </form></section>
-    {job ? <section className="batch-number"><h3>Batch number</h3>
-      <form className="admin-inline" onSubmit={(event) => { event.preventDefault(); const value = String(new FormData(event.currentTarget).get("batchNumber") ?? ""); setBatchNotice(onBatchNumber?.(job.id, value) ?? ""); }}>
-        <label>Batch number for {job.number}<input name="batchNumber" maxLength={60} defaultValue={job.batchNumber ?? ""} readOnly={!canBatchNumber} placeholder="Keyed in by production" key={job.batchNumber ?? ""} /></label>
-        {canBatchNumber ? <button type="submit" className="calendar-button">Save batch number</button> : null}
-      </form>
-      <p className="route-muted">One batch number per job order. It shows on every process of {job.number}{job.batchNumberBy ? ` · last entered by ${job.batchNumberBy}` : ""}.</p>
-      {batchNotice ? <p role="status">{batchNotice}</p> : null}
-    </section> : null}
-    <section><h3>Part 2 - Production</h3>
-      {entries.length === 0 ? <p>No production details yet.</p> : null}
-      {/* Keyed on the booking's times too, so a date move refreshes the form instead of leaving stale times that would move it back. */}
-      {entries.map((entry) => <ProductionForm key={`${entry.id}-${entry.startAt}-${entry.endAt}-${entry.machineId}`} entry={entry} machines={machines} statuses={statuses} editable={canProduce} onSave={onProduction} />)}
-      {adding ? <ProductionForm entry={{ id: `sched-${crypto.randomUUID()}`, planLineId: line.id, productId: line.productId, productionOrderId: line.productionOrderId, workCentreId: "", startAt: `${line.plannedDate}T08:00`, endAt: `${line.plannedDate}T16:00`, status: "Draft" }} machines={machines} statuses={statuses} editable onSave={(entry) => { const errors = onProduction(entry); if (!errors.length) setAdding(false); return errors; }} /> : canProduce ? <button type="button" className="calendar-button" onClick={() => setAdding(true)}><Plus size={16} /> Add production details</button> : null}
-    </section>
+    </form></section>}
     {children}
   </dialog>;
-}
-// datetime-local inputs only show "YYYY-MM-DDTHH:mm"; convert stored UTC timestamps to local time.
-function localInput(value: string) {
-  if (!/Z$|[+-]\d{2}:\d{2}$/.test(value)) return value.slice(0, 16);
-  const date = new Date(value);
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-function ProductionForm({ entry, machines, statuses, editable, onSave }: { entry: ScheduleEntry; machines: Machine[]; statuses: readonly ScheduleEntry["status"][]; editable: boolean; onSave: (entry: ScheduleEntry) => string[] }) {
-  const [machineId, setMachineId] = useState(entry.machineId ?? "");
-  const [errors, setErrors] = useState<string[]>([]);
-  const [saved, setSaved] = useState(false);
-  const [status, setStatus] = useState(entry.status);
-  useEffect(() => setStatus(entry.status), [entry.status]);
-  const machine = machines.find((item) => item.id === machineId);
-  return <form className="production-detail-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); if (!machine) return; const result = onSave({ ...entry, machineId, workCentreId: machine.workCentreId, startAt: String(data.get("start")), endAt: String(data.get("end")), status: String(data.get("status")) as ScheduleEntry["status"], notes: String(data.get("notes")) }); setErrors(result); setSaved(!result.length); }}>
-    <fieldset disabled={!editable}><label>Machine<select required value={machineId} onChange={(event) => setMachineId(event.target.value)}><option value="">Select machine</option>{machines.filter((item) => item.active === "Active" || item.id === entry.machineId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-    <p>Configured capacity: {machine?.capacity !== undefined ? `${machine.capacity} ${machine.capacityUom ?? ""}` : machine?.capacityNotes ?? "Not configured"}</p>
-    <p>Setup time: {machine?.setupMinutes ?? 0} minutes</p>
-    <label>Start<input name="start" type="datetime-local" required defaultValue={localInput(entry.startAt)} /></label><label>End<input name="end" type="datetime-local" required defaultValue={localInput(entry.endAt)} /></label><label>Status<select name="status" value={status} onChange={(event) => setStatus(event.target.value as ScheduleEntry["status"])}>{scheduleStatuses.filter((value) => statuses.includes(value) || value === entry.status).map((value) => <option key={value}>{value}</option>)}</select></label><label>Production notes<textarea name="notes" defaultValue={entry.notes} /></label></fieldset>
-    {errors.map((error) => <p role="alert" key={error}>{error}</p>)}{saved ? <p role="status">Production details saved.</p> : null}
-    {editable ? <button className="primary-button" type="submit">Save production</button> : null}
-  </form>;
 }
 export function MachineConfiguration({ machines, onSave }: { machines: Machine[]; onSave: (machine: Machine) => void }) {
   return <section className="measurement-admin"><h2>Machine configuration</h2>{machines.map((machine) => <form key={machine.id} className="machine-config-row" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onSave({ ...machine, name: String(data.get("name")).trim(), capacity: data.get("capacity") ? Number(data.get("capacity")) : undefined, capacityUom: String(data.get("unit")).trim() }); }}>

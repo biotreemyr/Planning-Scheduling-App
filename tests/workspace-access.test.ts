@@ -68,4 +68,14 @@ describe("workspace change review", () => {
     next.data.lines.find((line) => line.id === openLine().id)!.plannedDate = "2026-10-20";
     expect(reviewWorkspaceChange(base, next, planner).summary).toEqual(["activities changed: 1"]);
   });
+  it("lets production save its progress (start date, notes) but not move the plan", () => {
+    const progressed = copy();
+    const line = progressed.data.lines.find((item) => item.id === openLine().id)!;
+    Object.assign(line, { startedAt: "2026-10-07", productionNotes: "Line stopped 20 minutes for a sieve change." });
+    expect(reviewWorkspaceChange(base, progressed, manager).allowed).toBe(true);
+    expect(reviewWorkspaceChange(base, progressed, viewer).allowed).toBe(false);
+    const moved = structuredClone(progressed);
+    moved.data.lines.find((item) => item.id === line.id)!.plannedDate = "2026-10-09";
+    expect(reviewWorkspaceChange(progressed, moved, role("schedule.edit")).denied).toContain("move or edit plan activities");
+  });
 });

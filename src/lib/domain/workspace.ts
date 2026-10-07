@@ -33,6 +33,7 @@ export const workspaceSchema = z.object({
   data: z.object({
     lines: z.array(z.object({ id, calendarId: id, planId: id, productId: id, quantity: number.positive(), plannedDate: date,
       priority: z.enum(["Low", "Normal", "High", "Urgent"]), status: z.enum(["Unscheduled", "Partially Scheduled", "Fully Scheduled"]),
+      startedAt: date.optional(), productionNotes: text.optional(),
       completedAt: timestamp.optional(), yieldQuantity: number.nonnegative().optional(), incomingWipId: id.optional(), uom: name.optional(),
       activityType: text.optional(), unitWeightMg: number.positive().optional(), batchSizeKg: number.nonnegative().optional(),
       teamId: text.optional(), productionOrderId: id.optional(), jobOrderId: id.optional(), orderReference: text.optional(), notes: text.optional() })),
@@ -42,7 +43,8 @@ export const workspaceSchema = z.object({
     actuals: z.array(z.object({ calendarId: id, planLineId: id, teamId: text, actualQuantity: number.nonnegative(), plannedQuantity: number.positive(),
       uom: name, productionDate: date, hasDeviation: z.boolean(), deviation: text, correctiveAction: text, updatedBy: name, updatedAt: timestamp })),
     transfers: z.array(z.object({ id, sourceLineId: id, sourceCalendarId: id, calendarId: id, productId: id, quantity: number.positive(), uom: name,
-      orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional() })),
+      orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional(),
+      wipRoom: z.boolean().optional() })),
     // Added after the first pilot release; older snapshots load with no orders.
     orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), customerId: id.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([]),

@@ -477,3 +477,13 @@
 .orders-list .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .order-dialog .orders-form { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 18px 20px 20px; }
 @media (max-width: 760px) { .order-dialog .orders-form { grid-template-columns: minmax(0, 1fr); } }
+/* Activity panel: planning summary and production's update. */
+.production-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 16px; margin: 6px 0 8px; }
+.production-facts div { display: grid; gap: 2px; }
+.production-facts dt { font-size: 12px; color: var(--muted); }
+.production-facts dd { margin: 0; font-weight: 600; }
+.production-facts dd small { font-weight: 400; color: var(--muted); }
+.production-update-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; align-items: end; }
+.production-update-form .production-notes, .production-update-form .production-destination, .production-update-form > p, .production-update-form .production-actions { grid-column: 1 / -1; }
+.production-update-form .production-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 760px) { .production-update-form { grid-template-columns: minmax(0, 1fr); } }
