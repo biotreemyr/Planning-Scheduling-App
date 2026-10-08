@@ -53,6 +53,8 @@ export const workspaceSchema = z.object({
     jobOrders: z.array(z.object({ id, number: name, orderId: id, sequence: number.int().positive(), quantity: number.positive(), uom: name,
       batchSizeKg: number.positive().optional(), batchVolumeL: number.positive().optional(), packQuantity: number.positive().optional(), packUom: name.optional(), packSize: number.positive().optional(),
       boxQuantity: number.positive().optional(), packingNumber: z.string().trim().min(1).max(60).optional(),
+      testedAt: timestamp.optional(), testedBy: text.optional(),
+      releaseQuantity: number.nonnegative().optional(), releaseUom: name.optional(), releasedAt: timestamp.optional(), releasedBy: text.optional(),
       batchNumber: z.string().trim().max(60).optional(), batchNumberBy: text.optional(), batchNumberAt: timestamp.optional(),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([])
   })

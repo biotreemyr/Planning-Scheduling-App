@@ -10,9 +10,9 @@ const role = (...keys: string[]) => capabilitiesFromPermissions(keys.map((key) =
 // Core's live roles (checked against the Core database on 2026-10-03).
 const viewer = role("planning.view", "schedule.view", "reports.view");
 const production = role("planning.view", "schedule.view");
-const planner = role("planning.create", "planning.edit", "planning.view", "reports.view", "schedule.view");
+const planner = role("planning.create", "planning.edit", "planning.view", "reports.view", "schedule.view", "orders.view", "orders.create", "orders.edit");
 const manager = role("planning.edit", "planning.view", "reports.view", "schedule.edit", "schedule.view");
-const admin = role("master_data.manage", "planning.create", "planning.edit", "planning.view", "reports.view", "schedule.edit", "schedule.view");
+const admin = role("orders.create", "orders.edit", "master_data.manage", "planning.create", "planning.edit", "planning.view", "reports.view", "schedule.edit", "schedule.view");
 const everything = role("master_data.manage", "planning.create", "planning.edit", "planning.view", "reports.view", "schedule.edit", "schedule.view", "schedule.approve", "schedule.cancel", "schedule.review", "schedule.submit");
 const openLine = () => base.data.lines.find((line) => !line.completedAt && !base.data.entries.some((entry) => entry.planLineId === line.id))!;
 
@@ -28,12 +28,26 @@ describe("workspace change review", () => {
     expect(reviewWorkspaceChange(base, next, viewer).denied).toEqual(["move or edit plan activities"]);
     expect(reviewWorkspaceChange(base, next, production).allowed).toBe(false);
   });
-  it("requires planning create to add activities and orders", () => {
+  it("requires planning create to add activities, and orders create to add orders", () => {
     const next = copy();
     next.data.lines.push({ ...openLine(), id: "new-line" });
     next.data.orders.push({ ...base.data.orders[0], id: "new-order", poNumber: "PO-NEW", number: 99 });
     expect(reviewWorkspaceChange(base, next, planner).allowed).toBe(true);
-    expect(reviewWorkspaceChange(base, next, manager).denied).toEqual(["add or edit orders", "add plan activities"]);
+    expect(reviewWorkspaceChange(base, next, manager).denied).toEqual(["add orders", "add plan activities"]);
+    const edited = copy();
+    edited.data.orders[0].quantity += 1;
+    expect(reviewWorkspaceChange(base, edited, role("orders.create")).denied).toEqual(["edit or delete orders"]);
+    expect(reviewWorkspaceChange(base, edited, role("orders.edit")).allowed).toBe(true);
+  });
+  it("lets only testing pass a batch and only release release it", () => {
+    const passed = copy();
+    Object.assign(passed.data.jobOrders[0], { testedAt: "2026-10-08T10:00:00.000Z", testedBy: "QC" });
+    expect(reviewWorkspaceChange(base, passed, role("testing.edit")).allowed).toBe(true);
+    expect(reviewWorkspaceChange(base, passed, admin).denied).toEqual(["pass testing"]);
+    const released = structuredClone(passed);
+    Object.assign(released.data.jobOrders[0], { releaseQuantity: 4100, releaseUom: "boxes", releasedAt: "2026-10-09T10:00:00.000Z", releasedBy: "QA" });
+    expect(reviewWorkspaceChange(passed, released, role("release.edit")).allowed).toBe(true);
+    expect(reviewWorkspaceChange(passed, released, role("testing.edit")).denied).toEqual(["release batches"]);
   });
   it("requires schedule edit to record results, not planning rights", () => {
     const next = copy();

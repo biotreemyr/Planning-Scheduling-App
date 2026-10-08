@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { batchStatus, orderStatusSummary, passTesting, releaseBatch, releaseQueue, testingQueue, activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { validateOrder } from "../src/lib/services/orders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
@@ -183,6 +183,39 @@ describe("job orders", () => {
     const packingLine = { ...state.data.lines[0], jobOrderId: job.id, activityType: "Packing" };
     expect(activityFacts(packingLine, [job]).jobNumber).toBe("PJO0060");
     expect(activityFacts({ ...packingLine, activityType: "Filling" }, [job]).jobNumber).toBe("JO0060");
+  });
+  it("moves a finished batch through testing and release, showing only pending work", () => {
+    const job = state.data.jobOrders.find((item) => state.data.lines.some((line) => line.jobOrderId === item.id && line.activityType === "Packing" && line.completedAt))!;
+    const lines = state.data.lines;
+    // Earlier processes handed on; only packing's boxes are final output.
+    const handed = lines.filter((line) => line.jobOrderId === job.id && line.completedAt && line.activityType !== "Packing").map((line) => ({ sourceLineId: line.id }));
+    const boxes = finalOutput(job.id, lines, handed)[0];
+    expect(batchStatus(job, lines, handed)).toBe("Awaiting testing");
+    expect(testingQueue([job], lines, handed)).toEqual([job]);
+    expect(releaseQueue([job])).toEqual([]);
+    const unfinished = state.data.jobOrders.find((item) => !lines.some((line) => line.jobOrderId === item.id && line.completedAt))!;
+    expect(passTesting(unfinished, lines, [], "QC", today)).toEqual({ error: `${unfinished.number} has no final output to test yet.` });
+    expect(releaseBatch(job, 1, "boxes", "QA", today)).toEqual({ error: `${job.number} has not passed testing yet.` });
+
+    const passed = passTesting(job, lines, handed, "QC", today) as JobOrder;
+    expect(passed).toMatchObject({ testedBy: "QC", testedAt: today.toISOString() });
+    expect(passTesting(passed, lines, handed, "QC", today)).toMatchObject({ error: expect.stringContaining("already passed") });
+    expect(testingQueue([passed], lines, handed)).toEqual([]);
+    expect(releaseQueue([passed])).toEqual([passed]);
+
+    // The release quantity defaults to the final output in the screen; here it is changed.
+    const released = releaseBatch(passed, boxes.quantity - 5, boxes.uom, "QA", today) as JobOrder;
+    expect(released).toMatchObject({ releaseQuantity: boxes.quantity - 5, releaseUom: "boxes", releasedBy: "QA" });
+    expect(releaseBatch(released, 1, "boxes", "QA", today)).toMatchObject({ error: expect.stringContaining("already released") });
+    expect(releaseBatch(passed, -1, "boxes", "QA", today)).toEqual({ error: "Release quantity must be zero or more." });
+    expect(releaseQueue([released])).toEqual([]);
+    expect(batchStatus(released, lines, handed)).toBe("Released");
+    const others = state.data.jobOrders.filter((item) => item.id !== job.id);
+    expect(orderStatusSummary(job.orderId, [...others, released], lines, handed)).toMatchObject({ passed: 1, released: 1, releasedQuantity: [{ quantity: boxes.quantity - 5, uom: "boxes" }] });
+    // The workspace stores it.
+    const next = structuredClone(state);
+    next.data.jobOrders = next.data.jobOrders.map((item) => item.id === released.id ? released : item);
+    expect(() => parseWorkspace(next)).not.toThrow();
   });
 });
 

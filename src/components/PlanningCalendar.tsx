@@ -21,8 +21,10 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
 
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
-export default function PlanningCalendar({ orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", planLines, products, initialDate, onPlanJob, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
+export default function PlanningCalendar({ canPrint = true, orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", planLines, products, initialDate, onPlanJob, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
   processNames: Record<string, string>;
+  // Core's "Print planner board": print, PDF and Excel.
+  canPrint?: boolean;
   orders?: PurchaseOrder[];
   jobOrders?: JobOrder[];
   // Process-flow warnings by activity id, marked with ⚠ on the calendar and list.
@@ -161,6 +163,7 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], allLines
   return <div className="planning-calendar" onMouseLeave={() => setHover(null)} onKeyDown={(event) => { if (event.key === "Escape") setHover(null); }}>
     <div className="calendar-toolbar">
       <div className="calendar-navigation">
+        {canPrint ? <>
         <button type="button" className="icon-button" aria-label={`Print ${printName} / Save as PDF`} title={`Print ${printName} / Save as PDF`} disabled={!ready} onClick={() => window.print()}><Printer size={18} /></button>
         <button type="button" className="icon-button" aria-label={`Download ${printName} PDF`} title={`Download ${printName} PDF`} disabled={!ready || exporting} onClick={async () => {
           setExporting(true);
@@ -185,6 +188,7 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], allLines
           } catch { setNotice("Excel could not be generated. Please try again."); }
           finally { setExporting(false); }
         }}><FileSpreadsheet size={18} /></button>
+        </> : null}
         <button type="button" className="icon-button" title="Previous period" aria-label="Previous period" disabled={!ready} onClick={() => navigate("prev")}><ChevronLeft size={18} /></button>
         <button type="button" className="icon-button" title="Next period" aria-label="Next period" disabled={!ready} onClick={() => navigate("next")}><ChevronRight size={18} /></button>
         <button type="button" className="calendar-button" disabled={!ready} onClick={() => navigate("today")}>Today</button>

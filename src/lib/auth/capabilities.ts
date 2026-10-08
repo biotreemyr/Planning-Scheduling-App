@@ -5,6 +5,10 @@ import { permissions } from "./permissions";
 export type WorkspaceCapabilities = {
   manage: boolean; createPlan: boolean; editPlan: boolean; produce: boolean;
   approve: boolean; cancel: boolean; reports: boolean;
+  printPlan: boolean;
+  viewOrders: boolean; createOrders: boolean; editOrders: boolean; printOrders: boolean;
+  viewTesting: boolean; passTesting: boolean; printTesting: boolean;
+  viewRelease: boolean; release: boolean; printRelease: boolean;
 };
 
 export function capabilitiesFromPermissions(granted: readonly string[]): WorkspaceCapabilities {
@@ -16,7 +20,11 @@ export function capabilitiesFromPermissions(granted: readonly string[]): Workspa
     produce: has(permissions.editEntry),
     approve: has(permissions.confirmEntry),
     cancel: has(permissions.cancelEntry),
-    reports: has(permissions.reports)
+    reports: has(permissions.reports),
+    printPlan: has(permissions.printPlanning),
+    viewOrders: has(permissions.viewOrders), createOrders: has(permissions.createOrders), editOrders: has(permissions.editOrders), printOrders: has(permissions.printOrders),
+    viewTesting: has(permissions.viewTesting), passTesting: has(permissions.passTesting), printTesting: has(permissions.printTesting),
+    viewRelease: has(permissions.viewRelease), release: has(permissions.releaseBatches), printRelease: has(permissions.printRelease)
   };
 }
 
@@ -24,6 +32,10 @@ export function capabilitiesFromPermissions(granted: readonly string[]): Workspa
 export function capabilitiesForDemoRole(role: "admin" | "planner" | "production"): WorkspaceCapabilities {
   return {
     manage: role === "admin", createPlan: role !== "production", editPlan: role !== "production", produce: role === "production",
-    approve: true, cancel: true, reports: true
+    approve: true, cancel: true, reports: true, printPlan: true,
+    // Planners own orders; production tests and releases finished batches; everyone may look.
+    viewOrders: true, createOrders: role !== "production", editOrders: role !== "production", printOrders: true,
+    viewTesting: true, passTesting: role !== "planner", printTesting: true,
+    viewRelease: true, release: role !== "planner", printRelease: true
   };
 }

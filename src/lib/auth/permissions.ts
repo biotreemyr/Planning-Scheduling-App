@@ -18,22 +18,37 @@ export const permissions = {
   cancelEntry: "scheduler.schedule.cancel",
   confirmEntry: "scheduler.schedule.approve",
   reports: "scheduler.reports.view",
-  manageMasterData: "scheduler.master_data.manage"
+  manageMasterData: "scheduler.master_data.manage",
+  // Per-feature access added in Core migration 0011: view, create, edit and print per feature.
+  printPlanning: "scheduler.planning.print",
+  viewOrders: "scheduler.orders.view",
+  createOrders: "scheduler.orders.create",
+  editOrders: "scheduler.orders.edit",
+  printOrders: "scheduler.orders.print",
+  viewTesting: "scheduler.testing.view",
+  passTesting: "scheduler.testing.edit",
+  printTesting: "scheduler.testing.print",
+  viewRelease: "scheduler.release.view",
+  releaseBatches: "scheduler.release.edit",
+  printRelease: "scheduler.release.print"
 } as const;
 
 // Opening the workspace at all needs at least one of these.
-export const boardPermissions = [permissions.viewPlanning, permissions.viewSchedule] as const;
+export const boardPermissions = [permissions.viewPlanning, permissions.viewSchedule, permissions.viewOrders, permissions.viewTesting, permissions.viewRelease] as const;
+
+// Always granted only as ticked in Core, even under open access: Admin, and the Status area.
+const coreOnly = new Set<string>([permissions.manageMasterData, permissions.viewTesting, permissions.passTesting, permissions.printTesting, permissions.viewRelease, permissions.releaseBatches, permissions.printRelease]);
 
 /**
  * What a signed-in user may do in the scheduler. While SCHEDULER_OPEN_ACCESS is "true", anyone who
- * can open the scheduler from Core may plan, edit orders and record production without roles being
- * set up; Admin (master data) still follows Core: tick "Manage scheduler master data" for a person
- * in Core to give them the Admin tab. Otherwise their Core permissions apply as granted.
+ * can open the scheduler from Core may plan, use orders and record production without roles being
+ * set up; Admin (master data) and the Status area (testing, release) still follow Core: tick them for
+ * a person in Core. Otherwise every Core permission applies exactly as granted.
  */
 export function effectivePermissions(granted: readonly string[], env: Record<string, string | undefined> = process.env) {
   if (env.SCHEDULER_OPEN_ACCESS !== "true") return [...granted];
-  const everyday = Object.values(permissions).filter((key) => key !== permissions.manageMasterData);
-  return [...new Set<string>([...everyday, ...granted.filter((key) => key === permissions.manageMasterData)])];
+  const everyday = Object.values(permissions).filter((key) => !coreOnly.has(key));
+  return [...new Set<string>([...everyday, ...granted.filter((key) => coreOnly.has(key))])];
 }
 
 export type Permission = (typeof permissions)[keyof typeof permissions];

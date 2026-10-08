@@ -1,0 +1,102 @@
+"use client";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { CheckCircle2, PackageCheck, Printer } from "lucide-react";
+import type { PlanLine, Product } from "@/lib/domain/types";
+import { finalOutput, finishedOn, packingNumber, releaseQueue, testingQueue, type JobOrder } from "@/lib/services/jobOrders";
+import type { PurchaseOrder } from "@/lib/services/orders";
+
+export type StatusAccess = { viewTesting: boolean; passTesting: boolean; printTesting: boolean; viewRelease: boolean; release: boolean; printRelease: boolean };
+type Section = "testing" | "release";
+
+const day = (value?: string) => value ? new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
+
+/**
+ * Status: finished batches through testing and release. Testing lists each job order with final
+ * output not yet passed; Pass moves it to Release. Release lists passed batches with the release
+ * quantity (the final output, which can be changed); Release completes it. Only pending work shows.
+ */
+export function StatusPanel({ jobOrders, orders, products, lines, transfers, access, onPass, onRelease }: {
+  jobOrders: JobOrder[]; orders: PurchaseOrder[]; products: Product[]; lines: PlanLine[]; transfers: { sourceLineId: string }[];
+  access: StatusAccess;
+  onPass: (jobId: string) => string[];
+  onRelease: (jobId: string, quantity: number, uom: string) => string[];
+}) {
+  const sections = ([["testing", "Testing", access.viewTesting], ["release", "Release", access.viewRelease]] as const).filter(([, , allowed]) => allowed);
+  const [section, setSection] = useState<Section>(sections[0]?.[0] ?? "testing");
+  const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const [printing, setPrinting] = useState(0);
+  useEffect(() => { if (printing) window.print(); }, [printing]);
+  const testing = testingQueue(jobOrders, lines, transfers);
+  const release = releaseQueue(jobOrders);
+  const rows = section === "testing" ? testing : release;
+  const canPrint = section === "testing" ? access.printTesting : access.printRelease;
+  const details = (job: JobOrder) => {
+    const order = orders.find((item) => item.id === job.orderId);
+    const output = finalOutput(job.id, lines, transfers)[0];
+    return { order, product: products.find((item) => item.id === order?.productId)?.name ?? "Unknown product", output };
+  };
+  const report = (errors: string[], text: string) => setMessage(errors.length ? { text: errors.join(" "), error: true } : { text, error: false });
+  if (!sections.length) return null;
+
+  return <section className="workspace-panel status-panel">
+    <div className="panel-title">
+      <div className="view-switch" aria-label="Status section">
+        {sections.map(([key, label]) => <button key={key} type="button" aria-pressed={section === key} onClick={() => { setSection(key); setMessage(null); }}>
+          {label} <span className="badge neutral">{key === "testing" ? testing.length : release.length}</span></button>)}
+      </div>
+      {canPrint ? <button type="button" className="calendar-button" onClick={() => setPrinting((value) => value + 1)}><Printer size={16} />Print {section} list</button> : null}
+    </div>
+    <p className="orders-help">{section === "testing" ? "Finished batches, from production's final output, waiting for testing. Pass sends a batch to Release." : "Batches that passed testing, waiting for release. The release quantity is the final output; change it if needed, then release."}</p>
+    {message ? <p role={message.error ? "alert" : "status"} className={message.error ? undefined : "calendar-notice"}>{message.text}</p> : null}
+    <div className="orders-table-scroll" tabIndex={0} role="region" aria-label={`${section === "testing" ? "Testing" : "Release"} list`}>
+      <table className="job-order-table status-table">
+        <thead><tr>
+          <th scope="col">PJO no.</th><th scope="col">Product</th><th scope="col">Batch no.</th><th scope="col">Job order no.</th><th scope="col">PO</th>
+          <th scope="col" className="numeric">Final output</th>
+          {section === "testing" ? <th scope="col">Finished</th> : <><th scope="col">Passed testing</th><th scope="col" className="numeric">Release quantity</th></>}
+          <th scope="col"><span className="admin-sr-only">Action</span></th>
+        </tr></thead>
+        <tbody>
+          {!rows.length ? <tr><td colSpan={section === "testing" ? 8 : 9} className="empty-state">{section === "testing" ? "No batches waiting for testing." : "No batches waiting for release."}</td></tr> : null}
+          {rows.map((job) => {
+            const { order, product, output } = details(job);
+            const typed = quantities[job.id] ?? (output ? String(output.quantity) : "");
+            return <tr key={job.id}>
+              <th scope="row"><strong>{packingNumber(job)}</strong></th>
+              <td>{product}</td>
+              <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Not keyed in</span>}</td>
+              <td>{job.number}</td>
+              <td>{order?.poNumber ?? "-"}{order?.customerName ? <small>{order.customerName}</small> : null}</td>
+              <td className="numeric">{output ? `${amount(output.quantity)} ${output.uom}` : "-"}</td>
+              {section === "testing" ? <td>{day(finishedOn(job, lines, transfers))}</td> : <>
+                <td>{day(job.testedAt)}{job.testedBy ? <small>by {job.testedBy}</small> : null}</td>
+                <td className="numeric"><span className="status-release-qty"><input type="number" min="0" step="any" aria-label={`Release quantity for ${packingNumber(job)}`} disabled={!access.release} value={typed}
+                  onChange={(event) => setQuantities({ ...quantities, [job.id]: event.target.value })} /> {output?.uom ?? ""}</span>
+                  {output && typed !== "" && Number(typed) !== output.quantity ? <small className="order-warning">Final output is {amount(output.quantity)}</small> : null}</td>
+              </>}
+              <td>{section === "testing"
+                ? access.passTesting ? <button type="button" className="primary-button" onClick={() => report(onPass(job.id), `${packingNumber(job)} passed testing and moved to Release.`)}><CheckCircle2 size={16} />Pass</button> : null
+                : access.release ? <button type="button" className="primary-button" onClick={() => {
+                  if (typed.trim() === "") { report(["Enter the release quantity."], ""); return; }
+                  report(onRelease(job.id, Number(typed), output?.uom ?? job.releaseUom ?? ""), `${packingNumber(job)} released: ${amount(Number(typed))} ${output?.uom ?? ""}.`);
+                }}><PackageCheck size={16} />Release</button> : null}</td>
+            </tr>;
+          })}
+        </tbody>
+      </table>
+    </div>
+    {printing && typeof document !== "undefined" ? createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
+      <header><h1>{section === "testing" ? "Testing" : "Release"} list</h1><p>{rows.length} batch{rows.length === 1 ? "" : "es"} pending · printed {new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p></header>
+      <table className="print-orders-table">
+        <thead><tr><th>PJO no.</th><th>Product</th><th>Batch no.</th><th>Job order no.</th><th>PO</th><th>Final output</th>{section === "testing" ? <th>Finished</th> : <><th>Passed testing</th><th>Release quantity</th></>}</tr></thead>
+        <tbody>{rows.map((job) => { const { order, product, output } = details(job); return <tr key={job.id}>
+          <td>{packingNumber(job)}</td><td>{product}</td><td>{job.batchNumber ?? ""}</td><td>{job.number}</td><td>{order?.poNumber ?? ""}</td><td>{output ? `${amount(output.quantity)} ${output.uom}` : ""}</td>
+          {section === "testing" ? <td>{day(finishedOn(job, lines, transfers))}</td> : <><td>{day(job.testedAt)}</td><td>{quantities[job.id] ?? (output ? amount(output.quantity) : "")} {output?.uom ?? ""}</td></>}
+        </tr>; })}</tbody>
+      </table>
+    </section>, document.body) : null}
+  </section>;
+}

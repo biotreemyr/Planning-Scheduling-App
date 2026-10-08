@@ -16,6 +16,7 @@ import { SampleDataAdmin } from "@/components/SampleDataAdmin";
 import { useWorkspacePersistence } from "@/components/WorkspacePersistence";
 import { capabilitiesForDemoRole, capabilitiesFromPermissions } from "@/lib/auth/capabilities";
 import { OrdersPanel } from "@/components/OrdersPanel";
+import { StatusPanel } from "@/components/StatusPanel";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { inUnit, type JobPlan } from "@/components/JobPlanDialog";
 import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
@@ -40,15 +41,16 @@ import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
 import { getScheduleReport } from "@/lib/services/reports";
 import { syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 import { moveActivity } from "@/lib/services/planChanges";
-import { checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
+import { passTesting, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, stepOf, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
-type Tab = "planner" | "orders" | "master" | "reports" | "audit";
+type Tab = "planner" | "orders" | "status" | "master" | "reports" | "audit";
 type PlanningView = "calendar" | "list";
 
 const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: "planner", label: "Planner Board", icon: CalendarDays },
   { id: "orders", label: "Orders", icon: FileText },
+  { id: "status", label: "Status", icon: CheckCircle2 },
   { id: "master", label: "Admin", icon: LayoutGrid },
   { id: "reports", label: "Reports", icon: ClipboardList },
   { id: "audit", label: "Audit trail", icon: History }
@@ -80,7 +82,9 @@ function AppHeader({
   onTabChange,
   conflictCount,
   showReports,
-  showAdmin
+  showAdmin,
+  showOrders,
+  showStatus
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
@@ -88,6 +92,8 @@ function AppHeader({
   showReports: boolean;
   // Signed-in Core users see Admin only with Core's "Manage scheduler master data".
   showAdmin: boolean;
+  // Orders with Core's "View orders"; Status with "View testing" or "View release".
+  showOrders: boolean; showStatus: boolean;
 }) {
   return (
     <aside className="app-header">
@@ -96,7 +102,7 @@ function AppHeader({
         <p>Production workspace</p>
       </div>
       <nav className="tab-list" aria-label="Scheduler sections">
-        {tabs.filter((tab) => (showReports || tab.id !== "reports") && (showAdmin || tab.id !== "master")).map((tab) => {
+        {tabs.filter((tab) => (showReports || tab.id !== "reports") && (showAdmin || tab.id !== "master") && (showOrders || tab.id !== "orders") && (showStatus || tab.id !== "status")).map((tab) => {
           const Icon = tab.icon;
           return (
             <button
@@ -143,6 +149,7 @@ function PlannerBoard({
   jobOrders,
   allLines,
   canPlanJobs,
+  canPrint,
   flow,
   onJobPlan,
   editJobRequest,
@@ -168,6 +175,7 @@ function PlannerBoard({
   allLines: PlanLine[];
   // Whether this person may plan job orders (the waiting list's Plan buttons).
   canPlanJobs: boolean;
+  canPrint: boolean;
   flow: FlowWarning[];
   // The plan form: a job order's whole route (new), or corrections to a planned one (edit).
   onJobPlan: (plan: JobPlan, mode: "new" | "edit") => { error: string } | { message: string };
@@ -212,7 +220,7 @@ function PlannerBoard({
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
         <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} onPlan={canPlanJobs ? (jobId, date) => setQueueRequest({ jobId, date, mode: "new", nonce: Date.now() }) : undefined} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
+        <PlanningCalendar canPrint={canPrint} processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
           const result = onJobPlan(plan, mode);
           if ("message" in result) { setQuery(""); setPriorityFilter(""); setStatusFilter(""); }
           return result;
@@ -698,7 +706,9 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   const allowedLines = syncPlanLineStatuses(allowedCalendars.flatMap((item) => scopeCalendarRecords(data.lines, member, item, directory)), data.entries);
   const selectedLine = allowedLines.find((line) => line.id === selectedActivity);
   const activityCalendar = allowedCalendars.find((item) => item.id === selectedLine?.calendarId);
-  const canEditOrders = caps.createPlan || caps.manage;
+  // Orders follow Core's orders tasks: create adds POs and job orders, edit changes or deletes them.
+  const canCreateOrders = caps.createOrders || caps.manage;
+  const canEditOrders = caps.editOrders || caps.manage;
   // One set of process-flow warnings feeds the calendar, list, activity panel and orders.
   const flow = [...checkProcessFlow(data.lines, data.entries, data.orders, products, directory), ...checkTally(data.lines, data.jobOrders, directory)];
   const flowByLine = warningsByLine(flow);
@@ -839,7 +849,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     return flowWarning ? `${base} Warning: ${flowWarning.message}` : base;
   }
   function saveOrder(order: PurchaseOrder) {
-    if (!canEditOrders) return ["Planner or administrator access is required."];
+    if (!canEditOrders) return ["Your access does not include editing orders."];
     const errors = validateOrder(order, data.orders, products);
     if (errors.length) return errors;
     const old = data.orders.find((item) => item.id === order.id);
@@ -850,7 +860,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   // Several line items of one PO are added together, each checked against the ones before it.
   // A customer ID not seen before is added to the customer list in the same save.
   function addOrders(items: PurchaseOrder[], customer: Customer) {
-    if (!canEditOrders) return ["Planner or administrator access is required."];
+    if (!canCreateOrders) return ["Your access does not include creating orders."];
     const known = data.customers.find((item) => item.id === customer.id);
     const customerErrors = known ? [] : validateCustomer(customer, data.customers);
     if (customerErrors.length) return customerErrors;
@@ -962,7 +972,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   }
   // Job orders: keyed in on the PO item, one per batch, each with its own number.
   function addJobOrder(input: ManualJob) {
-    if (!caps.createPlan && !caps.manage) return ["Planning access is required to add job orders."];
+    if (!canCreateOrders) return ["Your access does not include creating job orders."];
     const created = createManualJobOrder(input, data.orders, data.jobOrders, products, { today: new Date(), userName: member.name, newId: () => newId("job") });
     if ("error" in created) return [created.error];
     setData((current) => ({ ...current, jobOrders: [...current.jobOrders, created] }));
@@ -970,7 +980,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   }
   // Editing a job order; a new number relabels the batch reference of its activities too.
   function editJobOrder(next: JobOrder) {
-    if (!caps.createPlan && !caps.manage) return ["Planning access is required to edit job orders."];
+    if (!canEditOrders) return ["Your access does not include editing job orders."];
     const current = data.jobOrders.find((job) => job.id === next.id);
     if (!current) return ["This job order no longer exists."];
     const result = updateJobOrder(next, data.jobOrders, data.orders, products);
@@ -1000,13 +1010,32 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     return [];
   }
   function deleteJobOrder(id: string) {
-    if (!caps.createPlan && !caps.manage) return ["Planning access is required to remove job orders."];
+    if (!canEditOrders) return ["Your access does not include removing job orders."];
     if (linesForJob(id, data.lines).length) return ["This job order is planned. Remove or unlink its activities on the Planner Board first."];
     setData((current) => ({ ...current, jobOrders: current.jobOrders.filter((job) => job.id !== id) }));
     return [];
   }
+  // Status: a finished batch passes testing, then is released with its release quantity.
+  function passJob(id: string) {
+    if (!caps.passTesting) return ["Your access does not include passing testing."];
+    const job = data.jobOrders.find((item) => item.id === id);
+    if (!job) return ["This job order no longer exists."];
+    const result = passTesting(job, data.lines, data.transfers, member.name, new Date());
+    if ("error" in result) return [result.error];
+    setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
+    return [];
+  }
+  function releaseJob(id: string, quantity: number, uom: string) {
+    if (!caps.release) return ["Your access does not include releasing batches."];
+    const job = data.jobOrders.find((item) => item.id === id);
+    if (!job) return ["This job order no longer exists."];
+    const result = releaseBatch(job, quantity, uom, member.name, new Date());
+    if ("error" in result) return [result.error];
+    setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
+    return [];
+  }
   function deleteOrder(id: string) {
-    if (!canEditOrders) return ["Planner or administrator access is required."];
+    if (!canEditOrders) return ["Your access does not include editing orders."];
     if (data.lines.some((line) => line.productionOrderId === id)) return ["Activities are linked to this PO. Unlink them on the Planner Board first."];
     // Unplanned job orders of the PO item go with it.
     setData((current) => ({ ...current, orders: current.orders.filter((item) => item.id !== id), jobOrders: current.jobOrders.filter((job) => job.orderId !== id) }));
@@ -1075,7 +1104,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     </fieldset>
   </div>;
   return <main className="workstation">
-    <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAdmin={!identity || canManage} />
+    <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAdmin={!identity || canManage} showOrders={caps.viewOrders} showStatus={caps.viewTesting || caps.viewRelease} />
     <div className="workstation-content">
       <header className="workstation-topbar"><span>Bio Tree / Production</span>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
       {persistenceStatus}
@@ -1083,7 +1112,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPlanJobs={canCreate} flow={flow}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPlanJobs={canCreate} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
@@ -1113,7 +1142,10 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "orders" ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: caps.createPlan || caps.manage, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} editable={canEditOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
+      {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers}
+        access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
+        onPass={passJob} onRelease={releaseJob} /> : null}
+      {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "audit" ? <HistoryPanel refreshKey={activeTab} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}

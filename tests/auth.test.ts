@@ -115,11 +115,15 @@ describe("Core contract", () => {
 
 describe("open access while Core roles are not set up", async () => {
   const { effectivePermissions, permissions } = await import("../src/lib/auth/permissions");
-  it("gives every everyday permission when SCHEDULER_OPEN_ACCESS is true, but Admin only from Core", () => {
+  it("gives every everyday permission when SCHEDULER_OPEN_ACCESS is true, but Admin and Status only from Core", () => {
     const open = { SCHEDULER_OPEN_ACCESS: "true" };
-    const everyday = [...new Set(Object.values(permissions))].filter((key) => key !== permissions.manageMasterData).sort();
+    const coreOnly = [permissions.manageMasterData, permissions.viewTesting, permissions.passTesting, permissions.printTesting, permissions.viewRelease, permissions.releaseBatches, permissions.printRelease] as string[];
+    const everyday = [...new Set(Object.values(permissions))].filter((key) => !coreOnly.includes(key)).sort();
     expect(effectivePermissions(["scheduler.planning.view"], open).sort()).toEqual(everyday);
     expect(effectivePermissions(["scheduler.planning.view", permissions.manageMasterData], open)).toContain(permissions.manageMasterData);
+    // Testing and release go only to the people ticked in Core.
+    expect(effectivePermissions(["scheduler.planning.view", permissions.passTesting], open)).toEqual(expect.arrayContaining([permissions.passTesting]));
+    expect(effectivePermissions(["scheduler.planning.view"], open)).not.toContain(permissions.viewTesting);
     expect(effectivePermissions(["scheduler.planning.view"], {})).toEqual(["scheduler.planning.view"]);
     expect(effectivePermissions(["scheduler.planning.view"], { SCHEDULER_OPEN_ACCESS: "false" })).toEqual(["scheduler.planning.view"]);
   });

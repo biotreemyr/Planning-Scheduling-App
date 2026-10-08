@@ -43,7 +43,7 @@ export async function PUT(request: NextRequest) {
     const host = request.headers.get("host");
     if (!localPersistenceAllowed(host, process.env) || !sameLocalOrigin(host, request.headers.get("origin")) || !validWriteToken(request.headers.get("x-scheduler-token"))) return response({ error: "Local database access denied. Reload the app if the server restarted." }, 403);
     // The local demo has no verified identity; it allows every change but still logs what changed.
-    const everything = { manage: true, createPlan: true, editPlan: true, produce: true, approve: true, cancel: true, reports: true };
+    const everything = Object.fromEntries(Object.keys(capabilitiesFromPermissions([])).map((key) => [key, true])) as ReturnType<typeof capabilitiesFromPermissions>;
     access = { actor: { name: "Local demo" }, review: (before, after) => ({ denied: [], summary: reviewWorkspaceChange(before, after, everything).summary }) };
   }
   if (!request.headers.get("content-type")?.startsWith("application/json")) return response({ error: "JSON required." }, 415);

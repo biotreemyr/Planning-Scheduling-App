@@ -526,3 +526,7 @@
 .planner-title .process-ticks legend { float: left; margin: 0 4px 0 0; font-size: 13px; color: var(--muted); }
 .job-order-table .job-output { display: block; font-weight: 600; } .job-order-table .job-output small { display: block; font-weight: 400; color: var(--muted); }
 .plan-save-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 12px; }
+.job-order-table td small, .status-table td small { display: block; color: var(--muted); font-weight: 400; }
+.status-table .status-release-qty { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.status-table .status-release-qty input { width: 110px; }
+.status-panel .panel-title { flex-wrap: wrap; }

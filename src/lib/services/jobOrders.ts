@@ -25,6 +25,9 @@ export type JobOrder = {
   boxQuantity?: number;
   // Packing's own job order number, e.g. PJO0009; when not keyed in it follows the job order number.
   packingNumber?: string;
+  // Status: when the finished batch passed testing, and when (and how much of it) was released.
+  testedAt?: string; testedBy?: string;
+  releaseQuantity?: number; releaseUom?: string; releasedAt?: string; releasedBy?: string;
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;
@@ -230,4 +233,51 @@ export function activityFacts(line: PlanLine, jobs: JobOrder[], productUom = "")
   const amount = (done ? line.yieldQuantity! : line.quantity).toLocaleString("en-MY", { maximumFractionDigits: 3 });
   const uom = (done ? line.yieldUom ?? line.uom : line.uom) ?? productUom;
   return { batchNumber: job?.batchNumber?.trim() ?? "", jobNumber: job ? packing ? packingNumber(job) : job.number : line.orderReference?.trim() ?? "", quantity: `${done ? "Actual " : ""}${amount} ${uom}`.trim(), done };
+}
+
+// ---- Status: testing and release of finished batches ----
+
+export type BatchStatus = "In production" | "Awaiting testing" | "Awaiting release" | "Released";
+// A job order is finished once it has final output; it then waits for testing, then for release.
+export function batchStatus(job: JobOrder, lines: PlanLine[], transfers: { sourceLineId: string }[]): BatchStatus {
+  if (job.releasedAt) return "Released";
+  if (job.testedAt) return "Awaiting release";
+  return finalOutput(job.id, lines, transfers).length ? "Awaiting testing" : "In production";
+}
+// The day the batch's final output was last completed (YYYY-MM-DD), for the testing list.
+export function finishedOn(job: JobOrder, lines: PlanLine[], transfers: { sourceLineId: string }[]) {
+  const done = linesForJob(job.id, lines).filter((line) => line.completedAt && !transfers.some((transfer) => transfer.sourceLineId === line.id)).map((line) => line.completedAt!).sort();
+  return done.at(-1);
+}
+export const testingQueue = (jobs: JobOrder[], lines: PlanLine[], transfers: { sourceLineId: string }[]) => jobs.filter((job) => batchStatus(job, lines, transfers) === "Awaiting testing");
+export const releaseQueue = (jobs: JobOrder[]) => jobs.filter((job) => job.testedAt && !job.releasedAt);
+
+// Passing testing: once, and only for a finished batch.
+export function passTesting(job: JobOrder, lines: PlanLine[], transfers: { sourceLineId: string }[], by: string, at: Date): JobOrder | { error: string } {
+  if (job.testedAt) return { error: `${job.number} has already passed testing.` };
+  if (!finalOutput(job.id, lines, transfers).length) return { error: `${job.number} has no final output to test yet.` };
+  return { ...job, testedAt: at.toISOString(), testedBy: by };
+}
+// Releasing: a tested batch, once, with the quantity released (the final output unless changed).
+export function releaseBatch(job: JobOrder, quantity: number, uom: string, by: string, at: Date): JobOrder | { error: string } {
+  if (!job.testedAt) return { error: `${job.number} has not passed testing yet.` };
+  if (job.releasedAt) return { error: `${job.number} is already released.` };
+  if (!Number.isFinite(quantity) || quantity < 0) return { error: "Release quantity must be zero or more." };
+  if (!uom.trim()) return { error: "The release quantity needs its unit." };
+  return { ...job, releaseQuantity: quantity, releaseUom: uom.trim(), releasedAt: at.toISOString(), releasedBy: by };
+}
+
+// A PO item's testing and release at a glance, for the Orders summary.
+export function orderStatusSummary(orderId: string, jobs: JobOrder[], lines: PlanLine[], transfers: { sourceLineId: string }[]) {
+  const own = jobsFor(orderId, jobs);
+  const states = own.map((job) => batchStatus(job, lines, transfers));
+  const released = new Map<string, number>();
+  for (const job of own) if (job.releasedAt && job.releaseUom) released.set(job.releaseUom, Number(((released.get(job.releaseUom) ?? 0) + (job.releaseQuantity ?? 0)).toPrecision(12)));
+  return {
+    jobs: own.length,
+    awaitingTesting: states.filter((state) => state === "Awaiting testing").length,
+    passed: own.filter((job) => job.testedAt).length,
+    released: own.filter((job) => job.releasedAt).length,
+    releasedQuantity: [...released].map(([uom, quantity]) => ({ quantity, uom }))
+  };
 }
