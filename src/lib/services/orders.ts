@@ -18,7 +18,9 @@ export type PurchaseOrder = {
   format?: ProductFormat;
   // The production unit (BTP, BTB...) that makes it; its job orders are planned on that unit's board.
   unitId?: string;
-  // Expected completion date keyed by the unit-process calendar the work runs in.
+  // When the customer expects the goods (YYYY-MM-DD); the one date people follow an order by.
+  deliveryDate?: string;
+  // Per-process expected completion dates from before delivery dates; no longer entered or shown.
   expectedDates: Record<string, string>;
   notes?: string; createdAt: string; createdBy: string;
 };
@@ -120,7 +122,7 @@ export function orderProgress(order: PurchaseOrder, rows: OrderProcessRow[], tod
   const started = rows.some((row) => row.completedCount > 0);
   const finishedQuantity = finishedInOrderUnit(order, rows.at(-1), lines);
   const status: OrderStatus = !rows.length ? "Not scheduled" : processesDone === rows.length ? "Completed" : started ? "In production" : "Scheduled";
-  const expectedDate = Object.entries(order.expectedDates).filter(([calendarId]) => rows.some((row) => row.calendar.id === calendarId)).map(([, value]) => value).sort().at(-1);
+  const expectedDate = order.deliveryDate;
   const scheduled = lines.filter((line) => line.productionOrderId === order.id && rows.some((row) => row.calendar.id === line.calendarId));
   const batches = new Map<string, PlanLine[]>();
   for (const line of scheduled) { const key = line.orderReference?.trim() || line.id; batches.set(key, [...batches.get(key) ?? [], line]); }

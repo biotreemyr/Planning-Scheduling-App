@@ -514,3 +514,13 @@
    pinned to the left and as wide as the visible table area, so the job order form fits on screen. */
 .orders-table-scroll { container-type: inline-size; }
 .order-detail-row > td > .order-detail { position: sticky; left: 44px; width: calc(100cqw - 60px); min-width: 0; box-sizing: border-box; }
+
+/* Planner Board: the process ticks share the "Production plan" line with the view switch. */
+.workstation .planner-title { flex-wrap: nowrap; justify-content: flex-start; align-items: center; gap: 10px 20px; }
+.planner-title h2 { white-space: nowrap; }
+.planner-title h2 { margin: 0; }
+.planner-title .calendar-filters { flex: 1 1 0; margin: 0; min-width: 0; }
+.planner-title .view-switch { margin-left: auto; flex: none; }
+@media (max-width: 760px) { .workstation .planner-title { flex-wrap: wrap; } .planner-title .calendar-filters { flex-basis: 100%; order: 3; } }
+.planner-title .process-ticks { padding: 0; }
+.planner-title .process-ticks legend { float: left; margin: 0 4px 0 0; font-size: 13px; color: var(--muted); }

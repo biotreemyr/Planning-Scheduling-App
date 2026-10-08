@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { CompletionInput, WipTransfer } from "@/lib/services/productionFlow";
-import { actualUoms } from "@/lib/services/processRules";
+import { actualUoms, stepOf } from "@/lib/services/processRules";
 
 // Today as YYYY-MM-DD in local time.
 const today = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
@@ -30,7 +30,12 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const reportUoms = actualUoms(processName(line.calendarId), uom);
   const defaultUom = reportUoms.includes(uom) ? uom : reportUoms[0] ?? uom;
   const doneUom = line.yieldUom ?? uom;
-  const others = d.calendars.filter((calendar) => calendar.processId !== source?.processId && calendar.unitId === source?.unitId && calendar.id !== nextCalendarId);
+  // Where the output can go: the WIP room, any other process of the unit after dispensing (in the
+  // unit's process order), or final output. The next process of the batch's route is the default.
+  const destinations = d.calendars.filter((calendar) => calendar.unitId === source?.unitId && calendar.id !== source?.id && stepOf(processName(calendar.id)) !== "dispensing");
+  const unitOrder = d.calendars.filter((calendar) => calendar.unitId === source?.unitId);
+  // The WIP room holds the output for the next process, or else the process after this one.
+  const wipFor = nextCalendarId ?? unitOrder.slice(unitOrder.findIndex((calendar) => calendar.id === source?.id) + 1).find((calendar) => destinations.includes(calendar))?.id;
   if (line.completedAt) return <section className="production-update"><h3>Production update</h3>
     <dl className="production-facts">
       <div><dt>Started</dt><dd>{line.startedAt ? display(line.startedAt) : "-"}</dd></div>
@@ -60,10 +65,9 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
         <label>UOM<select name="yieldUom" defaultValue={defaultUom}>{reportUoms.map((name) => <option key={name}>{name}</option>)}</select></label></div>
       <label className="production-notes">Notes<textarea name="notes" defaultValue={line.productionNotes ?? ""} placeholder="Anything that happened during production: issues, stoppages, deviations" /></label>
       <label className="production-destination">After completion, send to<select name="destination" defaultValue={nextCalendarId ? `next:${nextCalendarId}` : "final"}>
-        {nextCalendarId ? <option value={`next:${nextCalendarId}`}>Next process: {processName(nextCalendarId)}</option> : null}
-        {nextCalendarId ? <option value={`wip:${nextCalendarId}`}>WIP room, for {processName(nextCalendarId)}</option> : null}
-        <option value="final">Final output - no transfer</option>
-        {others.length ? <optgroup label="Another process">{others.map((calendar) => <option key={calendar.id} value={`next:${calendar.id}`}>{processName(calendar.id)}</option>)}</optgroup> : null}
+        {wipFor ? <option value={`wip:${wipFor}`}>WIP room</option> : null}
+        {destinations.map((calendar) => <option key={calendar.id} value={`next:${calendar.id}`}>{processName(calendar.id)}{calendar.id === nextCalendarId ? " (next process)" : ""}</option>)}
+        <option value="final">Final output</option>
       </select></label>
       <div className="production-actions">
         <button type="submit" value="progress" className="calendar-button">Save progress</button>

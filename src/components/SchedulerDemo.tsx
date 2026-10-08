@@ -195,16 +195,14 @@ function PlannerBoard({
   return (
     <section className="screen-grid planner-grid">
       <div className="workspace-panel wide">
-        <div className="panel-title">
-          <div>
-            <h2>Production plan</h2>
-          </div>
+        <div className="panel-title planner-title">
+          <h2>Production plan</h2>
+          {filterControls}
           <div className="view-switch" aria-label="Planning view">
             <button type="button" aria-pressed={planningView === "calendar"} onClick={() => setPlanningView("calendar")}>Calendar</button>
             <button type="button" aria-pressed={planningView === "list"} onClick={() => setPlanningView("list")}>List</button>
           </div>
         </div>
-        {filterControls}
         <div className="operational-filters">
           <label className="planning-search">Search plans<input type="search" placeholder="Product, order or remarks" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <label>Priority<select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="">All priorities</option>{priorities.map((value) => <option key={value}>{value}</option>)}</select></label>
@@ -1018,8 +1016,9 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       return { ...current, lines: [...current.lines, line], transfers: current.transfers.map((item) => item.id === id ? { ...item, plannedLineId: lineId } : item) };
     });
   }
+  // The unit picker shows only when there is more than one unit to choose from (BTP alone today).
   const filterControls = <div className="calendar-filters">
-    <label>Unit<select value={unit?.id ?? ""} disabled={!unit} onChange={(event) => { setUnitSelection(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{!unit ? <option value="">No unit assigned</option> : availableUnits.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+    {availableUnits.length > 1 ? <label>Unit<select value={unit?.id ?? ""} disabled={!unit} onChange={(event) => { setUnitSelection(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{!unit ? <option value="">No unit assigned</option> : availableUnits.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
     <fieldset className="process-ticks"><legend>Processes</legend>
       <label><input type="checkbox" checked={unitCalendars.length > 0 && visibleCalendars.length === unitCalendars.length} onChange={(event) => { setProcessSelection(event.target.checked ? null : []); setSelectedActivity(null); }} />All</label>
       {unitCalendars.map((item) => <label key={item.id}><input type="checkbox" checked={visibleCalendars.some((entry) => entry.id === item.id)} onChange={(event) => { const ids = visibleCalendars.map((entry) => entry.id); setProcessSelection(event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id)); setSelectedActivity(null); }} />{item.name}</label>)}

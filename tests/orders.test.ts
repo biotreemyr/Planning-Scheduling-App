@@ -78,12 +78,13 @@ describe("order progress", () => {
     expect(running.nextStep?.batch).toBe("Batch 6");
     expect(done).toMatchObject({ batchCount: 2, batchesFinished: 2, nextStep: undefined });
   });
-  it("flags an open order whose expected completion has passed", () => {
-    const order = { ...state.data.orders.find((item) => item.poNumber === "PO-2610-131")! };
+  it("flags an open order whose expected customer delivery has passed", () => {
+    const order = { ...state.data.orders.find((item) => item.poNumber === "PO-2610-131")!, deliveryDate: "2026-10-01" };
     const rows = orderProcessRows(order, state.data.lines, state.directory);
-    order.expectedDates = { [rows.at(-1)!.calendar.id]: "2026-10-01" };
     expect(orderProgress(order, rows, "2026-10-07")).toMatchObject({ expectedDate: "2026-10-01", overdue: true });
-    expect(orderProgress(order, [], "2026-10-07")).toMatchObject({ status: "Not scheduled", percent: 0, overdue: false });
+    // An order not even scheduled by its delivery date is overdue too; one with no delivery date never is.
+    expect(orderProgress(order, [], "2026-10-07")).toMatchObject({ status: "Not scheduled", percent: 0, overdue: true });
+    expect(orderProgress({ ...order, deliveryDate: undefined }, rows, "2026-10-07")).toMatchObject({ expectedDate: undefined, overdue: false });
   });
 });
 
