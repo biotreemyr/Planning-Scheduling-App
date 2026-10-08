@@ -325,17 +325,17 @@ function JobOrders({ order, product, format, jobOrders, lines, actions }: { orde
       packQuantity, packUom: packUom || undefined, boxQuantity: number(data.get("boxQuantity")) };
   }
   const fields = (job?: JobOrder) => <>
-    <label className="job-number-field">Job order no.<input name="number" required maxLength={60} autoComplete="off" placeholder="e.g. JO0010" defaultValue={job?.number} /></label>
-    <fieldset className="job-measure"><legend>Dispensing · Batch size</legend>
+    <fieldset className="job-measure job-number"><legend>Job order no.</legend><input name="number" required maxLength={60} autoComplete="off" aria-label="Job order no." placeholder="e.g. JO0010" defaultValue={job?.number} /></fieldset>
+    <fieldset className="job-measure"><legend title="Batch size, for Dispensing">Batch size<span> · Dispensing</span></legend>
       <input name="batchSize" type="number" min="0" step="any" aria-label="Batch size" defaultValue={job?.batchSizeKg ?? job?.batchVolumeL} placeholder={!job && product?.batchSizeKg ? "From the product if blank" : "e.g. 41.5"} />
       <select name="batchSizeUom" aria-label="Batch size UOM" defaultValue={job?.batchVolumeL ? "L" : "kg"}><option>kg</option><option>L</option></select></fieldset>
-    <fieldset className="job-measure"><legend>{countSteps || "Production"} · Batch quantity</legend>
+    <fieldset className="job-measure"><legend title={`Batch quantity, for ${countSteps || "production"}`}>Batch quantity<span> · {countSteps || "Production"}</span></legend>
       <input name="quantity" type="number" min="0" step="any" required aria-label="Batch quantity" defaultValue={job ? job.quantity : remaining ? Math.min(remaining, allowable ?? remaining) : undefined} />
       <select name="uom" aria-label="Batch quantity UOM" defaultValue={job?.uom ?? order.uom}>{options([order.uom, ...COUNT_UOMS], job?.uom).map((name) => <option key={name}>{name}</option>)}</select></fieldset>
-    <fieldset className="job-measure"><legend>Filling · Pack quantity</legend>
+    <fieldset className="job-measure"><legend title="Pack quantity, for Filling">Pack quantity<span> · Filling</span></legend>
       <input name="packQuantity" type="number" min="0" step="any" aria-label="Pack quantity" defaultValue={job?.packQuantity} />
       <select name="packUom" aria-label="Pack quantity UOM" defaultValue={job?.packUom ?? (format === "Sachet" ? "sachets" : "bottles")}>{options(FILL_UOMS, job?.packUom).map((name) => <option key={name}>{name}</option>)}</select></fieldset>
-    <fieldset className="job-measure"><legend>Packing · Total pack quantity</legend>
+    <fieldset className="job-measure"><legend title="Total pack quantity, for Packing">Total packs<span> · Packing</span></legend>
       <input name="boxQuantity" type="number" min="0" step="any" aria-label="Total pack quantity in boxes" defaultValue={job?.boxQuantity} /><span className="job-measure-unit">boxes</span></fieldset>
   </>;
   const measure = (value?: { quantity: number; uom: string }) => value ? `${value.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} ${value.uom}` : <span className="route-muted">Not keyed in</span>;

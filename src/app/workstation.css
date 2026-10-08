@@ -494,14 +494,23 @@
 .history-table .history-when { white-space: nowrap; }
 .history-link { padding: 0; min-height: 0; border: 0; background: none; color: #1971c2; font: inherit; text-decoration: underline; cursor: pointer; text-align: left; }
 
-/* Job order quantities: one group per process measure, value beside its UOM. */
-.job-order-form, .job-order-edit { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 12px; align-items: start; }
+/* Job order quantities: job order no. and one group per process measure, five equal columns on one
+   line; each heading stays on one line (the full text is in its tooltip). */
+.job-order-form, .job-order-edit { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px 12px; align-items: end; }
 .job-order-edit > small, .job-order-buttons { grid-column: 1 / -1; }
 .job-order-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
-.job-measure { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
-.job-measure legend { padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.job-measure { display: grid; grid-template-columns: minmax(0, 1fr) minmax(64px, 40%); gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.job-measure.job-number { grid-template-columns: minmax(0, 1fr); }
+.job-measure input, .job-measure select { min-width: 0; width: 100%; }
+.job-measure legend { float: left; width: 100%; grid-column: 1 / -1; padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-measure legend span { font-weight: 400; }
 .job-measure-unit { align-self: center; color: var(--muted); font-size: 13px; }
+@media (max-width: 760px) { .job-order-form, .job-order-edit { grid-template-columns: minmax(0, 1fr); } }
 .job-order-table thead th small { display: block; font-weight: 400; font-size: 11px; }
 .route-plan-table .route-plan-machine, .route-plan-table td select[aria-label$="machine"] { width: 150px; }
 .route-plan-table output { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .route-plan-table .numeric { text-align: right; }
+/* An open order's details stay in view while the wide orders table scrolls sideways: they are
+   pinned to the left and as wide as the visible table area, so the job order form fits on screen. */
+.orders-table-scroll { container-type: inline-size; }
+.order-detail-row > td > .order-detail { position: sticky; left: 44px; width: calc(100cqw - 60px); min-width: 0; box-sizing: border-box; }
