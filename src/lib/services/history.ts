@@ -80,6 +80,15 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
     const reference = refs(row);
     if (!old.startedAt && row.startedAt) changes.push({ kind: "Production", ...reference, text: `${what(row)} started on ${day(row.startedAt)}` });
     if (!old.completedAt && row.completedAt) changes.push({ kind: "Production", ...reference, text: `${what(row)} completed on ${day(row.completedAt)}: ${num(row.yieldQuantity)} ${str(row.yieldUom) || str(row.uom)} (planned ${num(row.quantity)} ${str(row.uom)})` });
+    // A completed update corrected afterwards.
+    if (old.completedAt && row.completedAt) {
+      const fixed = [
+        day(old.completedAt) !== day(row.completedAt) ? `completed ${day(old.completedAt)} → ${day(row.completedAt)}` : "",
+        old.yieldQuantity !== row.yieldQuantity || (old.yieldUom ?? old.uom) !== (row.yieldUom ?? row.uom) ? `actual ${num(old.yieldQuantity)} ${str(old.yieldUom) || str(old.uom)} → ${num(row.yieldQuantity)} ${str(row.yieldUom) || str(row.uom)}` : "",
+        old.startedAt !== row.startedAt ? `started ${old.startedAt ? day(old.startedAt) : "-"} → ${row.startedAt ? day(row.startedAt) : "-"}` : ""
+      ].filter(Boolean);
+      if (fixed.length) changes.push({ kind: "Production", ...reference, text: `${what(row)} production update corrected: ${fixed.join("; ")}` });
+    }
     if (row.productionNotes && old.productionNotes !== row.productionNotes) changes.push({ kind: "Production", ...reference, text: `Note on ${what(row)}: ${str(row.productionNotes)}` });
     const parts = [
       old.plannedDate !== row.plannedDate ? `moved ${day(old.plannedDate)} → ${day(row.plannedDate)}` : "",
@@ -100,6 +109,11 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
   for (const { before: old, after: row } of transferDiff.changed) {
     const source = lines.find((item) => item.id === row.sourceLineId);
     if (!old.receivedAt && row.receivedAt) changes.push({ kind: "Transfer", ...(source ? refs(source) : { product: productName(row.productId) }), text: `${processName(row.calendarId)} received ${num(row.quantity)} ${str(row.uom)} from ${processName(row.sourceCalendarId)}` });
+    if (old.calendarId !== row.calendarId || !!old.wipRoom !== !!row.wipRoom || old.quantity !== row.quantity || old.uom !== row.uom) changes.push({ kind: "Transfer", ...(source ? refs(source) : { product: productName(row.productId) }), text: `Handover from ${processName(row.sourceCalendarId)} corrected: ${num(row.quantity)} ${str(row.uom)} ${row.wipRoom ? "to the WIP room for" : "to"} ${processName(row.calendarId)}` });
+  }
+  for (const row of transferDiff.removed) {
+    const source = lines.find((item) => item.id === row.sourceLineId);
+    changes.push({ kind: "Transfer", ...(source ? refs(source) : { product: productName(row.productId) }), text: `Handover of ${num(row.quantity)} ${str(row.uom)} from ${processName(row.sourceCalendarId)} to ${processName(row.calendarId)} withdrawn` });
   }
 
   const entryDiff = diff(list(before, "entries"), list(after, "entries"));

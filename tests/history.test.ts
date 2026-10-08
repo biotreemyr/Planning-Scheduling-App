@@ -40,4 +40,13 @@ describe("transaction history", () => {
     delete old.data.jobOrders; delete old.data.customers;
     expect(() => describeChanges(old, base)).not.toThrow();
   });
+  it("records a corrected production update", () => {
+    const line = base.data.lines.find((item) => item.completedAt && item.yieldQuantity)!;
+    const fixed = structuredClone(base);
+    const target = fixed.data.lines.find((item) => item.id === line.id)!;
+    target.yieldQuantity = line.yieldQuantity! - 1;
+    const texts = describeChanges(base, fixed).map((change) => change.text);
+    expect(texts).toEqual([expect.stringContaining("production update corrected: actual")]);
+  });
 });
+

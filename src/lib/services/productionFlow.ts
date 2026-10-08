@@ -29,3 +29,23 @@ export function validateCompletion(line: PlanLine, input: CompletionInput, perso
   }
   return errors;
 }
+
+// Correcting a completed activity: the same fields as completing it, plus the start date.
+export type CorrectionInput = CompletionInput & { startedAt: string };
+
+/**
+ * Check a correction to a completed production update. Dates and notes can always be corrected;
+ * the actual quantity, its unit and where the output went only until the receiving process has
+ * acknowledged the handover (or planning has added it to the plan), so its stock stays true.
+ */
+export function validateCorrection(line: PlanLine, input: CorrectionInput, outgoing: WipTransfer | undefined, person: CalendarPerson, directory: CalendarDirectory, requireReceivingTeam = true) {
+  if (!line.completedAt) return ["This activity is not complete yet."];
+  const errors = validateCompletion({ ...line, completedAt: undefined, startedAt: input.startedAt || undefined }, input, person, directory, requireReceivingTeam);
+  if (!input.completedDate) errors.push("Choose the date production completed.");
+  if (input.startedAt && !/^\d{4}-\d{2}-\d{2}$/.test(input.startedAt)) errors.push("Choose the date production started.");
+  const handedOver = outgoing && (outgoing.receivedAt || outgoing.plannedLineId);
+  const destinationChanged = (outgoing?.calendarId ?? "") !== input.destinationId || !!outgoing?.wipRoom !== !!input.wipRoom;
+  const quantityChanged = input.quantity !== line.yieldQuantity || (input.uom || line.uom) !== (line.yieldUom ?? line.uom);
+  if (handedOver && (destinationChanged || quantityChanged)) errors.push(`${outgoing.receivedBy ?? "The next process"} has already received this output, so its quantity and destination stay as they are. Dates and notes can still be corrected.`);
+  return errors;
+}

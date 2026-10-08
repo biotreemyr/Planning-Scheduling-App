@@ -30,3 +30,22 @@ describe("production completion", () => {
     expect(validateCompletion(started, { ...input, completedDate: "13/10/2026" }, person, d)).toEqual(["Choose the date production completed."]);
   });
 });
+
+describe("correcting a completed production update", async () => {
+  const { validateCorrection } = await import("../src/lib/services/productionFlow");
+  const done = { ...line, startedAt: "2026-09-10", completedAt: "2026-09-12T09:00:00.000Z", yieldQuantity: 1140, uom: "kg" };
+  const fix = { ...input, quantity: 1100, uom: "kg", completedDate: "2026-09-11", startedAt: "2026-09-10" };
+  const handover = { id: "wip", sourceLineId: done.id, sourceCalendarId: done.calendarId, calendarId: "mfg-production", productId: done.productId, quantity: 1140, uom: "kg", notes: "", createdAt: "2026-09-12T09:00:00.000Z", createdBy: "Lim" };
+  it("lets production fix the quantity, dates and destination while the handover is not received", () => {
+    expect(validateCorrection(done, fix, handover, person, d)).toEqual([]);
+    expect(validateCorrection(done, { ...fix, destinationId: "" }, handover, person, d)).toEqual([]);
+    expect(validateCorrection({ ...done, completedAt: undefined }, fix, handover, person, d)).toEqual(["This activity is not complete yet."]);
+    expect(validateCorrection(done, { ...fix, completedDate: "2026-09-09" }, handover, person, d)).toContain("The completed date cannot be before the start date.");
+    expect(validateCorrection(done, fix, handover, { ...person, role: "planner" }, d)).not.toEqual([]);
+  });
+  it("keeps quantity and destination once the next process has received the output", () => {
+    const received = { ...handover, receivedAt: "2026-09-13T08:00:00.000Z", receivedBy: "Mei" };
+    expect(validateCorrection(done, fix, received, person, d)[0]).toContain("Mei has already received this output");
+    expect(validateCorrection(done, { ...fix, quantity: 1140, destinationId: "mfg-production" }, received, person, d)).toEqual([]);
+  });
+});

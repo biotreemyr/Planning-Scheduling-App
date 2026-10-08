@@ -19,7 +19,7 @@ import { OrdersPanel } from "@/components/OrdersPanel";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { inUnit, type JobPlan } from "@/components/JobPlanDialog";
 import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
-import { validateCompletion, type CompletionInput, type WipTransfer } from "@/lib/services/productionFlow";
+import { validateCompletion, validateCorrection, type CompletionInput, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
 import { validateActual, type ProductionActual } from "@/lib/services/actuals";
@@ -753,6 +753,38 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     });
     return [];
   }
+  // A mistaken production update can be corrected after completion: dates, notes, the actual quantity
+  // and where the output went. The handover follows: updated, moved, added, or removed for final output.
+  function correctProduction(input: CorrectionInput) {
+    const line = selectedLine;
+    if (!line || !canProduce) return ["Production access to this activity is required."];
+    const outgoing = data.transfers.find((item) => item.sourceLineId === line.id);
+    const errors = validateCorrection(line, input, outgoing, identity ? { ...member, role: "production" } : member, directory, !identity);
+    if (errors.length) return errors;
+    const now = new Date();
+    const sameDay = line.completedAt && localDateKey(new Date(line.completedAt)) === input.completedDate;
+    const completedAt = sameDay ? line.completedAt! : input.completedDate === localDateKey(now) ? now.toISOString() : new Date(`${input.completedDate}T17:00`).toISOString();
+    const uom = input.uom || (line.uom ?? "");
+    const handedOver = !!outgoing && !!(outgoing.receivedAt || outgoing.plannedLineId);
+    setData((current) => {
+      const lines = current.lines.map((item) => {
+        if (item.id !== line.id) return item;
+        const { yieldUom: _u, startedAt: _s, productionNotes: _n, ...rest } = item;
+        return { ...rest, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}),
+          startedAt: input.startedAt || input.completedDate!, ...(input.notes ? { productionNotes: input.notes } : {}) };
+      });
+      const actuals = current.actuals.map((item) => item.planLineId === line.id ? { ...item, actualQuantity: input.quantity, uom, productionDate: input.completedDate!, updatedAt: now.toISOString(), updatedBy: member.name } : item);
+      let transfers = current.transfers;
+      if (!handedOver) {
+        transfers = transfers.filter((item) => item.sourceLineId !== line.id);
+        if (input.destinationId) transfers = [...transfers, { ...(outgoing ?? { id: newId("wip"), sourceLineId: line.id, sourceCalendarId: line.calendarId!, productId: line.productId, orderReference: line.orderReference, createdBy: member.name }),
+          calendarId: input.destinationId, quantity: input.quantity, uom, notes: input.notes, createdAt: outgoing?.createdAt ?? completedAt, ...(input.wipRoom ? { wipRoom: true } : { wipRoom: undefined }) }];
+        transfers = transfers.map((item) => item.wipRoom === undefined ? (({ wipRoom: _w, ...rest }) => rest)(item) : item);
+      }
+      return { ...current, lines, actuals, transfers };
+    });
+    return [];
+  }
   // Production's progress on an activity: the day it started and notes; its bookings go in progress.
   function saveProgress(startedAt: string, notes: string) {
     const line = selectedLine;
@@ -1038,7 +1070,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
         orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
         jobOrders={data.jobOrders}>
-        <ProductionUpdate line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} />
+        <ProductionUpdate line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction} />
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
         <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements", "Sample data"].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>
