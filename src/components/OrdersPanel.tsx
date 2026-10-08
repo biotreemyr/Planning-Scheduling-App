@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
-import { type ManualJob, jobsFor, linesForJob, packsFor, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
+import { type ManualJob, jobsFor, linesForJob, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
@@ -316,13 +316,13 @@ function JobOrders({ order, product, format, jobOrders, lines, actions }: { orde
   // Which processes of this dosage form use each figure, so the form says where it goes.
   const route = format === "Other" ? [] : ROUTES[format];
   const countSteps = route.filter((step) => step === "tableting" || step === "coating" || step === "capsulation").map(stepLabel).join(", ");
-  // The fields shared by adding and editing; a blank pack quantity is worked out from the pack size.
+  // The fields shared by adding and editing.
   function readJob(data: FormData) {
-    const quantity = Number(data.get("quantity")), uom = String(data.get("uom") ?? order.uom), packSize = number(data.get("packSize"));
-    const packQuantity = number(data.get("packQuantity")) ?? packsFor(quantity, packSize), packUom = String(data.get("packUom") ?? "").trim();
+    const quantity = Number(data.get("quantity")), uom = String(data.get("uom") ?? order.uom);
+    const packQuantity = number(data.get("packQuantity")), packUom = String(data.get("packUom") ?? "").trim();
     const size = number(data.get("batchSize")), sizeUom = String(data.get("batchSizeUom") ?? "kg");
     return { number: String(data.get("number") ?? "").trim(), quantity, uom, batchSizeKg: sizeUom === "kg" ? size : undefined, batchVolumeL: sizeUom === "L" ? size : undefined,
-      packQuantity, packUom: packUom || undefined, packSize, boxQuantity: number(data.get("boxQuantity")) };
+      packQuantity, packUom: packUom || undefined, boxQuantity: number(data.get("boxQuantity")) };
   }
   const fields = (job?: JobOrder) => <>
     <label className="job-number-field">Job order no.<input name="number" required maxLength={60} autoComplete="off" placeholder="e.g. JO0010" defaultValue={job?.number} /></label>
@@ -333,9 +333,8 @@ function JobOrders({ order, product, format, jobOrders, lines, actions }: { orde
       <input name="quantity" type="number" min="0" step="any" required aria-label="Batch quantity" defaultValue={job ? job.quantity : remaining ? Math.min(remaining, allowable ?? remaining) : undefined} />
       <select name="uom" aria-label="Batch quantity UOM" defaultValue={job?.uom ?? order.uom}>{options([order.uom, ...COUNT_UOMS], job?.uom).map((name) => <option key={name}>{name}</option>)}</select></fieldset>
     <fieldset className="job-measure"><legend>Filling · Pack quantity</legend>
-      <input name="packQuantity" type="number" min="0" step="any" aria-label="Pack quantity" defaultValue={job?.packQuantity} placeholder="Auto from pack size" />
-      <select name="packUom" aria-label="Pack quantity UOM" defaultValue={job?.packUom ?? (format === "Sachet" ? "sachets" : "bottles")}>{options(FILL_UOMS, job?.packUom).map((name) => <option key={name}>{name}</option>)}</select>
-      <label className="job-pack-size" title={`How many ${order.uom} go in one pack`}>{order.uom} per pack<input name="packSize" type="number" min="0" step="any" defaultValue={job?.packSize} placeholder="e.g. 30" /></label></fieldset>
+      <input name="packQuantity" type="number" min="0" step="any" aria-label="Pack quantity" defaultValue={job?.packQuantity} />
+      <select name="packUom" aria-label="Pack quantity UOM" defaultValue={job?.packUom ?? (format === "Sachet" ? "sachets" : "bottles")}>{options(FILL_UOMS, job?.packUom).map((name) => <option key={name}>{name}</option>)}</select></fieldset>
     <fieldset className="job-measure"><legend>Packing · Total pack quantity</legend>
       <input name="boxQuantity" type="number" min="0" step="any" aria-label="Total pack quantity in boxes" defaultValue={job?.boxQuantity} /><span className="job-measure-unit">boxes</span></fieldset>
   </>;
@@ -357,7 +356,7 @@ function JobOrders({ order, product, format, jobOrders, lines, actions }: { orde
             const { batchSizeKg: _k, batchVolumeL: _l, packQuantity: _pq, packUom: _pu, packSize: _ps, boxQuantity: _b, ...rest } = job;
             const next: JobOrder = { ...rest, number: read.number, quantity: read.quantity, uom: read.uom,
               ...(read.batchSizeKg ? { batchSizeKg: read.batchSizeKg } : {}), ...(read.batchVolumeL ? { batchVolumeL: read.batchVolumeL } : {}), ...(read.packQuantity ? { packQuantity: read.packQuantity } : {}),
-              ...(read.packUom ? { packUom: read.packUom } : {}), ...(read.packSize ? { packSize: read.packSize } : {}), ...(read.boxQuantity ? { boxQuantity: read.boxQuantity } : {}) };
+              ...(read.packUom ? { packUom: read.packUom } : {}), ...(read.boxQuantity ? { boxQuantity: read.boxQuantity } : {}) };
             if (report(actions.onUpdate(next), `${next.number.trim()} saved.${planned.some((line) => !line.completedAt) ? " Its planned activities now carry the new quantities." : ""}`)) setEditing(null);
           }}>
             {fields(job)}
@@ -370,7 +369,7 @@ function JobOrders({ order, product, format, jobOrders, lines, actions }: { orde
           <th scope="row"><strong>{job.number}</strong><small>Batch {job.sequence} of PO item</small></th>
           <td className="numeric">{measure(processQuantity(job, "dispensing"))}</td>
           <td className="numeric">{measure(processQuantity(job, "tableting"))}</td>
-          <td className="numeric">{measure(processQuantity(job, "filling"))}{job.packSize ? <small>{job.packSize.toLocaleString()} {order.uom} per {(job.packUom ?? "pack").replace(/s$/, "")}</small> : null}</td>
+          <td className="numeric">{measure(processQuantity(job, "filling"))}</td>
           <td className="numeric">{measure(processQuantity(job, "packing"))}</td>
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
           <td>{planned.length ? <><span className={`badge ${done ? "success" : "info"}`}>{done ? "Done" : "Planned"}</span> <small>{shortDate(planned[0].plannedDate)} – {shortDate(planned.at(-1)!.plannedDate)} · {planned.length} activit{planned.length === 1 ? "y" : "ies"}</small></>

@@ -500,7 +500,6 @@
 .job-order-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .job-measure { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .job-measure legend { padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
-.job-measure .job-pack-size { grid-column: 1 / -1; font-size: 12px; }
 .job-measure-unit { align-self: center; color: var(--muted); font-size: 13px; }
 .job-order-table thead th small { display: block; font-weight: 400; font-size: 11px; }
 .route-plan-table .route-plan-machine, .route-plan-table td select[aria-label$="machine"] { width: 150px; }
