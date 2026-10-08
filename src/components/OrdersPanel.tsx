@@ -335,13 +335,13 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
     <fieldset className="job-measure"><legend title={`Batch quantity, for ${countSteps || "production"}`}>Batch quantity<span> · {countSteps || "Production"}</span></legend>
       <input name="quantity" type="number" min="0" step="any" required aria-label="Batch quantity" defaultValue={job ? job.quantity : remaining ? Math.min(remaining, allowable ?? remaining) : undefined} />
       <select name="uom" aria-label="Batch quantity UOM" defaultValue={job?.uom ?? order.uom}>{options([order.uom, ...COUNT_UOMS], job?.uom).map((name) => <option key={name}>{name}</option>)}</select></fieldset>
+    <fieldset className="job-measure job-number"><legend title="Packing job order number; follows the job order number with PJO in front unless keyed in">Packing JO no.<span> · Packing</span></legend>
+      <input name="packingNumber" maxLength={60} autoComplete="off" aria-label="Packing job order no." defaultValue={job?.packingNumber} placeholder={job ? defaultPackingNumber(job.number) : "PJO + job order no."} /></fieldset>
     <fieldset className="job-measure"><legend title="Pack quantity, for Filling">Pack quantity<span> · Filling</span></legend>
       <input name="packQuantity" type="number" min="0" step="any" aria-label="Pack quantity" defaultValue={job?.packQuantity} />
       <select name="packUom" aria-label="Pack quantity UOM" defaultValue={job?.packUom ?? (format === "Sachet" ? "sachets" : "bottles")}>{options(FILL_UOMS, job?.packUom).map((name) => <option key={name}>{name}</option>)}</select></fieldset>
     <fieldset className="job-measure"><legend title="Total pack quantity, for Packing">Total packs<span> · Packing</span></legend>
       <input name="boxQuantity" type="number" min="0" step="any" aria-label="Total pack quantity in boxes" defaultValue={job?.boxQuantity} /><span className="job-measure-unit">boxes</span></fieldset>
-    <fieldset className="job-measure job-number"><legend title="Packing job order number; follows the job order number with PJO in front unless keyed in">Packing JO no.<span> · Packing</span></legend>
-      <input name="packingNumber" maxLength={60} autoComplete="off" aria-label="Packing job order no." defaultValue={job?.packingNumber} placeholder={job ? defaultPackingNumber(job.number) : "PJO + job order no."} /></fieldset>
   </>;
   const measure = (value?: { quantity: number; uom: string }) => value ? `${value.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} ${value.uom}` : <span className="route-muted">Not keyed in</span>;
   return <section className="job-orders" aria-label={`Job orders for ${order.poNumber}`}>

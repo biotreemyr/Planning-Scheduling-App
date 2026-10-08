@@ -869,7 +869,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   // activity are corrected (a date change moves its bookings, like dragging), unticked ones removed,
   // newly ticked ones added. The batch number is stored on the job order either way.
   // Book (or clear) one activity's machine. A booking already made keeps its times and moves to the
-  // new machine; a new one is a draft for the working day. Double-booking a machine is refused.
+  // new machine; a new one is a draft for the working day (completed, for a completed activity being
+  // corrected). Double-booking a machine is refused.
   function bookMachine(current: ScheduleEntry[], line: PlanLine, machineId: string): { entries: ScheduleEntry[] } | { error: string } {
     const own = current.filter((entry) => entry.planLineId === line.id && entry.status !== "Cancelled");
     if (!machineId) {
@@ -882,7 +883,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     if (!machine) return { error: "Select an active machine set up for this process." };
     const next = own.length
       ? current.map((entry) => own.includes(entry) ? { ...entry, machineId, workCentreId: machine.workCentreId, changedBy: member.name } : entry)
-      : [...current, { id: newId("sched"), calendarId: line.calendarId, planLineId: line.id, productId: line.productId, productionOrderId: line.productionOrderId, workCentreId: machine.workCentreId, machineId, startAt: `${line.plannedDate}T08:00`, endAt: `${line.plannedDate}T17:00`, status: "Draft" as const, changedBy: member.name }];
+      : [...current, { id: newId("sched"), calendarId: line.calendarId, planLineId: line.id, productId: line.productId, productionOrderId: line.productionOrderId, workCentreId: machine.workCentreId, machineId, startAt: `${line.plannedDate}T08:00`, endAt: `${line.plannedDate}T17:00`, status: line.completedAt ? "Completed" as const : "Draft" as const, changedBy: member.name }];
     const changed = new Set(next.filter((entry) => entry.planLineId === line.id).map((entry) => entry.id));
     const clash = findMachineConflicts(next, machines, products).find((conflict) => conflict.entryIds.some((id) => changed.has(id)));
     if (clash) return { error: `${machine.name} is already booked that day.` };
