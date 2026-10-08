@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
-import { type ManualJob, jobsFor, linesForJob, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
+import { type ManualJob, finalOutput, jobsFor, linesForJob, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
@@ -24,8 +24,10 @@ export type JobActions = {
   onDelete: (id: string) => string[];
 };
 
-export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, lines, products, directory, visibleCalendarIds, editable, userName, onSave, onAdd, onDelete, flow = [] }: {
+export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, transfers = [], lines, products, directory, visibleCalendarIds, editable, userName, onSave, onAdd, onDelete, flow = [] }: {
   orders: PurchaseOrder[]; customers?: Customer[]; jobOrders?: JobOrder[]; jobActions?: JobActions;
+  // WIP handovers, to tell final output from output sent on to another process.
+  transfers?: { sourceLineId: string }[];
   lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[]; flow?: FlowWarning[];
   editable: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer) => string[]; onDelete: (id: string) => string[];
 }) {
@@ -41,7 +43,7 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
         onClose={() => dialog.current?.close()} onDone={(message) => { setAdded(message); dialog.current?.close(); }} />
     </dialog> : null}
     {added ? <p role="status" className="calendar-notice">{added}</p> : null}
-    <OrdersTable action={newOrderButton} orders={orders} customerRecords={customers} jobOrders={jobOrders} jobActions={jobActions} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
+    <OrdersTable action={newOrderButton} orders={orders} customerRecords={customers} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
   </section>;
 }
 
@@ -134,8 +136,8 @@ type Column = {
 };
 const COLUMN_STORAGE = "scheduler.orderColumns";
 
-function OrdersTable({ action, orders, customerRecords, jobOrders, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
-  customerRecords: Customer[]; jobOrders: JobOrder[]; jobActions?: JobActions; action?: ReactNode;
+function OrdersTable({ action, orders, customerRecords, jobOrders, transfers, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
+  customerRecords: Customer[]; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions; action?: ReactNode;
   flow: FlowWarning[];
   orders: PurchaseOrder[]; lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[];
   editable: boolean; customers: string[]; onSave: (order: PurchaseOrder) => string[]; onDelete: (id: string) => string[];
@@ -238,7 +240,7 @@ function OrdersTable({ action, orders, customerRecords, jobOrders, jobActions, l
                 <td><button type="button" className="icon-button order-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} ${row.order.poNumber} details`} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : row.order.id); }}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button></td>
                 {shown.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(row)}</td>)}
               </tr>
-              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail jobOrders={jobOrders} jobActions={jobActions} product={row.product} onPrint={() => setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 }))} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
+              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} product={row.product} onPrint={() => setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 }))} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
             </Fragment>;
           })}
         </tbody>
@@ -300,7 +302,7 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
 // every process makes. Planning them happens on the Planner Board.
 const FILL_UOMS = ["blisters", "bottles", "sachets"];
 const COUNT_UOMS = ["tablets", "capsules"];
-function JobOrders({ order, product, format, jobOrders, lines, actions }: { order: PurchaseOrder; product?: Product; format: ProductFormat; jobOrders: JobOrder[]; lines: PlanLine[]; actions: JobActions }) {
+function JobOrders({ order, product, format, jobOrders, transfers, lines, actions }: { order: PurchaseOrder; product?: Product; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
@@ -344,11 +346,11 @@ function JobOrders({ order, product, format, jobOrders, lines, actions }: { orde
     <div className="order-detail-head"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
       <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span></div>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
-      <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
+      <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col" className="numeric">Final output<small>Produced</small></th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
       <tbody>{jobs.map((job) => {
         const planned = linesForJob(job.id, lines).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate));
         const done = planned.length > 0 && planned.every((line) => line.completedAt);
-        if (editing === job.id) return <tr key={job.id} className="job-order-editing"><td colSpan={8}>
+        if (editing === job.id) return <tr key={job.id} className="job-order-editing"><td colSpan={9}>
           <form className="job-order-edit" onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
@@ -372,6 +374,13 @@ function JobOrders({ order, product, format, jobOrders, lines, actions }: { orde
           <td className="numeric">{measure(processQuantity(job, "tableting"))}</td>
           <td className="numeric">{measure(processQuantity(job, "filling"))}</td>
           <td className="numeric">{measure(processQuantity(job, "packing"))}</td>
+          <td className="numeric">{(() => {
+            const made = finalOutput(job.id, lines, transfers);
+            if (!made.length) return <span className="route-muted">-</span>;
+            const target = processQuantity(job, "packing");
+            return made.map((item) => <span key={item.uom} className="job-output">{item.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {item.uom}
+              {target && item.uom === target.uom ? <small>{Math.round(item.quantity / target.quantity * 100)}% of {target.quantity.toLocaleString()}</small> : null}</span>);
+          })()}</td>
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
           <td>{planned.length ? <><span className={`badge ${done ? "success" : "info"}`}>{done ? "Done" : "Planned"}</span> <small>{shortDate(planned[0].plannedDate)} – {shortDate(planned.at(-1)!.plannedDate)} · {planned.length} activit{planned.length === 1 ? "y" : "ies"}</small></>
             : <><span className="badge neutral">Not planned</span><small>Plan it on the Planner Board</small></>}</td>
@@ -417,8 +426,8 @@ function BatchStatus({ cell, uom }: { cell?: BatchCell; uom: string }) {
   </div>;
 }
 
-function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete, onPrint }: {
-  product?: Product; jobOrders: JobOrder[]; jobActions?: JobActions;
+function OrderDetail({ order, product, jobOrders, transfers, jobActions, format, warnings, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete, onPrint }: {
+  product?: Product; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions;
   format: ProductFormat; warnings: FlowWarning[];
   onPrint: () => void;
   order: PurchaseOrder; rows: OrderProcessRow[]; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; linked: boolean; editable: boolean; customers: string[];
@@ -457,7 +466,7 @@ function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, 
         </tr>;
       })}</tbody>
     </table></div> : <p className="order-empty">No production has been scheduled against this PO yet. Create its job orders below, then plan each one.</p>}
-    {jobActions ? <JobOrders order={order} product={product} format={format} jobOrders={jobOrders} lines={lines} actions={jobActions} /> : null}
+    {jobActions ? <JobOrders order={order} product={product} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);

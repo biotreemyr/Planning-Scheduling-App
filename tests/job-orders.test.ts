@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { checkTally, createManualJobOrder, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { checkTally, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { validateOrder } from "../src/lib/services/orders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
@@ -145,5 +145,16 @@ describe("job orders", () => {
     const next = structuredClone(state);
     next.data.orders[0].unitId = "no-such-unit";
     expect(() => parseWorkspace(next)).toThrow("Invalid order production unit");
+  });
+  it("totals a job order's final output: completed work not sent on to another process", () => {
+    const job = state.data.jobOrders.find((item) => state.data.lines.some((line) => line.jobOrderId === item.id && line.activityType === "Packing" && line.completedAt))!;
+    const lines = state.data.lines.filter((line) => line.jobOrderId === job.id);
+    const packed = lines.filter((line) => line.activityType === "Packing" && line.completedAt);
+    const boxes = packed.reduce((sum, line) => sum + line.yieldQuantity!, 0);
+    // Earlier processes handed their output on, so only packing's boxes count.
+    const handed = lines.filter((line) => line.completedAt && line.activityType !== "Packing").map((line) => ({ sourceLineId: line.id }));
+    expect(finalOutput(job.id, state.data.lines, handed)).toEqual([{ quantity: boxes, uom: "boxes" }]);
+    expect(finalOutput(job.id, state.data.lines, [...handed, ...packed.map((line) => ({ sourceLineId: line.id }))])).toEqual([]);
+    expect(finalOutput("no-such-job", state.data.lines, [])).toEqual([]);
   });
 });

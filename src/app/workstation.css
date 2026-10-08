@@ -524,3 +524,4 @@
 @media (max-width: 760px) { .workstation .planner-title { flex-wrap: wrap; } .planner-title .calendar-filters { flex-basis: 100%; order: 3; } }
 .planner-title .process-ticks { padding: 0; }
 .planner-title .process-ticks legend { float: left; margin: 0 4px 0 0; font-size: 13px; color: var(--muted); }
+.job-order-table .job-output { display: block; font-weight: 600; } .job-order-table .job-output small { display: block; font-weight: 400; color: var(--muted); }

@@ -189,3 +189,17 @@ export function checkTally(lines: PlanLine[], jobs: JobOrder[], directory: Calen
     });
   });
 }
+
+/**
+ * What a job order has finished as final output: its completed activities whose output production
+ * did not send on to another process or the WIP room, totalled per unit (boxes from packing).
+ */
+export function finalOutput(jobId: string, lines: PlanLine[], transfers: { sourceLineId: string }[]): ProcessQuantity[] {
+  const totals = new Map<string, number>();
+  for (const line of linesForJob(jobId, lines)) {
+    if (!line.completedAt || line.yieldQuantity === undefined || transfers.some((transfer) => transfer.sourceLineId === line.id)) continue;
+    const uom = line.yieldUom ?? line.uom ?? "";
+    totals.set(uom, Number(((totals.get(uom) ?? 0) + line.yieldQuantity).toPrecision(12)));
+  }
+  return [...totals].map(([uom, quantity]) => ({ quantity, uom }));
+}
