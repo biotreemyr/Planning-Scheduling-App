@@ -13,7 +13,7 @@ const line = (po: string, batch: string, process: string) => {
 describe("process routes by product format", () => {
   it("defines the three routes and treats shop-floor synonyms as the same step", () => {
     expect(routeLabel("Capsule")).toBe("Dispensing → Capsulation → Filling → Packing");
-    expect(routeLabel("Tablet")).toBe("Dispensing → Tableting → Coating → Filling → Packing");
+    expect(routeLabel("Tablet")).toBe("Dispensing → Compression → Coating → Filling → Packing");
     expect(routeLabel("Sachet")).toBe("Dispensing → Filling → Packing");
     expect(stepOf("Compression")).toBe("tableting");
     expect(stepOf(" bottling ")).toBe("filling");

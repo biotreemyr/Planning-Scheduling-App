@@ -1,6 +1,7 @@
 import { parseWorkspace, type WorkspaceSnapshot } from "./workspace";
 import { batchKilograms } from "@/lib/services/measurements";
-import { inferFormat } from "@/lib/services/processRules";
+import { inferFormat, stepOf } from "@/lib/services/processRules";
+import { processQuantity } from "@/lib/services/jobOrders";
 
 // Every sample record carries this ID prefix so it can be found and removed before go-live.
 export const SAMPLE_PREFIX = "sample-";
@@ -282,7 +283,7 @@ export function addSampleData(state: Snapshot, today = new Date(), options = { f
     const kg = batchKilograms(quantities[batch.product], product.uom, "weight" in product ? product.weight : undefined);
     next.data.jobOrders.push({
       id: jobId(key), number: `JO-SMP-${String(++jobNumber).padStart(3, "0")}`, orderId: orderId(order.po), sequence: order.batches.indexOf(batch.batch) + 1,
-      quantity: quantities[batch.product], uom: product.uom, ...(kg ? { batchSizeKg: kg } : {}),
+      quantity: quantities[batch.product], uom: product.uom, ...(kg ? { batchSizeKg: kg } : {}), ...sampleMeasures(quantities[batch.product], product.uom),
       ...(started ? { batchNumber: `${product.sku.slice(4)}-${String(batch.batch).padStart(3, "0")}`, batchNumberBy: "Kumar (Sample production)", batchNumberAt: stamp(dateKey(workday(monday, batch.start)), "08:00") } : {}),
       createdAt: stamp(dateKey(workday(monday, batch.start - 3)), "09:00"), createdBy: "Sample data"
     });
@@ -295,7 +296,7 @@ export function addSampleData(state: Snapshot, today = new Date(), options = { f
     const expectedDates: Record<string, string> = {};
     if (index % 2 === 0) for (const line of linked) if (!expectedDates[line.calendarId] || expectedDates[line.calendarId] < line.plannedDate) expectedDates[line.calendarId] = line.plannedDate;
     next.data.orders.push({
-      id: orderId(order.po), poNumber: order.po, customerName: order.customer, customerId: customerId(order.customer), number: index + 1, format: inferFormat(product), productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
+      id: orderId(order.po), poNumber: order.po, customerName: order.customer, customerId: customerId(order.customer), number: index + 1, format: inferFormat(product), unitId: d.calendars.find((calendar) => calendar.id === linked[0]?.calendarId)?.unitId ?? unitId("mfg"), productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
       uom: product.uom, expectedDates, createdAt: stamp(dateKey(workday(monday, order.batches.length ? -15 : index - 12)), "09:00"), createdBy: "Sample data"
     });
   }
@@ -309,11 +310,70 @@ export function addSampleData(state: Snapshot, today = new Date(), options = { f
     entries.push({ ...clash, id: `${SAMPLE_PREFIX}entry-conflict`, startAt: local(day, "10:00"), endAt: local(day, "14:00"), notes: "Sample overlap: shows how a machine conflict is flagged." });
     line.status = "Fully Scheduled";
   }
+  alignSampleQuantities(next);
   for (const line of lines) if (line.completedAt === undefined) delete line.completedAt;
   for (const line of lines) if (line.yieldQuantity === undefined) delete line.yieldQuantity;
 
   try { return { state: parseWorkspace(next), errors: [] }; }
   catch (error) { return { errors: [`Sample data could not be added: ${error instanceof Error ? error.message : "invalid workspace"}. Check for clashing unit names, product codes or machine codes.`] }; }
+}
+
+// A sample batch's filling and packing figures: tablets and capsules go 60 to a bottle, sachets are
+// filled as they are; 24 bottles or 30 sachets to a box.
+export function sampleMeasures(quantity: number, uom: string) {
+  if (!["tablets", "capsules", "sachets"].includes(uom)) return {};
+  const sachets = uom === "sachets";
+  const packQuantity = sachets ? quantity : Math.ceil(quantity / 60);
+  return { packQuantity, packUom: sachets ? "sachets" : "bottles", ...(sachets ? {} : { packSize: 60 }), boxQuantity: Math.ceil(packQuantity / (sachets ? 30 : 24)) };
+}
+
+/**
+ * Plan every sample activity in its process's own measure, from its job order: kilograms at
+ * dispensing, tablets or capsules through compression, coating and capsulation, bottles or sachets
+ * at filling, boxes at packing. A process run over several days keeps each day's share, and the
+ * actual results, WIP handovers and bookings of those activities follow. Only sample records change.
+ */
+export function alignSampleQuantities(state: Snapshot) {
+  const { directory: d, data } = state;
+  const decimal = (uom: string) => ["kg", "g", "L", "mL"].includes(uom);
+  // Split a total over shares so the parts add back up exactly: whole units by largest remainder,
+  // decimals to six significant figures with the last part taking the rest.
+  const share = (total: number, weights: number[], uom: string) => {
+    const sum = weights.reduce((a, b) => a + b, 0);
+    const raw = weights.map((weight) => total * weight / sum);
+    if (decimal(uom)) { const parts = raw.map((value) => Number(value.toPrecision(6))); parts[parts.length - 1] = Number((total - parts.slice(0, -1).reduce((a, b) => a + b, 0)).toPrecision(12)); return parts; }
+    const parts = raw.map(Math.floor);
+    let left = Math.round(total) - parts.reduce((a, b) => a + b, 0);
+    for (const index of raw.map((value, position) => [value - Math.floor(value), position]).sort((a, b) => b[0] - a[0]).map(([, position]) => position)) { if (left <= 0) break; parts[index] += 1; left -= 1; }
+    return parts;
+  };
+  const groups = new Map<string, { lines: Line[]; target: { quantity: number; uom: string }; job: Snapshot["data"]["jobOrders"][number] }>();
+  for (const line of data.lines) {
+    const job = data.jobOrders.find((item) => item.id === line.jobOrderId);
+    if (!isSample(line.id) || !job || line.uom !== job.uom) continue;
+    const calendar = d.calendars.find((item) => item.id === line.calendarId);
+    const step = stepOf(d.processes.find((item) => item.id === calendar?.processId)?.name ?? line.activityType ?? "");
+    const target = step ? processQuantity(job, step) : undefined;
+    if (!target || target.uom === line.uom) continue;
+    const key = `${job.id}|${line.calendarId}`;
+    groups.set(key, { lines: [...groups.get(key)?.lines ?? [], line], target, job });
+  }
+  for (const { lines, target, job } of groups.values()) {
+    const total = target.quantity * lines.reduce((sum, line) => sum + line.quantity, 0) / job.quantity;
+    const planned = share(total, lines.map((line) => line.quantity), target.uom);
+    lines.forEach((line, index) => {
+      const factor = planned[index] / line.quantity;
+      line.quantity = planned[index];
+      line.uom = target.uom;
+      if (line.yieldQuantity !== undefined) {
+        line.yieldQuantity = decimal(target.uom) ? Number((line.yieldQuantity * factor).toPrecision(6)) : Math.round(line.yieldQuantity * factor);
+        delete line.yieldUom;
+        for (const actual of data.actuals.filter((item) => item.planLineId === line.id)) Object.assign(actual, { actualQuantity: line.yieldQuantity, plannedQuantity: line.quantity, uom: target.uom });
+      }
+      for (const transfer of data.transfers.filter((item) => item.sourceLineId === line.id)) Object.assign(transfer, { quantity: line.yieldQuantity ?? line.quantity, uom: target.uom });
+    });
+  }
+  return state;
 }
 
 export type SampleRemoval = { state: Snapshot; removed: Record<"units" | "people" | "machines" | "products" | "lines" | "entries", number>; kept: string[] };

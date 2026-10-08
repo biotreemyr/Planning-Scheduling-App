@@ -16,6 +16,8 @@ export type PurchaseOrder = {
   item?: number;
   // Capsule, tablet or sachet: decides the required process route. Older orders infer it from the product.
   format?: ProductFormat;
+  // The production unit (BTP, BTB...) that makes it; its job orders are planned on that unit's board.
+  unitId?: string;
   // Expected completion date keyed by the unit-process calendar the work runs in.
   expectedDates: Record<string, string>;
   notes?: string; createdAt: string; createdBy: string;
@@ -32,8 +34,9 @@ export function poLabel(order: PurchaseOrder, orders: PurchaseOrder[]) {
   return count > 1 ? `${order.poNumber} · item ${poItem(order)} of ${count}` : order.poNumber;
 }
 
-export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName" | "number" | "item">, orders: PurchaseOrder[], products: Product[]) {
+export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName" | "number" | "item" | "unitId">, orders: PurchaseOrder[], products: Product[], units?: { id: string }[]) {
   const errors: string[] = [];
+  if (units?.length && !units.some((unit) => unit.id === order.unitId)) errors.push("Choose the production unit.");
   if (order.number !== undefined && orders.some((item) => item.id !== order.id && item.number === order.number)) errors.push("This order number is already in use.");
   if (!order.customerName?.trim()) errors.push("Enter the customer name.");
   const po = order.poNumber.trim();
@@ -67,6 +70,8 @@ export const nextOrderNumber = (orders: PurchaseOrder[]) => Math.max(0, ...order
 export type OrderProcessRow = {
   calendar: UnitCalendar; processName: string; unitName: string;
   firstDate: string; lastDate: string; plannedQuantity: number; completedQuantity: number; lineCount: number; completedCount: number;
+  // The process's own measure: kg at dispensing, tablets or capsules, bottles at filling, boxes at packing.
+  uom: string;
 };
 
 // Processes the order has been scheduled into so far, in the unit's process order.
@@ -81,7 +86,7 @@ export function orderProcessRows(order: PurchaseOrder, lines: PlanLine[], direct
       firstDate: steps[0].plannedDate, lastDate: steps.at(-1)!.plannedDate,
       plannedQuantity: steps.reduce((total, line) => total + line.quantity, 0),
       completedQuantity: steps.reduce((total, line) => total + (line.yieldQuantity ?? 0), 0),
-      lineCount: steps.length, completedCount: steps.filter((line) => line.completedAt).length
+      lineCount: steps.length, completedCount: steps.filter((line) => line.completedAt).length, uom: steps[0].uom ?? order.uom
     }];
   });
 }
@@ -114,7 +119,7 @@ export function orderProgress(order: PurchaseOrder, rows: OrderProcessRow[], tod
   const done = (row: OrderProcessRow) => row.lineCount > 0 && row.completedCount === row.lineCount;
   const processesDone = rows.filter(done).length;
   const started = rows.some((row) => row.completedCount > 0);
-  const finishedQuantity = rows.at(-1)?.completedQuantity ?? 0;
+  const finishedQuantity = finishedInOrderUnit(order, rows.at(-1), lines);
   const status: OrderStatus = !rows.length ? "Not scheduled" : processesDone === rows.length ? "Completed" : started ? "In production" : "Scheduled";
   const expectedDate = Object.entries(order.expectedDates).filter(([calendarId]) => rows.some((row) => row.calendar.id === calendarId)).map(([, value]) => value).sort().at(-1);
   const scheduled = lines.filter((line) => line.productionOrderId === order.id && rows.some((row) => row.calendar.id === line.calendarId));
@@ -130,6 +135,21 @@ export function orderProgress(order: PurchaseOrder, rows: OrderProcessRow[], tod
     finishedQuantity, percent: Math.min(100, Math.round(finishedQuantity / order.quantity * 100)),
     expectedDate, overdue: status !== "Completed" && !!expectedDate && expectedDate < today
   };
+}
+
+// What the final scheduled process has finished, in the PO's unit. A final process counted in another
+// measure (boxes at packing) is converted per batch: its yield share of plan times the batch's
+// planned quantity in the PO's unit.
+function finishedInOrderUnit(order: PurchaseOrder, last: OrderProcessRow | undefined, lines: PlanLine[]) {
+  if (!last) return 0;
+  if (last.uom === order.uom) return last.completedQuantity;
+  const linked = lines.filter((line) => line.productionOrderId === order.id);
+  const batchKey = (line: PlanLine) => line.orderReference?.trim() || line.id;
+  const total = linked.filter((line) => line.calendarId === last.calendar.id && line.completedAt && line.quantity > 0).reduce((sum, line) => {
+    const inOrderUnit = Math.max(0, ...linked.filter((other) => batchKey(other) === batchKey(line) && other.uom === order.uom && other.calendarId !== last.calendar.id).map((other) => other.quantity));
+    return sum + (line.yieldQuantity ?? 0) / line.quantity * inOrderUnit;
+  }, 0);
+  return Math.round(total);
 }
 
 export type MonthBasis = "scheduled" | "expected" | "created";
@@ -148,7 +168,7 @@ export type BatchCell = { firstDate: string; lastDate: string; days: number; day
 export type OrderBatch = { key: string; label: string; quantity: number; uom: string; kg?: number };
 export type OrderBatchMatrix = {
   batches: OrderBatch[];
-  rows: { calendar: UnitCalendar; processName: string; cells: Record<string, BatchCell>; planned: number; completed: number }[];
+  rows: { calendar: UnitCalendar; processName: string; uom: string; cells: Record<string, BatchCell>; planned: number; completed: number }[];
   total: { quantity: number; kg?: number };
 };
 const batchOrder = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
@@ -165,14 +185,19 @@ export function orderBatchMatrix(order: PurchaseOrder, lines: PlanLine[], direct
       cell.lastDate = line.plannedDate; cell.days += 1; cell.planned += line.quantity;
       if (line.completedAt) { cell.daysDone += 1; cell.completed += line.yieldQuantity ?? 0; } else if (line.plannedDate < today) cell.late = true;
     }
-    return { calendar: row.calendar, processName: row.processName, cells, planned: row.plannedQuantity, completed: row.completedQuantity };
+    return { calendar: row.calendar, processName: row.processName, uom: row.uom, cells, planned: row.plannedQuantity, completed: row.completedQuantity };
   });
-  // A batch's size is its largest process total; a multi-day step splits the batch across its days.
+  // A batch's size is its largest process total in the PO's unit; a multi-day step splits the batch
+  // across its days. Its kilograms are what dispensing weighs, else worked out from the unit weight.
   const batches = [...new Set(linked.map(keyOf))].sort(batchOrder).map((key) => {
-    const quantity = Math.max(0, ...rows.map((row) => row.cells[key]?.planned ?? 0));
-    const sample = linked.find((line) => keyOf(line) === key)!;
-    const kg = sample.batchSizeKg !== undefined && sample.quantity > 0 ? Number((sample.batchSizeKg / sample.quantity * quantity).toPrecision(6)) : undefined;
-    return { key, label: key, quantity, uom: sample.uom ?? order.uom, kg };
+    // With no process in the PO's unit, the batch has a size only when every process shares one unit.
+    const counted = rows.filter((row) => row.uom === order.uom);
+    const sameUnit = new Set(rows.map((row) => row.uom)).size === 1;
+    const quantity = Math.max(0, ...(counted.length ? counted : sameUnit ? rows : []).map((row) => row.cells[key]?.planned ?? 0));
+    const weighed = rows.find((row) => row.uom === "kg" && row.cells[key]);
+    const sample = linked.find((line) => keyOf(line) === key && line.uom === order.uom) ?? linked.find((line) => keyOf(line) === key)!;
+    const kg = weighed ? weighed.cells[key].planned : sample.batchSizeKg !== undefined && sample.quantity > 0 ? Number((sample.batchSizeKg / sample.quantity * quantity).toPrecision(6)) : undefined;
+    return { key, label: key, quantity, uom: counted.length ? order.uom : sample.uom ?? order.uom, kg };
   });
   const kgKnown = batches.length > 0 && batches.every((batch) => batch.kg !== undefined);
   return { batches, rows, total: { quantity: batches.reduce((sum, batch) => sum + batch.quantity, 0), kg: kgKnown ? Number(batches.reduce((sum, batch) => sum + batch.kg!, 0).toPrecision(6)) : undefined } };

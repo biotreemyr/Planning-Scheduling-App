@@ -46,12 +46,13 @@ export const workspaceSchema = z.object({
       orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional(),
       wipRoom: z.boolean().optional() })),
     // Added after the first pilot release; older snapshots load with no orders.
-    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), customerId: id.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
+    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), customerId: id.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), unitId: id.optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([]),
     // Customer master and job orders came later still; older snapshots load with none.
     customers: z.array(z.object({ id, code: name, name, contactNotes: text.optional(), active })).default([]),
     jobOrders: z.array(z.object({ id, number: name, orderId: id, sequence: number.int().positive(), quantity: number.positive(), uom: name,
-      batchSizeKg: number.positive().optional(), packQuantity: number.positive().optional(), packUom: name.optional(), packSize: number.positive().optional(),
+      batchSizeKg: number.positive().optional(), batchVolumeL: number.positive().optional(), packQuantity: number.positive().optional(), packUom: name.optional(), packSize: number.positive().optional(),
+      boxQuantity: number.positive().optional(),
       batchNumber: z.string().trim().max(60).optional(), batchNumberBy: text.optional(), batchNumberAt: timestamp.optional(),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([])
   })
@@ -108,6 +109,7 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
     poCustomers.set(po, customer);
   });
   data.orders.forEach((order) => require(has(state.products, order.productId), "Invalid order product"));
+  data.orders.forEach((order) => require(!order.unitId || has(d.units, order.unitId), "Invalid order production unit"));
   require(new Set(data.customers.map((item) => item.code.trim().toLowerCase())).size === data.customers.length, "Duplicate customer ID");
   data.orders.forEach((order) => require(!order.customerId || has(data.customers, order.customerId), "Invalid order customer"));
   require(new Set(data.jobOrders.map((item) => item.number.trim().toLowerCase())).size === data.jobOrders.length, "Duplicate job order number");

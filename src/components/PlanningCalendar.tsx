@@ -33,8 +33,9 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], allLines
   planLines: PlanLine[]; products: Product[]; initialDate: string;
   // Every activity, to tell planned job orders from ones still to plan.
   allLines?: PlanLine[];
-  // Set from the activity panel's "Edit job order planning"; opens the plan form for that job order.
-  editJobRequest?: { jobId: string; nonce: number } | null;
+  // Opens the plan form for a job order: "edit" from the activity panel's "Edit job order planning",
+  // "new" from the waiting job orders' Plan button.
+  editJobRequest?: { jobId: string; nonce: number; mode?: "new" | "edit"; date?: string } | null;
   onPlanJob: (plan: JobPlan, mode: "new" | "edit") => { error: string } | { message: string };
   onMove: (id: string, date: string) => string;
   canPlan?: boolean;
@@ -47,7 +48,10 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], allLines
   callbacks.current = { onMove, canPlan, canCreate, onSelect };
   // Planning happens per job order, in one form for its whole route.
   const [planRequest, setPlanRequest] = useState<PlanRequest | null>(null);
-  useEffect(() => { if (editJobRequest) setPlanRequest({ mode: "edit", jobId: editJobRequest.jobId, nonce: editJobRequest.nonce }); }, [editJobRequest]);
+  useEffect(() => {
+    if (!editJobRequest) return;
+    setPlanRequest(editJobRequest.mode === "new" ? { mode: "new", jobId: editJobRequest.jobId, date: editJobRequest.date ?? dateKey(new Date()), nonce: editJobRequest.nonce } : { mode: "edit", jobId: editJobRequest.jobId, nonce: editJobRequest.nonce });
+  }, [editJobRequest]);
   const [notice, setNotice] = useState("");
   const [exporting, setExporting] = useState(false);
   const [hover, setHover] = useState<{ id: string; left: number; top: number } | null>(null);
@@ -211,7 +215,7 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], allLines
       {hoverLine.orderReference ? <p>{hoverLine.orderReference}{(() => { const batch = jobOrders.find((item) => item.id === hoverLine.jobOrderId)?.batchNumber; return batch ? ` · Batch no. ${batch}` : ""; })()}</p> : null}
       {hoverLine.notes ? <p>{hoverLine.notes}</p> : null}
     </div> : null}
-    <JobPlanDialog request={planRequest} jobOrders={jobOrders} orders={orders} products={products} calendars={calendars} processNames={processNames} lines={allLines ?? allPrintLines}
+    <JobPlanDialog request={planRequest} jobOrders={jobOrders} orders={orders} products={products} calendars={calendars} processNames={processNames} lines={allLines ?? allPrintLines} machines={machines} entries={entries}
       onPlan={onPlanJob} onDone={(message, firstDate) => { calendar.current?.clearGridSelections(); setNotice(message); if (firstDate) setDate(firstDate); }} />
     <div className="order-legend" aria-label="Legend">
       <span><span className="order-badge">1</span>Order number · tab colour</span>

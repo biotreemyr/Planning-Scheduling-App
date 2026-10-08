@@ -1,5 +1,7 @@
+import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
+import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 
 /**
  * A job order is one batch of one PO item, released to production. Planning keys in its number
@@ -13,11 +15,14 @@ export type JobOrder = {
   orderId: string;
   // 1, 2, 3... within its PO item.
   sequence: number;
+  // Batch quantity in tablets or capsules: what compression, coating and capsulation make.
   quantity: number; uom: string;
-  // Batch quantity in kilograms (what dispensing weighs out).
-  batchSizeKg?: number;
-  // Packed output: how many boxes, bottles or cartons, and how many units go in each.
+  // Batch size dispensing weighs out, in kilograms or (for liquids) litres; one of the two.
+  batchSizeKg?: number; batchVolumeL?: number;
+  // Pack quantity filling makes: blisters, bottles or sachets, and how many units go in each.
   packQuantity?: number; packUom?: string; packSize?: number;
+  // Total pack quantity packing makes, in boxes.
+  boxQuantity?: number;
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;
@@ -54,9 +59,10 @@ export function updateJobOrder(next: JobOrder, jobs: JobOrder[], orders: Purchas
   if (!order) return { error: "This job order's PO no longer exists." };
   if (!Number.isFinite(next.quantity) || next.quantity <= 0) return { error: "Quantity must be greater than zero." };
   if (!next.uom.trim()) return { error: "Choose a UOM." };
-  if (next.batchSizeKg !== undefined && !(next.batchSizeKg > 0)) return { error: "Batch quantity must be greater than zero." };
-  const packIssue = packProblem(next);
+  const packIssue = measureProblem(next) || packProblem(next);
   if (packIssue) return { error: packIssue };
+  const missing = missingQuantity(next, formatOf(order, products));
+  if (missing) return { error: missing };
   const allowable = products.find((product) => product.id === order.productId)?.batchQuantity;
   if (allowable && next.uom === order.uom && next.quantity > allowable) return { error: `One job order holds at most the allowable batch quantity of ${allowable.toLocaleString()} ${order.uom}.` };
   const saved: JobOrder = { ...next, number };
@@ -81,19 +87,54 @@ export const findJobByNumber = (value: string, jobs: JobOrder[]) => {
   return number ? jobs.find((job) => job.number.trim().toLowerCase() === number) : undefined;
 };
 
-export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number; packQuantity?: number; packUom?: string; packSize?: number };
+export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number; batchVolumeL?: number; packQuantity?: number; packUom?: string; packSize?: number; boxQuantity?: number };
+
+export type ProcessQuantity = { quantity: number; uom: string };
+/**
+ * The theoretical quantity a process of this job order makes, as keyed in on the job order:
+ * dispensing its batch size (kg or L), compression, coating and capsulation its batch quantity
+ * (tablets or capsules), filling its pack quantity (blisters, bottles, sachets), packing its boxes.
+ */
+export function processQuantity(job: JobOrder, step: RouteStepName): ProcessQuantity | undefined {
+  if (step === "dispensing") return job.batchSizeKg ? { quantity: job.batchSizeKg, uom: "kg" } : job.batchVolumeL ? { quantity: job.batchVolumeL, uom: "L" } : undefined;
+  if (step === "filling") return job.packQuantity && job.packUom ? { quantity: job.packQuantity, uom: job.packUom } : undefined;
+  if (step === "packing") return job.boxQuantity ? { quantity: job.boxQuantity, uom: "boxes" } : undefined;
+  return { quantity: job.quantity, uom: job.uom };
+}
+const MEASURE_NAME: Record<RouteStepName, string> = {
+  dispensing: "batch size (kg or L)", tableting: "batch quantity", coating: "batch quantity", capsulation: "batch quantity",
+  filling: "pack quantity (blisters, bottles or sachets)", packing: "total pack quantity (boxes)"
+};
+export const measureName = (step: RouteStepName) => MEASURE_NAME[step];
+// The first process of the route whose quantity the job order is missing, as a message.
+export function missingQuantity(job: JobOrder, format: ProductFormat) {
+  if (format === "Other") return "";
+  const step = ROUTES[format].find((item) => !processQuantity(job, item));
+  return step ? `Key in the ${measureName(step)} for ${stepLabel(step)}.` : "";
+}
+const formatOf = (order: PurchaseOrder, products: Product[]) => order.format ?? inferFormat(products.find((product) => product.id === order.productId));
 
 // Pack fields: optional, but a pack quantity needs its UOM and every number must be positive.
 export function packProblem(job: Pick<ManualJob, "packQuantity" | "packUom" | "packSize">) {
   if (job.packSize !== undefined && !(job.packSize > 0)) return "Pack size must be greater than zero.";
   if (job.packQuantity !== undefined && !(job.packQuantity > 0)) return "Pack quantity must be greater than zero.";
-  if (job.packQuantity !== undefined && !job.packUom?.trim()) return "Choose the pack UOM (boxes, bottles, carton...).";
+  if (job.packQuantity !== undefined && !job.packUom?.trim()) return "Choose the pack UOM (blisters, bottles, sachets...).";
+  return "";
+}
+// Dispensing's batch size is in kg or L, not both; box quantity must be positive.
+function measureProblem(job: Pick<ManualJob, "batchSizeKg" | "batchVolumeL" | "boxQuantity">) {
+  if (job.batchSizeKg !== undefined && !(job.batchSizeKg > 0)) return "Batch size must be greater than zero.";
+  if (job.batchVolumeL !== undefined && !(job.batchVolumeL > 0)) return "Batch size must be greater than zero.";
+  if (job.batchSizeKg !== undefined && job.batchVolumeL !== undefined) return "Key in the batch size in kg or in L, not both.";
+  if (job.boxQuantity !== undefined && !(job.boxQuantity > 0)) return "Total pack quantity must be greater than zero.";
   return "";
 }
 // How many packs a quantity fills, rounded up: 125,000 capsules at 30 per bottle is 4,167 bottles.
 export const packsFor = (quantity: number, packSize?: number) => packSize && packSize > 0 && quantity > 0 ? Math.ceil(Number((quantity / packSize).toPrecision(12))) : undefined;
-const packFields = (job: Pick<ManualJob, "packQuantity" | "packUom" | "packSize">) => ({
-  ...(job.packQuantity ? { packQuantity: job.packQuantity } : {}), ...(job.packQuantity && job.packUom?.trim() ? { packUom: job.packUom.trim() } : {}), ...(job.packSize ? { packSize: job.packSize } : {})
+const packFields = (job: Pick<ManualJob, "packQuantity" | "packUom" | "packSize" | "batchSizeKg" | "batchVolumeL" | "boxQuantity">) => ({
+  ...(job.batchSizeKg ? { batchSizeKg: job.batchSizeKg } : {}), ...(job.batchVolumeL ? { batchVolumeL: job.batchVolumeL } : {}),
+  ...(job.packQuantity ? { packQuantity: job.packQuantity } : {}), ...(job.packQuantity && job.packUom?.trim() ? { packUom: job.packUom.trim() } : {}), ...(job.packSize ? { packSize: job.packSize } : {}),
+  ...(job.boxQuantity ? { boxQuantity: job.boxQuantity } : {})
 });
 
 /**
@@ -108,14 +149,43 @@ export function createManualJobOrder(input: ManualJob, orders: PurchaseOrder[], 
   const order = orders.find((item) => item.id === input.orderId);
   if (!order) return { error: `Choose the PO item job order ${number} belongs to.` };
   if (!Number.isFinite(input.quantity) || input.quantity <= 0) return { error: "Quantity must be greater than zero." };
-  const packIssue = packProblem(input);
+  const packIssue = measureProblem(input) || packProblem(input);
   if (packIssue) return { error: packIssue };
   const allowable = products.find((product) => product.id === order.productId)?.batchQuantity;
   if (allowable && input.uom === order.uom && input.quantity > allowable) return { error: `One job order holds at most the allowable batch quantity of ${allowable.toLocaleString()} ${order.uom}.` };
   const created: JobOrder = {
     id: context.newId(), number, orderId: order.id, sequence: Math.max(0, ...jobsFor(order.id, jobs).map((job) => job.sequence)) + 1,
-    quantity: input.quantity, uom: input.uom, ...(input.batchSizeKg ? { batchSizeKg: input.batchSizeKg } : {}), ...packFields(input), createdAt: context.today.toISOString(), createdBy: context.userName
+    quantity: input.quantity, uom: input.uom, ...packFields(input), createdAt: context.today.toISOString(), createdBy: context.userName
   };
+  const missing = missingQuantity(created, formatOf(order, products));
+  if (missing) return { error: missing };
   const over = overOrdered(order, [...jobs, created]);
   return over ? { error: over } : created;
+}
+
+const amount = (value: number) => Number(value.toPrecision(12)).toLocaleString("en-GB", { maximumFractionDigits: 3 });
+
+/**
+ * Every process of a job order must plan its theoretical quantity: the activities of one process
+ * (one day or several) add up to the job order's figure for it, in its unit. Warns, never blocks.
+ */
+export function checkTally(lines: PlanLine[], jobs: JobOrder[], directory: CalendarDirectory): FlowWarning[] {
+  const stepFor = (line: PlanLine) => {
+    const calendar = directory.calendars.find((item) => item.id === line.calendarId);
+    return stepOf(directory.processes.find((item) => item.id === calendar?.processId)?.name ?? calendar?.name ?? line.activityType ?? "");
+  };
+  return jobs.flatMap((job) => {
+    const steps = new Map<RouteStepName, PlanLine[]>();
+    for (const line of linesForJob(job.id, lines)) { const step = stepFor(line); if (step) steps.set(step, [...steps.get(step) ?? [], line]); }
+    return [...steps].flatMap(([step, items]) => {
+      const expected = processQuantity(job, step);
+      if (!expected) return [];
+      const planned = items.reduce((sum, line) => sum + (line.uom === expected.uom ? line.quantity : 0), 0);
+      const otherUnit = items.some((line) => line.uom !== expected.uom);
+      if (!otherUnit && Math.abs(planned - expected.quantity) < 1e-9 * Math.max(1, expected.quantity)) return [];
+      const batch = job.batchNumber ? `${job.number} (batch ${job.batchNumber})` : job.number;
+      return [{ kind: "tally" as const, lineIds: items.map((line) => line.id), orderId: job.orderId, batch: job.number,
+        message: `${batch}: ${stepLabel(step)} is planned for ${otherUnit ? items.map((line) => `${amount(line.quantity)} ${line.uom ?? ""}`.trim()).join(" + ") : `${amount(planned)} ${expected.uom}`} but the job order's ${measureName(step)} is ${amount(expected.quantity)} ${expected.uom}.` }];
+    });
+  });
 }

@@ -572,3 +572,48 @@ th {
     min-width: 100%;
   }
 }
+
+/* Back-link to Bio Tree Core, for people who arrived from a dashboard tile. */
+.core-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-sizing: border-box;
+  height: var(--core-bar-height);
+  padding: 0 16px;
+  background: #0f2f21;
+  color: #fff;
+  font-size: 0.86rem;
+}
+
+.core-bar-link {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 650;
+}
+
+.core-bar-link:hover {
+  text-decoration: underline;
+}
+
+.core-bar-app {
+  opacity: 0.75;
+}
+
+/* The workstation sidebar is fixed to the viewport, so start it below the bar. */
+body:has(.core-bar) {
+  --core-bar-height: 36px;
+}
+
+@media (min-width: 761px) {
+  body:has(.core-bar) .workstation .app-header {
+    top: var(--core-bar-height);
+  }
+}
+
+@media print {
+  .core-bar {
+    display: none;
+  }
+}

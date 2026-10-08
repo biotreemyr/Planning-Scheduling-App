@@ -19,8 +19,11 @@ describe("purchase orders", () => {
   it("lists each scheduled process with its total quantity in process order", () => {
     const rows = orderProcessRows(order, state.data.lines, state.directory);
     expect(rows.map((row) => row.processName)).toEqual(["Dispensing", "Compression", "Coating", "Filling", "Packing"]);
-    // Three batches of 280,000 tablets; multi-day steps split each batch across days.
-    for (const row of rows) expect(row.plannedQuantity).toBe(order.quantity);
+    // Three batches of 280,000 tablets; multi-day steps split each batch across days. Each process
+    // plans its own measure: kg dispensed, tablets pressed and coated, bottles filled, boxes packed.
+    expect(rows.map((row) => row.uom)).toEqual(["kg", "tablets", "tablets", "bottles", "boxes"]);
+    for (const row of rows.filter((item) => item.uom === order.uom)) expect(row.plannedQuantity).toBe(order.quantity);
+    expect(rows.find((row) => row.uom === "bottles")!.plannedQuantity).toBe(3 * Math.ceil(280000 / 60));
     expect(rows[0].firstDate <= rows[0].lastDate).toBe(true);
   });
   it("keeps older workspaces without orders loadable", () => {
@@ -142,8 +145,9 @@ describe("order batch grid", () => {
     expect(matrix.rows.map((row) => row.processName)).toEqual(["Dispensing", "Compression", "Coating", "Filling", "Packing"]);
     // Filling runs two days per batch; its days add back up to the batch.
     const filling = matrix.rows.find((row) => row.processName === "Filling")!;
-    expect(filling.cells["Batch 1"]).toMatchObject({ days: 2, planned: 300000 });
-    expect(filling.planned).toBe(900000);
+    expect(filling.uom).toBe("bottles");
+    expect(filling.cells["Batch 1"]).toMatchObject({ days: 2, planned: 5000 });
+    expect(filling.planned).toBe(15000);
   });
   it("marks finished, late and planned batch steps", () => {
     const lines = structuredClone(state.data.lines);

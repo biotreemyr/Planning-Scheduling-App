@@ -12,7 +12,7 @@ export const ROUTES: Record<Exclude<ProductFormat, "Other">, Step[]> = {
   Tablet: ["dispensing", "tableting", "coating", "filling", "packing"],
   Sachet: ["dispensing", "filling", "packing"]
 };
-const STEP_LABEL: Record<Step, string> = { dispensing: "Dispensing", capsulation: "Capsulation", tableting: "Tableting", coating: "Coating", filling: "Filling", packing: "Packing" };
+const STEP_LABEL: Record<Step, string> = { dispensing: "Dispensing", capsulation: "Capsulation", tableting: "Compression", coating: "Coating", filling: "Filling", packing: "Packing" };
 // Process names used on the shop floor that mean the same step.
 const ALIASES: Record<string, Step> = {
   dispensing: "dispensing", weighing: "dispensing",
@@ -48,7 +48,7 @@ export function inferFormat(product?: Pick<Product, "name" | "uom">): ProductFor
   return "Other";
 }
 
-export type FlowWarning = { kind: "route" | "missing" | "sequence" | "booking"; lineIds: string[]; orderId?: string; batch?: string; message: string };
+export type FlowWarning = { kind: "route" | "missing" | "sequence" | "booking" | "tally"; lineIds: string[]; orderId?: string; batch?: string; message: string };
 
 const pretty = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 function bookingDate(value: string) {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { createManualJobOrder, findJobByNumber, packsFor, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { checkTally, createManualJobOrder, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { validateOrder } from "../src/lib/services/orders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
 import { createBatchLines } from "../src/lib/services/planChanges";
@@ -10,9 +11,11 @@ const state = addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state!;
 // A newly received PO with no job orders yet: 600,000 folic acid tablets.
 const order = state.data.orders.find((item) => item.poNumber === "PO-2610-142")!;
 const today = new Date(2026, 9, 7, 10);
+// What every process of a tablet batch makes: dispensing's kg, filling's bottles, packing's boxes.
+const measures = { batchSizeKg: 75, packQuantity: 5000, packUom: "bottles", boxQuantity: 209 };
 
 describe("job orders", () => {
-  const keyIn = (number: string, quantity: number, jobs: JobOrder[] = state.data.jobOrders) => createManualJobOrder({ number, orderId: order.id, quantity, uom: "tablets" }, state.data.orders, jobs, state.products, { today, userName: "Aida", newId: () => `job-${number}` });
+  const keyIn = (number: string, quantity: number, jobs: JobOrder[] = state.data.jobOrders) => createManualJobOrder({ number, orderId: order.id, quantity, uom: "tablets", ...measures }, state.data.orders, jobs, state.products, { today, userName: "Aida", newId: () => `job-${number}` });
   it("keys in several job orders on one PO item, never more than it ordered", () => {
     const first = keyIn("JO0010", 300000) as JobOrder;
     const second = keyIn("JO0011", 300000, [...state.data.jobOrders, first]) as JobOrder;
@@ -83,7 +86,7 @@ describe("job orders", () => {
   });
   it("creates a keyed-in job order number for a PO item, once, within one allowable batch", () => {
     const context = { today, userName: "Aida", newId: () => "job-typed" };
-    const typed = createManualJobOrder({ number: " JO/BT/0457 ", orderId: order.id, quantity: 250000, uom: "tablets" }, state.data.orders, state.data.jobOrders, state.products, context);
+    const typed = createManualJobOrder({ number: " JO/BT/0457 ", orderId: order.id, quantity: 250000, uom: "tablets", ...measures }, state.data.orders, state.data.jobOrders, state.products, context);
     expect(typed).toMatchObject({ id: "job-typed", number: "JO/BT/0457", orderId: order.id, sequence: 1, quantity: 250000 });
     const jobs = [...state.data.jobOrders, typed as never];
     expect(findJobByNumber("jo/bt/0457", jobs)?.id).toBe("job-typed");
@@ -97,12 +100,51 @@ describe("job orders", () => {
     expect(packsFor(120000, 30)).toBe(4000);
     expect(packsFor(1000)).toBeUndefined();
     const context = { today, userName: "Aida", newId: () => "job-pack" };
-    const packed = createManualJobOrder({ number: "JO0030", orderId: order.id, quantity: 300000, uom: "tablets", batchSizeKg: 75, packQuantity: 10000, packUom: "bottles", packSize: 30 }, state.data.orders, state.data.jobOrders, state.products, context);
+    const packed = createManualJobOrder({ number: "JO0030", orderId: order.id, quantity: 300000, uom: "tablets", batchSizeKg: 75, packQuantity: 10000, packUom: "bottles", packSize: 30, boxQuantity: 417 }, state.data.orders, state.data.jobOrders, state.products, context);
     expect(packed).toMatchObject({ batchSizeKg: 75, packQuantity: 10000, packUom: "bottles", packSize: 30 });
     const next = structuredClone(state);
     next.data.jobOrders.push(packed as JobOrder);
     expect(() => parseWorkspace(next)).not.toThrow();
-    expect(createManualJobOrder({ number: "JO0031", orderId: order.id, quantity: 1, uom: "tablets", packQuantity: 5 }, state.data.orders, state.data.jobOrders, state.products, context)).toEqual({ error: "Choose the pack UOM (boxes, bottles, carton...)." });
+    expect(createManualJobOrder({ number: "JO0031", orderId: order.id, quantity: 1, uom: "tablets", packQuantity: 5 }, state.data.orders, state.data.jobOrders, state.products, context)).toEqual({ error: "Choose the pack UOM (blisters, bottles, sachets...)." });
     expect(updateJobOrder({ ...(packed as JobOrder), packSize: 0 }, [...state.data.jobOrders, packed as JobOrder], state.data.orders, state.products)).toEqual({ error: "Pack size must be greater than zero." });
+  });
+  it("captures each process's quantity on the job order, and needs every one its route uses", () => {
+    const context = { today, userName: "Aida", newId: () => "job-measures" };
+    const make = (extra: object) => createManualJobOrder({ number: "JO0040", orderId: order.id, quantity: 300000, uom: "tablets", ...extra }, state.data.orders, state.data.jobOrders, state.products, context);
+    const job = make(measures) as JobOrder;
+    expect(processQuantity(job, "dispensing")).toEqual({ quantity: 75, uom: "kg" });
+    expect(processQuantity(job, "tableting")).toEqual({ quantity: 300000, uom: "tablets" });
+    expect(processQuantity(job, "coating")).toEqual({ quantity: 300000, uom: "tablets" });
+    expect(processQuantity(job, "filling")).toEqual({ quantity: 5000, uom: "bottles" });
+    expect(processQuantity(job, "packing")).toEqual({ quantity: 209, uom: "boxes" });
+    // Liquids are dispensed in litres instead.
+    const liquid = make({ ...measures, batchSizeKg: undefined, batchVolumeL: 120 }) as JobOrder;
+    expect(processQuantity(liquid, "dispensing")).toEqual({ quantity: 120, uom: "L" });
+    expect(make({ ...measures, batchVolumeL: 120 })).toEqual({ error: "Key in the batch size in kg or in L, not both." });
+    expect(make({ ...measures, batchSizeKg: undefined })).toEqual({ error: "Key in the batch size (kg or L) for Dispensing." });
+    expect(make({ ...measures, packQuantity: undefined })).toEqual({ error: "Key in the pack quantity (blisters, bottles or sachets) for Filling." });
+    expect(make({ ...measures, boxQuantity: undefined })).toEqual({ error: "Key in the total pack quantity (boxes) for Packing." });
+    expect(make({ ...measures, boxQuantity: 0 })).toEqual({ error: "Total pack quantity must be greater than zero." });
+    expect(missingQuantity(job, "Other")).toBe("");
+  });
+  it("warns when a process's planned quantity no longer tallies with its job order", () => {
+    // The sample plan tallies: every process plans exactly its job order's figure, split days included.
+    expect(checkTally(state.data.lines, state.data.jobOrders, state.directory)).toEqual([]);
+    const job = state.data.jobOrders.find((item) => state.data.lines.some((line) => line.jobOrderId === item.id && line.activityType === "Filling"))!;
+    const lines = structuredClone(state.data.lines);
+    const filling = lines.find((line) => line.jobOrderId === job.id && line.activityType === "Filling")!;
+    filling.quantity += 10;
+    const warnings = checkTally(lines, state.data.jobOrders, state.directory);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ kind: "tally", orderId: job.orderId, lineIds: expect.arrayContaining([filling.id]) });
+    expect(warnings[0].message).toContain(`job order's pack quantity (blisters, bottles or sachets) is ${job.packQuantity!.toLocaleString("en-GB")} ${job.packUom}`);
+  });
+  it("needs the production unit on a new PO when units are set up", () => {
+    const base = { id: "new", customerName: "Acme", poNumber: "PO-UNIT-1", productId: state.products[0].id, quantity: 10 };
+    expect(validateOrder(base, state.data.orders, state.products, state.directory.units)).toEqual(["Choose the production unit."]);
+    expect(validateOrder({ ...base, unitId: state.directory.units[0].id }, state.data.orders, state.products, state.directory.units)).toEqual([]);
+    const next = structuredClone(state);
+    next.data.orders[0].unitId = "no-such-unit";
+    expect(() => parseWorkspace(next)).toThrow("Invalid order production unit");
   });
 });
