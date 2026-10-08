@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { checkTally, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { activityFacts, checkTally, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { validateOrder } from "../src/lib/services/orders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
@@ -157,4 +157,13 @@ describe("job orders", () => {
     expect(finalOutput(job.id, state.data.lines, [...handed, ...packed.map((line) => ({ sourceLineId: line.id }))])).toEqual([]);
     expect(finalOutput("no-such-job", state.data.lines, [])).toEqual([]);
   });
+  it("labels a planned activity with batch number, job order number and its process quantity", () => {
+    const job = { ...state.data.jobOrders[0], number: "JO0099", batchNumber: " FA-099 " };
+    const line = { ...state.data.lines[0], jobOrderId: job.id, quantity: 75, uom: "kg", completedAt: undefined, yieldQuantity: undefined, yieldUom: undefined };
+    expect(activityFacts(line, [job])).toEqual({ batchNumber: "FA-099", jobNumber: "JO0099", quantity: "75 kg", done: false });
+    // Once completed, the actual quantity in the unit production reported.
+    expect(activityFacts({ ...line, completedAt: "2026-10-08T09:00:00Z", yieldQuantity: 74.5 }, [job]).quantity).toBe("Actual 74.5 kg");
+    expect(activityFacts({ ...line, jobOrderId: undefined, orderReference: "Batch 4" }, [job])).toMatchObject({ batchNumber: "", jobNumber: "Batch 4" });
+  });
 });
+

@@ -10,7 +10,7 @@ import { priorities } from "@/lib/domain/types";
 import type { PlanLine, Product, Machine, ScheduleEntry } from "@/lib/domain/types";
 import { StatusBadge } from "./StatusBadge";
 import { ORDER_COLORS, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
-import type { JobOrder } from "@/lib/services/jobOrders";
+import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
 import { JobPlanDialog, type JobPlan, type PlanRequest } from "./JobPlanDialog";
 
 type View = "month" | "week" | "day";
@@ -128,13 +128,14 @@ export default function PlanningCalendar({ orders = [], jobOrders = [], allLines
       return {
         id: line.id, calendarId: "planning", category: "allday", isAllday: true,
         raw: { number, priority: line.priority, completed: !!line.completedAt, warn: warnings?.get(line.id)?.join("\n") },
-        title: `${line.activityType ? `${line.activityType}: ` : ""}${item?.name ?? "Unknown product"} - ${line.quantity.toLocaleString()} ${line.uom ?? item?.uom ?? ""}`,
+        // Process, then product, batch number, job order number and this process's quantity (actual once done).
+        title: (() => { const facts = activityFacts(line, jobOrders, item?.uom); return `${line.activityType ? `${line.activityType}: ` : ""}${[item?.name ?? "Unknown product", facts.batchNumber, facts.jobNumber, facts.quantity].filter(Boolean).join(" · ")}`; })(),
         start: line.plannedDate, end: line.plannedDate, isReadOnly: !canPlan || !!line.completedAt,
         color: "#1f2528", borderColor: color, backgroundColor: line.completedAt ? "#ecefed" : tint(color)
       };
     }));
     instance.setOptions({ isReadOnly: !canPlan && !canCreate });
-  }, [ready, planLines, products, canPlan, canCreate, orders, warnings]);
+  }, [ready, planLines, products, canPlan, canCreate, orders, jobOrders, warnings]);
 
   useEffect(() => {
     const instance = calendar.current;

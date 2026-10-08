@@ -203,3 +203,13 @@ export function finalOutput(jobId: string, lines: PlanLine[], transfers: { sourc
   }
   return [...totals].map(([uom, quantity]) => ({ quantity, uom }));
 }
+
+// What a planned activity shows: its batch number (just the number), job order number, and the
+// quantity in its process's unit, the actual once production completed it, else the planned one.
+export function activityFacts(line: PlanLine, jobs: JobOrder[], productUom = "") {
+  const job = jobs.find((item) => item.id === line.jobOrderId);
+  const done = !!line.completedAt && line.yieldQuantity !== undefined;
+  const amount = (done ? line.yieldQuantity! : line.quantity).toLocaleString("en-MY", { maximumFractionDigits: 3 });
+  const uom = (done ? line.yieldUom ?? line.uom : line.uom) ?? productUom;
+  return { batchNumber: job?.batchNumber?.trim() ?? "", jobNumber: job?.number ?? line.orderReference?.trim() ?? "", quantity: `${done ? "Actual " : ""}${amount} ${uom}`.trim(), done };
+}
