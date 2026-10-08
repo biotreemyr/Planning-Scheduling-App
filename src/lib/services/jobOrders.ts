@@ -23,6 +23,8 @@ export type JobOrder = {
   packQuantity?: number; packUom?: string; packSize?: number;
   // Total pack quantity packing makes, in boxes.
   boxQuantity?: number;
+  // Packing's own job order number, e.g. PJO0009; when not keyed in it follows the job order number.
+  packingNumber?: string;
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;
@@ -31,6 +33,15 @@ export type JobOrder = {
 
 export const jobsFor = (orderId: string, jobs: JobOrder[]) => jobs.filter((job) => job.orderId === orderId).sort((a, b) => a.sequence - b.sequence);
 export const linesForJob = (jobId: string, lines: PlanLine[]) => lines.filter((line) => line.jobOrderId === jobId);
+// Packing works to a packing job order numbered like the job order with PJO in front: JO0009 → PJO0009.
+export const defaultPackingNumber = (number: string) => { const value = number.trim(); return /^jo/i.test(value) ? `PJO${value.slice(2)}` : `PJO${value}`; };
+export const packingNumber = (job: Pick<JobOrder, "number" | "packingNumber">) => job.packingNumber?.trim() || defaultPackingNumber(job.number);
+function packingNumberProblem(job: Pick<JobOrder, "id" | "number" | "packingNumber">, jobs: JobOrder[]) {
+  const value = packingNumber(job).toLowerCase();
+  if (value.length > 60) return "Keep the packing job order number to 60 characters.";
+  const clash = jobs.find((other) => other.id !== job.id && packingNumber(other).toLowerCase() === value);
+  return clash ? `Packing job order ${packingNumber(job)} is already used by ${clash.number}.` : "";
+}
 export const jobLabel = (job: JobOrder) => job.batchNumber ? `${job.number} · Batch no. ${job.batchNumber}` : job.number;
 
 export function validateBatchNumber(value: string, job: JobOrder, jobs: JobOrder[]) {
@@ -65,7 +76,10 @@ export function updateJobOrder(next: JobOrder, jobs: JobOrder[], orders: Purchas
   if (missing) return { error: missing };
   const allowable = products.find((product) => product.id === order.productId)?.batchQuantity;
   if (allowable && next.uom === order.uom && next.quantity > allowable) return { error: `One job order holds at most the allowable batch quantity of ${allowable.toLocaleString()} ${order.uom}.` };
-  const saved: JobOrder = { ...next, number };
+  const { packingNumber: typed, ...base } = next;
+  const saved: JobOrder = { ...base, number, ...(typed?.trim() && typed.trim() !== defaultPackingNumber(number) ? { packingNumber: typed.trim() } : {}) };
+  const packingIssue = packingNumberProblem(saved, jobs);
+  if (packingIssue) return { error: packingIssue };
   const batchProblem = validateBatchNumber(saved.batchNumber ?? "", saved, jobs);
   if (batchProblem) return { error: batchProblem };
   const over = overOrdered(order, [...jobs.filter((job) => job.id !== saved.id), saved]);
@@ -87,7 +101,7 @@ export const findJobByNumber = (value: string, jobs: JobOrder[]) => {
   return number ? jobs.find((job) => job.number.trim().toLowerCase() === number) : undefined;
 };
 
-export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number; batchVolumeL?: number; packQuantity?: number; packUom?: string; packSize?: number; boxQuantity?: number };
+export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number; batchVolumeL?: number; packQuantity?: number; packUom?: string; packSize?: number; boxQuantity?: number; packingNumber?: string };
 
 export type ProcessQuantity = { quantity: number; uom: string };
 /**
@@ -131,10 +145,12 @@ function measureProblem(job: Pick<ManualJob, "batchSizeKg" | "batchVolumeL" | "b
 }
 // How many packs a quantity fills, rounded up: 125,000 capsules at 30 per bottle is 4,167 bottles.
 export const packsFor = (quantity: number, packSize?: number) => packSize && packSize > 0 && quantity > 0 ? Math.ceil(Number((quantity / packSize).toPrecision(12))) : undefined;
-const packFields = (job: Pick<ManualJob, "packQuantity" | "packUom" | "packSize" | "batchSizeKg" | "batchVolumeL" | "boxQuantity">) => ({
+const packFields = (job: Pick<ManualJob, "packQuantity" | "packUom" | "packSize" | "batchSizeKg" | "batchVolumeL" | "boxQuantity" | "packingNumber" | "number">) => ({
   ...(job.batchSizeKg ? { batchSizeKg: job.batchSizeKg } : {}), ...(job.batchVolumeL ? { batchVolumeL: job.batchVolumeL } : {}),
   ...(job.packQuantity ? { packQuantity: job.packQuantity } : {}), ...(job.packQuantity && job.packUom?.trim() ? { packUom: job.packUom.trim() } : {}), ...(job.packSize ? { packSize: job.packSize } : {}),
-  ...(job.boxQuantity ? { boxQuantity: job.boxQuantity } : {})
+  ...(job.boxQuantity ? { boxQuantity: job.boxQuantity } : {}),
+  // Kept only when it differs from the one the job order number gives.
+  ...(job.packingNumber?.trim() && "number" in job && job.packingNumber.trim() !== defaultPackingNumber(String(job.number)) ? { packingNumber: job.packingNumber.trim() } : {})
 });
 
 /**
@@ -155,9 +171,9 @@ export function createManualJobOrder(input: ManualJob, orders: PurchaseOrder[], 
   if (allowable && input.uom === order.uom && input.quantity > allowable) return { error: `One job order holds at most the allowable batch quantity of ${allowable.toLocaleString()} ${order.uom}.` };
   const created: JobOrder = {
     id: context.newId(), number, orderId: order.id, sequence: Math.max(0, ...jobsFor(order.id, jobs).map((job) => job.sequence)) + 1,
-    quantity: input.quantity, uom: input.uom, ...packFields(input), createdAt: context.today.toISOString(), createdBy: context.userName
+    quantity: input.quantity, uom: input.uom, ...packFields({ ...input, number }), createdAt: context.today.toISOString(), createdBy: context.userName
   };
-  const missing = missingQuantity(created, formatOf(order, products));
+  const missing = missingQuantity(created, formatOf(order, products)) || packingNumberProblem(created, jobs);
   if (missing) return { error: missing };
   const over = overOrdered(order, [...jobs, created]);
   return over ? { error: over } : created;
@@ -208,8 +224,10 @@ export function finalOutput(jobId: string, lines: PlanLine[], transfers: { sourc
 // quantity in its process's unit, the actual once production completed it, else the planned one.
 export function activityFacts(line: PlanLine, jobs: JobOrder[], productUom = "") {
   const job = jobs.find((item) => item.id === line.jobOrderId);
+  // Packing activities carry the packing job order number (PJO...).
+  const packing = stepOf(line.activityType ?? "") === "packing";
   const done = !!line.completedAt && line.yieldQuantity !== undefined;
   const amount = (done ? line.yieldQuantity! : line.quantity).toLocaleString("en-MY", { maximumFractionDigits: 3 });
   const uom = (done ? line.yieldUom ?? line.uom : line.uom) ?? productUom;
-  return { batchNumber: job?.batchNumber?.trim() ?? "", jobNumber: job?.number ?? line.orderReference?.trim() ?? "", quantity: `${done ? "Actual " : ""}${amount} ${uom}`.trim(), done };
+  return { batchNumber: job?.batchNumber?.trim() ?? "", jobNumber: job ? packing ? packingNumber(job) : job.number : line.orderReference?.trim() ?? "", quantity: `${done ? "Actual " : ""}${amount} ${uom}`.trim(), done };
 }

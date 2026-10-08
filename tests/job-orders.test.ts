@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { activityFacts, checkTally, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { validateOrder } from "../src/lib/services/orders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
@@ -164,6 +164,25 @@ describe("job orders", () => {
     // Once completed, the actual quantity in the unit production reported.
     expect(activityFacts({ ...line, completedAt: "2026-10-08T09:00:00Z", yieldQuantity: 74.5 }, [job]).quantity).toBe("Actual 74.5 kg");
     expect(activityFacts({ ...line, jobOrderId: undefined, orderReference: "Batch 4" }, [job])).toMatchObject({ batchNumber: "", jobNumber: "Batch 4" });
+  });
+  it("gives packing its own job order number: the job order number with PJO in front, unless keyed in", () => {
+    expect(defaultPackingNumber("JO0009")).toBe("PJO0009");
+    expect(defaultPackingNumber("jo2026-240")).toBe("PJO2026-240");
+    expect(defaultPackingNumber("2610-7")).toBe("PJO2610-7");
+    const context = { today, userName: "Aida", newId: () => "job-pjo" };
+    const job = createManualJobOrder({ number: "JO0060", orderId: order.id, quantity: 300000, uom: "tablets", ...measures }, state.data.orders, state.data.jobOrders, state.products, context) as JobOrder;
+    expect(job.packingNumber).toBeUndefined();
+    expect(packingNumber(job)).toBe("PJO0060");
+    // Renaming the job order renumbers packing too; a keyed-in packing number stays.
+    const jobs = [...state.data.jobOrders, job];
+    expect(packingNumber(updateJobOrder({ ...job, number: "JO0061" }, jobs, state.data.orders, state.products) as JobOrder)).toBe("PJO0061");
+    expect(updateJobOrder({ ...job, packingNumber: " PJO-SPECIAL " }, jobs, state.data.orders, state.products)).toMatchObject({ packingNumber: "PJO-SPECIAL" });
+    const other = { ...job, id: "job-other", number: "JO0070" };
+    expect(updateJobOrder({ ...other, packingNumber: "pjo0060" }, [...jobs, other], state.data.orders, state.products)).toEqual({ error: "Packing job order pjo0060 is already used by JO0060." });
+    // Packing activities show the packing number.
+    const packingLine = { ...state.data.lines[0], jobOrderId: job.id, activityType: "Packing" };
+    expect(activityFacts(packingLine, [job]).jobNumber).toBe("PJO0060");
+    expect(activityFacts({ ...packingLine, activityType: "Filling" }, [job]).jobNumber).toBe("JO0060");
   });
 });
 

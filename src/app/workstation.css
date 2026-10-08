@@ -494,9 +494,9 @@
 .history-table .history-when { white-space: nowrap; }
 .history-link { padding: 0; min-height: 0; border: 0; background: none; color: #1971c2; font: inherit; text-decoration: underline; cursor: pointer; text-align: left; }
 
-/* Job order quantities: job order no. and one group per process measure, five equal columns on one
+/* Job order quantities: job order no., one group per process measure and the packing job order no., six equal columns on one
    line; each heading stays on one line (the full text is in its tooltip). */
-.job-order-form, .job-order-edit { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px 12px; align-items: end; }
+.job-order-form, .job-order-edit { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 12px; align-items: end; }
 .job-order-edit > small, .job-order-buttons { grid-column: 1 / -1; }
 .job-order-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .job-measure { display: grid; grid-template-columns: minmax(0, 1fr) minmax(64px, 40%); gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
@@ -525,3 +525,4 @@
 .planner-title .process-ticks { padding: 0; }
 .planner-title .process-ticks legend { float: left; margin: 0 4px 0 0; font-size: 13px; color: var(--muted); }
 .job-order-table .job-output { display: block; font-weight: 600; } .job-order-table .job-output small { display: block; font-weight: 400; color: var(--muted); }
+.plan-save-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 12px; }

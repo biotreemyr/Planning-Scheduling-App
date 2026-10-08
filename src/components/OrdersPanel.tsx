@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
-import { type ManualJob, finalOutput, jobsFor, linesForJob, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
+import { type ManualJob, defaultPackingNumber, finalOutput, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
@@ -325,7 +325,7 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
     const packQuantity = number(data.get("packQuantity")), packUom = String(data.get("packUom") ?? "").trim();
     const size = number(data.get("batchSize")), sizeUom = String(data.get("batchSizeUom") ?? "kg");
     return { number: String(data.get("number") ?? "").trim(), quantity, uom, batchSizeKg: sizeUom === "kg" ? size : undefined, batchVolumeL: sizeUom === "L" ? size : undefined,
-      packQuantity, packUom: packUom || undefined, boxQuantity: number(data.get("boxQuantity")) };
+      packQuantity, packUom: packUom || undefined, boxQuantity: number(data.get("boxQuantity")), packingNumber: String(data.get("packingNumber") ?? "").trim() || undefined };
   }
   const fields = (job?: JobOrder) => <>
     <fieldset className="job-measure job-number"><legend>Job order no.</legend><input name="number" required maxLength={60} autoComplete="off" aria-label="Job order no." placeholder="e.g. JO0010" defaultValue={job?.number} /></fieldset>
@@ -340,6 +340,8 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
       <select name="packUom" aria-label="Pack quantity UOM" defaultValue={job?.packUom ?? (format === "Sachet" ? "sachets" : "bottles")}>{options(FILL_UOMS, job?.packUom).map((name) => <option key={name}>{name}</option>)}</select></fieldset>
     <fieldset className="job-measure"><legend title="Total pack quantity, for Packing">Total packs<span> · Packing</span></legend>
       <input name="boxQuantity" type="number" min="0" step="any" aria-label="Total pack quantity in boxes" defaultValue={job?.boxQuantity} /><span className="job-measure-unit">boxes</span></fieldset>
+    <fieldset className="job-measure job-number"><legend title="Packing job order number; follows the job order number with PJO in front unless keyed in">Packing JO no.<span> · Packing</span></legend>
+      <input name="packingNumber" maxLength={60} autoComplete="off" aria-label="Packing job order no." defaultValue={job?.packingNumber} placeholder={job ? defaultPackingNumber(job.number) : "PJO + job order no."} /></fieldset>
   </>;
   const measure = (value?: { quantity: number; uom: string }) => value ? `${value.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} ${value.uom}` : <span className="route-muted">Not keyed in</span>;
   return <section className="job-orders" aria-label={`Job orders for ${order.poNumber}`}>
@@ -356,10 +358,10 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
             const data = new FormData(event.currentTarget);
             // The batch number is keyed in on the Planner Board; editing here keeps it.
             const read = readJob(data);
-            const { batchSizeKg: _k, batchVolumeL: _l, packQuantity: _pq, packUom: _pu, packSize: _ps, boxQuantity: _b, ...rest } = job;
+            const { batchSizeKg: _k, batchVolumeL: _l, packQuantity: _pq, packUom: _pu, packSize: _ps, boxQuantity: _b, packingNumber: _pn, ...rest } = job;
             const next: JobOrder = { ...rest, number: read.number, quantity: read.quantity, uom: read.uom,
               ...(read.batchSizeKg ? { batchSizeKg: read.batchSizeKg } : {}), ...(read.batchVolumeL ? { batchVolumeL: read.batchVolumeL } : {}), ...(read.packQuantity ? { packQuantity: read.packQuantity } : {}),
-              ...(read.packUom ? { packUom: read.packUom } : {}), ...(read.boxQuantity ? { boxQuantity: read.boxQuantity } : {}) };
+              ...(read.packUom ? { packUom: read.packUom } : {}), ...(read.boxQuantity ? { boxQuantity: read.boxQuantity } : {}), ...(read.packingNumber ? { packingNumber: read.packingNumber } : {}) };
             if (report(actions.onUpdate(next), `${next.number.trim()} saved.${planned.some((line) => !line.completedAt) ? " Its planned activities now carry the new quantities." : ""}`)) setEditing(null);
           }}>
             {fields(job)}
@@ -369,7 +371,7 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
           </form>
         </td></tr>;
         return <tr key={job.id}>
-          <th scope="row"><strong>{job.number}</strong><small>Batch {job.sequence} of PO item</small></th>
+          <th scope="row"><strong>{job.number}</strong><small>Packing {packingNumber(job)}</small><small>Batch {job.sequence} of PO item</small></th>
           <td className="numeric">{measure(processQuantity(job, "dispensing"))}</td>
           <td className="numeric">{measure(processQuantity(job, "tableting"))}</td>
           <td className="numeric">{measure(processQuantity(job, "filling"))}</td>

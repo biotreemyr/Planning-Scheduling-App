@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
-import type { PlanLine, Product } from "@/lib/domain/types";
+import type { Machine, PlanLine, Product } from "@/lib/domain/types";
 import type { CompletionInput, CorrectionInput, WipTransfer } from "@/lib/services/productionFlow";
 import { actualUoms, stepOf } from "@/lib/services/processRules";
 
@@ -16,11 +16,15 @@ const localDay = (value: string) => { const date = new Date(value); return `${da
  * actual quantity, notes on any issue, and where the output goes: the next process of the job's
  * route, the WIP room (held for that process), or nowhere when it is the final output.
  */
-export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, outgoing }: {
+export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineId = "" }: {
   line: PlanLine; uom: string; directory: CalendarDirectory; editable: boolean;
+  // Machines set up for this process, and the one the activity is booked on ("" for none).
+  machines?: Machine[]; machineId?: string;
+  // Called after a successful save, to close the activity and say what was saved.
+  onSaved?: (message: string) => void;
   // The next process of this batch's route, offered first as the destination.
   nextCalendarId?: string;
-  onProgress: (startedAt: string, notes: string) => string[];
+  onProgress: (startedAt: string, notes: string, machineId?: string) => string[];
   onComplete: (input: CompletionInput) => string[];
   // Present when a completed update may be corrected.
   onCorrect?: (input: CorrectionInput) => string[];
@@ -50,6 +54,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       <div><dt>Started</dt><dd>{line.startedAt ? display(line.startedAt) : "-"}</dd></div>
       <div><dt>Completed</dt><dd>{display(completedDay)}</dd></div>
       <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {doneUom}{doneUom === uom && line.quantity > 0 ? <small> ({((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1)}% of plan)</small> : <small> (planned {line.quantity.toLocaleString()} {uom})</small>}</dd></div>
+      <div><dt>Machine</dt><dd>{machines.find((machine) => machine.id === machineId)?.name ?? "Not assigned"}</dd></div>
       <div><dt>Output</dt><dd>{outgoing ? `${outgoing.wipRoom ? "WIP room, for " : "Transferred to "}${processName(outgoing.calendarId)} · ${outgoing.receivedAt ? `received by ${outgoing.receivedBy}` : "awaiting receipt"}` : "Final output - no transfer"}</dd></div>
     </dl>
     {line.productionNotes ? <p><strong>Notes:</strong> {line.productionNotes}</p> : null}
@@ -63,26 +68,30 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       const startedAt = String(data.get("startedAt") ?? ""), completedDate = String(data.get("completedAt") ?? ""), notes = String(data.get("notes") ?? "").trim();
       const quantityText = String(data.get("quantity") ?? "").trim();
       const [kind, destinationId = ""] = String(data.get("destination") ?? "final").split(":");
-      const output = { quantity: Number(quantityText), uom: String(data.get("yieldUom") ?? "") || uom, completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip" };
+      const machine = String(data.get("machine") ?? "");
+      const output = { quantity: Number(quantityText), uom: String(data.get("yieldUom") ?? "") || uom, completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineId: machine };
+      const done = (result: string[], message: string) => { setErrors(result); if (!result.length) { if (onSaved) onSaved(message); else setSaved(message); } return result; };
       if (correcting) {
         if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity."]); return; }
-        const result = onCorrect!({ ...output, startedAt });
-        setErrors(result);
-        if (!result.length) { setCorrecting(false); setSaved("Production update corrected."); }
+        if (!done(onCorrect!({ ...output, startedAt }), "Production update corrected.").length) setCorrecting(false);
         return;
       }
       const completing = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "complete";
-      if (!completing) { const result = onProgress(startedAt, notes); setErrors(result); setSaved(result.length ? "" : "Progress saved."); return; }
+      if (!completing) { done(onProgress(startedAt, notes, machine), "Progress saved."); return; }
       if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity to complete."]); return; }
       const progress = startedAt !== (line.startedAt ?? "") || notes !== (line.productionNotes ?? "") ? onProgress(startedAt || completedDate, notes) : [];
       if (progress.length) { setErrors(progress); return; }
-      setErrors(onComplete(output));
+      done(onComplete(output), "Production completed.");
     }}>
       <label>Date started<input name="startedAt" type="date" defaultValue={line.startedAt ?? ""} /></label>
       <label>Date completed<input name="completedAt" type="date" defaultValue={completedDay} max={today()} /></label>
       <div className="quantity-fields"><label>Actual quantity<input name="quantity" type="number" min="0" step="any" defaultValue={line.completedAt ? line.yieldQuantity : undefined} readOnly={handedOver} placeholder={`Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
         <label>UOM<select name="yieldUom" defaultValue={defaultUom} disabled={handedOver}>{[...new Set([...reportUoms, ...(line.completedAt ? [doneUom] : [])])].map((name) => <option key={name}>{name}</option>)}</select></label>
         {handedOver ? <input type="hidden" name="yieldUom" value={doneUom} /> : null}</div>
+      <label>Machine<select name="machine" defaultValue={machineId}>
+        <option value="">{machines.length ? "Not assigned" : "No machine set up"}</option>
+        {machines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
+      </select></label>
       <label className="production-notes">Notes<textarea name="notes" defaultValue={line.productionNotes ?? ""} placeholder="Anything that happened during production: issues, stoppages, deviations" /></label>
       <label className="production-destination">After completion, send to<select name="destination" defaultValue={destinationValue} disabled={handedOver}>
         {wipFor ? <option value={`wip:${wipFor}`}>WIP room</option> : null}

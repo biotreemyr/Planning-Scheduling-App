@@ -16,7 +16,8 @@ export function printDates(date: string, view: CalendarView) {
 }
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { orderNumbers, type PurchaseOrder } from "./orders";
-import type { JobOrder } from "./jobOrders";
+import { packingNumber, type JobOrder } from "./jobOrders";
+import { stepOf } from "./processRules";
 
 export type CalendarPrintInput = { title: string; date: string; view: CalendarView; lines: PlanLine[]; products: Product[]; processNames: Record<string, string>; orders?: PurchaseOrder[]; jobOrders?: JobOrder[] };
 
@@ -35,7 +36,8 @@ export function scheduleDetail(line: PlanLine, products: Product[], orders: Purc
   return {
     productName: product?.name ?? "Unknown product",
     process: line.activityType ?? "",
-    jobNumber: job?.number ?? "", reference: line.orderReference?.trim() ?? "",
+    // Packing works to its packing job order number (PJO...).
+    jobNumber: job ? stepOf(line.activityType ?? "") === "packing" ? packingNumber(job) : job.number : "", reference: line.orderReference?.trim() ?? "",
     batchNumber: job?.batchNumber ?? "",
     batchQuantity: job?.batchSizeKg !== undefined ? `${job.batchSizeKg.toLocaleString("en-GB", { maximumFractionDigits: 3 })} kg` : "",
     packSize: job?.packSize ? `${job.packSize.toLocaleString("en-GB")} ${job.uom}/${job.packUom ? singular(job.packUom) : "pack"}` : "",

@@ -680,6 +680,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   const [planningView, setPlanningView] = useState<PlanningView>("calendar");
   const [adminSection, setAdminSection] = useState("Configuration");
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
+  // What the last save from the activity panel did, shown once the panel closes.
+  const [planNotice, setPlanNotice] = useState("");
   // "Edit job order planning" from the activity panel reopens the plan form for that job order.
   const [jobEdit, setJobEdit] = useState<{ jobId: string; nonce: number } | null>(null);
   const [products, setProducts] = useState<Product[]>(initial.snapshot.products);
@@ -728,6 +730,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     if (!selectedLine) return ["Activity not available."];
     const errors = validateCompletion(selectedLine, input, identity ? { ...member, role: "production" } : member, directory, !identity);
     if (errors.length) return errors;
+    const machine = machineChange(selectedLine, input.machineId);
+    if ("error" in machine) return [machine.error];
     // The completed day production keyed in, at the time of saving (or end of day for an earlier day).
     const now = new Date();
     const completedAt = input.completedDate && input.completedDate !== localDateKey(now) ? new Date(`${input.completedDate}T17:00`).toISOString() : now.toISOString();
@@ -746,12 +750,21 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       return {
         ...current,
         lines: current.lines.map((item) => item.id === line.id ? { ...item, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), startedAt: item.startedAt ?? localDateKey(new Date(completedAt)) } : item),
-        entries: current.entries.map((item) => item.planLineId === line.id && item.status !== "Cancelled" ? { ...item, status: "Completed" as const, changedBy: member.name } : item),
+        entries: (machine.entries ?? current.entries).map((item) => item.planLineId === line.id && item.status !== "Cancelled" ? { ...item, status: "Completed" as const, changedBy: member.name } : item),
         actuals: [...current.actuals.filter((item) => item.planLineId !== line.id), actual],
         transfers: transfer ? [...current.transfers, transfer] : current.transfers
       };
     });
     return [];
+  }
+  // Production's machine choice in its update: the bookings this save starts from, with the machine
+  // changed when it differs (undefined when no choice was sent).
+  function machineChange(line: PlanLine, machineId?: string): { entries?: ScheduleEntry[] } | { error: string } {
+    if (machineId === undefined) return {};
+    const current = data.entries.find((entry) => entry.planLineId === line.id && entry.status !== "Cancelled")?.machineId ?? "";
+    if (current === machineId) return {};
+    const booked = bookMachine(data.entries, line, machineId);
+    return "error" in booked ? booked : { entries: booked.entries };
   }
   // A mistaken production update can be corrected after completion: dates, notes, the actual quantity
   // and where the output went. The handover follows: updated, moved, added, or removed for final output.
@@ -761,6 +774,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     const outgoing = data.transfers.find((item) => item.sourceLineId === line.id);
     const errors = validateCorrection(line, input, outgoing, identity ? { ...member, role: "production" } : member, directory, !identity);
     if (errors.length) return errors;
+    const machine = machineChange(line, input.machineId);
+    if ("error" in machine) return [machine.error];
     const now = new Date();
     const sameDay = line.completedAt && localDateKey(new Date(line.completedAt)) === input.completedDate;
     const completedAt = sameDay ? line.completedAt! : input.completedDate === localDateKey(now) ? now.toISOString() : new Date(`${input.completedDate}T17:00`).toISOString();
@@ -781,19 +796,21 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
           calendarId: input.destinationId, quantity: input.quantity, uom, notes: input.notes, createdAt: outgoing?.createdAt ?? completedAt, ...(input.wipRoom ? { wipRoom: true } : { wipRoom: undefined }) }];
         transfers = transfers.map((item) => item.wipRoom === undefined ? (({ wipRoom: _w, ...rest }) => rest)(item) : item);
       }
-      return { ...current, lines, actuals, transfers };
+      return { ...current, lines, actuals, transfers, ...(machine.entries ? { entries: machine.entries } : {}) };
     });
     return [];
   }
   // Production's progress on an activity: the day it started and notes; its bookings go in progress.
-  function saveProgress(startedAt: string, notes: string) {
+  function saveProgress(startedAt: string, notes: string, machineId?: string) {
     const line = selectedLine;
     if (!line || !canProduce) return ["Production access to this activity is required."];
     if (line.completedAt) return ["This activity is already complete."];
     if (startedAt && !/^\d{4}-\d{2}-\d{2}$/.test(startedAt)) return ["Choose the date production started."];
-    setData((current) => ({ ...current,
+    const machine = machineChange(line, machineId);
+    if ("error" in machine) return [machine.error];
+    setData((previous) => { const current = machine.entries ? { ...previous, entries: machine.entries } : previous; return { ...current,
       lines: current.lines.map((item) => item.id !== line.id ? item : (({ startedAt: _s, productionNotes: _n, ...rest }) => ({ ...rest, ...(startedAt ? { startedAt } : {}), ...(notes ? { productionNotes: notes } : {}) }))(item)),
-      entries: startedAt ? current.entries.map((entry) => entry.planLineId === line.id && (entry.status === "Draft" || entry.status === "Confirmed") ? { ...entry, status: "In Progress" as const, changedBy: member.name } : entry) : current.entries }));
+      entries: startedAt ? current.entries.map((entry) => entry.planLineId === line.id && (entry.status === "Draft" || entry.status === "Confirmed") ? { ...entry, status: "In Progress" as const, changedBy: member.name } : entry) : current.entries }; });
     return [];
   }
   function saveDirectory(next: CalendarDirectory) {
@@ -1064,13 +1081,17 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {activeTab !== "planner" ? <div className="workspace-heading"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1></div> : null}
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
+      {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
       {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPlanJobs={canCreate} flow={flow}
         onMoveLine={moveLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
         orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
         jobOrders={data.jobOrders}>
-        <ProductionUpdate line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction} />
+        <ProductionUpdate line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
+          machines={unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? "") && (machine.active === "Active" || data.entries.some((entry) => entry.planLineId === selectedLine.id && entry.machineId === machine.id)))}
+          machineId={data.entries.find((entry) => entry.planLineId === selectedLine.id && entry.status !== "Cancelled")?.machineId ?? ""}
+          onSaved={(message) => { setSelectedActivity(null); setPlanNotice(`${products.find((item) => item.id === selectedLine.productId)?.name ?? "Activity"} · ${selectedLine.activityType ?? ""}: ${message}`); }} />
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
         <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements", "Sample data"].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>
