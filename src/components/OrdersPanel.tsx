@@ -59,7 +59,6 @@ function NewOrderForm({ orders, products, customers, units, userName, onAdd, onC
   const [poNumber, setPoNumber] = useState("");
   const [customerCode, setCustomerCode] = useState("");
   const [customerName, setCustomerName] = useState("");
-  const [unitId, setUnitId] = useState(units.length === 1 ? units[0].id : "");
   // A known customer ID fills in its name; a new one is added to the customer list with this PO.
   const known = customers.find((item) => item.code.trim().toLowerCase() === customerCode.trim().toLowerCase() && customerCode.trim());
   const [errors, setErrors] = useState<string[]>([]);
@@ -75,7 +74,7 @@ function NewOrderForm({ orders, products, customers, units, userName, onAdd, onC
     let number = nextOrderNumber(orders);
     const customer: Customer = known ?? { id: `customer-${crypto.randomUUID()}`, code: customerCode.trim(), name: customerName.trim(), active: "Active" };
     const built: PurchaseOrder[] = items.map((item, index) => ({
-      id: `order-${crypto.randomUUID()}`, number: number++, item: firstItem + index, format: formatOf(item), unitId,
+      id: `order-${crypto.randomUUID()}`, number: number++, item: firstItem + index, format: formatOf(item), ...(units.length === 1 ? { unitId: units[0].id } : {}),
       customerId: customer.id, customerName: customer.name, poNumber: poNumber.trim(), productId: item.productId,
       quantity: Number(data.get(`quantity-${item.key}`)), uom: item.uom || (products.find((product) => product.id === item.productId)?.uom ?? ""),
       expectedDates: {}, createdAt, createdBy: userName
@@ -85,7 +84,7 @@ function NewOrderForm({ orders, products, customers, units, userName, onAdd, onC
     if (!result.length) {
       const range = built.length === 1 ? `order ${built[0].number}` : `orders ${built[0].number}-${built.at(-1)!.number}`;
       onDone(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}. Open it in the list to key in its job orders.`);
-      setItems([draftItem()]); setPoNumber(""); setUnitId(units.length === 1 ? units[0].id : ""); setCustomerCode(""); setCustomerName(""); setVersion((value) => value + 1);
+      setItems([draftItem()]); setPoNumber(""); setCustomerCode(""); setCustomerName(""); setVersion((value) => value + 1);
     }
   }}>
     <div className="panel-title"><h2 id="new-order-title">New order</h2><button className="icon-button" type="button" aria-label="Close new order" title="Close" onClick={onClose}><X size={18} /></button></div>
@@ -98,12 +97,7 @@ function NewOrderForm({ orders, products, customers, units, userName, onAdd, onC
       const owner = poItems(event.target.value, orders).find((item) => item.customerId);
       const record = customers.find((item) => item.id === owner?.customerId);
       if (record && !customerCode.trim()) setCustomerCode(record.code);
-      if (owner?.unitId && !unitId) setUnitId(owner.unitId);
     }} /></label>
-    <label>Production unit<select name="unit" required value={unitId} onChange={(event) => setUnitId(event.target.value)}>
-      <option value="" disabled>Choose BTP or BTB production</option>
-      {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
-    </select></label>
     {customerCode.trim() && !known ? <p className="orders-help" role="status">New customer ID {customerCode.trim()}: it is added to the customer list with this PO.</p> : null}
     {existing.length ? <p className="orders-help" role="status">{existing[0].poNumber} already has {existing.length} item{existing.length === 1 ? "" : "s"}{existing[0].customerName ? ` for ${existing[0].customerName}` : ""}. These are added as item {firstItem}{items.length > 1 ? ` to ${firstItem + items.length - 1}` : ""}.</p> : null}
     <fieldset className="order-items">
@@ -116,7 +110,7 @@ function NewOrderForm({ orders, products, customers, units, userName, onAdd, onC
             {items.length > 1 ? <button type="button" className="icon-button" aria-label={`Remove item ${firstItem + index}`} title="Remove this item" onClick={() => setItems((current) => current.filter((other) => other.key !== item.key))}><Trash2 size={15} /></button> : null}
           </div>
           <ProductSelect products={products} name={`product-${item.key}`} value={item.productId} onChange={(id) => update(item.key, { productId: id, uom: "", format: "" })} />
-          <label title={routeLabel(format)}>Format<select value={format} onChange={(event) => update(item.key, { format: event.target.value as ProductFormat })}>{PRODUCT_FORMATS.map((option) => <option key={option}>{option}</option>)}</select></label>
+          <label title={routeLabel(format)}>Dosage form<select value={format} onChange={(event) => update(item.key, { format: event.target.value as ProductFormat })}>{PRODUCT_FORMATS.map((option) => <option key={option}>{option}</option>)}</select></label>
           <div className="quantity-fields"><label>Quantity<input name={`quantity-${item.key}`} type="number" min="1" step="any" required /></label>
             <label>UOM<select value={item.uom || productUom} onChange={(event) => update(item.key, { uom: event.target.value })} required>{!productUom && !item.uom ? <option value="">Select</option> : null}{[...new Set([productUom, ...uoms.filter((unit) => unit.active).map((unit) => unit.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select></label></div>
           <small className="route-muted">Route: {routeLabel(format)}</small>
@@ -161,14 +155,12 @@ function OrdersTable({ action, orders, customerRecords, jobOrders, jobActions, l
     setHidden(next);
     try { localStorage.setItem(COLUMN_STORAGE, JSON.stringify(next)); } catch { /* not persisted */ }
   }
-  const unitName = (order: PurchaseOrder) => directory.units.find((unit) => unit.id === order.unitId)?.name ?? "";
   const columns: Column[] = [
     { key: "number", label: "#", required: true, sort: (row) => row.number, cell: (row) => <span className="order-number-cell" style={{ "--order-color": orderColor(row.number) } as React.CSSProperties}><OrderBadge number={row.number} poNumber={row.order.poNumber} /></span> },
     { key: "customer", label: "Customer", sort: (row) => row.order.customerName ?? "", cell: (row) => { const record = customerRecords.find((item) => item.id === row.order.customerId); return row.order.customerName ? <>{row.order.customerName}{record ? <small>ID {record.code}</small> : null}</> : <span className="route-muted">Not set</span>; }, filter: { kind: "text", text: (row) => `${row.order.customerName ?? ""} ${customerRecords.find((item) => item.id === row.order.customerId)?.code ?? ""}` } },
     { key: "po", label: "PO number", required: true, sort: (row) => `${row.order.poNumber}#${String(poItem(row.order)).padStart(4, "0")}`, cell: (row) => <><strong>{row.order.poNumber}</strong>{poItems(row.order.poNumber, orders).length > 1 ? <small>Item {poItem(row.order)} of {poItems(row.order.poNumber, orders).length}</small> : null}</>, filter: { kind: "text", text: (row) => row.order.poNumber } },
-    { key: "unit", label: "Unit", sort: (row) => unitName(row.order), cell: (row) => unitName(row.order) || <span className="route-muted">Not set</span>, filter: { kind: "select", options: directory.units.map((unit) => unit.name), value: (row) => unitName(row.order) } },
     { key: "product", label: "Product", sort: (row) => row.product?.name ?? "", cell: (row) => row.product?.name ?? "Unknown product", filter: { kind: "text", text: (row) => `${row.product?.name ?? ""} ${row.product?.sku ?? ""}` } },
-    { key: "format", label: "Format", sort: (row) => row.format, cell: (row) => <span title={routeLabel(row.format)}>{row.format}</span>, filter: { kind: "select", options: [...PRODUCT_FORMATS], value: (row) => row.format } },
+    { key: "format", label: "Dosage form", sort: (row) => row.format, cell: (row) => <span title={routeLabel(row.format)}>{row.format}</span>, filter: { kind: "select", options: [...PRODUCT_FORMATS], value: (row) => row.format } },
     { key: "quantity", label: "Order qty", numeric: true, sort: (row) => row.order.quantity, cell: (row) => `${row.order.quantity.toLocaleString()} ${row.order.uom}` },
     { key: "progress", label: "Progress", sort: (row) => row.progress.batchCount ? row.progress.batchesFinished / row.progress.batchCount : -1, cell: (row) => <>
       <div className="order-steps" role="img" aria-label={row.rows.map((item) => `${item.processName} ${Math.round(item.completedCount / item.lineCount * 100)}%`).join(", ")}>
@@ -266,9 +258,9 @@ function OrdersPrint({ rows, orders, detail, lines, directory, visibleCalendarId
     {detail && rows[0] ? <OrderPrintDetail row={rows[0]} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} printed={printed} /> : <>
       <header><h1>Customer orders</h1><p>{rows.length} order{rows.length === 1 ? "" : "s"}{filtered ? " (filtered)" : ""} · printed {printed}</p></header>
       <table className="print-orders-table">
-        <thead><tr><th>#</th><th>Customer</th><th>PO number</th><th>Unit</th><th>Product</th><th>Format</th><th>Order qty</th><th>Progress</th><th>Finished</th><th>Expected completion</th><th>Status</th></tr></thead>
+        <thead><tr><th>#</th><th>Customer</th><th>PO number</th><th>Product</th><th>Dosage form</th><th>Order qty</th><th>Progress</th><th>Finished</th><th>Expected completion</th><th>Status</th></tr></thead>
         <tbody>{rows.map((row) => <tr key={row.order.id}>
-          <td>{row.number}</td><td>{row.order.customerName ?? ""}</td><td>{poLabel(row.order, orders)}</td><td>{directory.units.find((unit) => unit.id === row.order.unitId)?.name ?? ""}</td><td>{row.product?.name ?? "Unknown product"}</td><td>{row.format}</td>
+          <td>{row.number}</td><td>{row.order.customerName ?? ""}</td><td>{poLabel(row.order, orders)}</td><td>{row.product?.name ?? "Unknown product"}</td><td>{row.format}</td>
           <td>{row.order.quantity.toLocaleString()} {row.order.uom}</td><td>{progressText(row.progress)}</td>
           <td>{row.progress.finishedQuantity ? `${row.progress.finishedQuantity.toLocaleString()} (${row.progress.percent}%)` : "-"}</td>
           <td>{row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " · Overdue" : ""}</td>
@@ -289,7 +281,7 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
   };
   return <>
     <header><h1>Order {row.number} · {row.order.poNumber}{row.order.item ? ` item ${row.order.item}` : ""}</h1><p>{row.order.customerName ?? ""} · {row.product?.name ?? "Unknown product"} · {row.order.quantity.toLocaleString()} {row.order.uom} · printed {printed}</p></header>
-    <p className="print-order-facts">Format: {row.format} ({routeLabel(row.format)}) · Status: {row.progress.status} · {progressText(row.progress)} · Expected completion: {row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " (overdue)" : ""}</p>
+    <p className="print-order-facts">Dosage form: {row.format} ({routeLabel(row.format)}) · Status: {row.progress.status} · {progressText(row.progress)} · Expected completion: {row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " (overdue)" : ""}</p>
     {row.warnings.length ? <ul className="print-order-warnings">{row.warnings.map((warning) => <li key={warning.message}>Warning: {warning.message}</li>)}</ul> : null}
     {matrix.rows.length ? <table className="print-orders-table">
       <thead><tr><th>Process</th>{matrix.batches.map((batch) => <th key={batch.key}>{batch.label}<br />{batch.kg !== undefined ? `${batch.kg.toLocaleString("en-MY", { maximumFractionDigits: 2 })} kg · ` : ""}{batch.quantity.toLocaleString()} {batch.uom}</th>)}<th>Summary</th><th>Expected</th></tr></thead>
@@ -321,7 +313,7 @@ function JobOrders({ order, product, format, jobOrders, lines, actions }: { orde
   const kgFor = (quantity: number, uom: string) => product?.batchSizeKg && product.batchQuantity && uom === order.uom ? Number((product.batchSizeKg * quantity / product.batchQuantity).toPrecision(6)) : undefined;
   const number = (value: FormDataEntryValue | null) => { const text = String(value ?? "").trim(); return text ? Number(text) : undefined; };
   const options = (list: string[], current?: string) => [...new Set([current ?? "", ...list].filter(Boolean))];
-  // Which processes of this format use each figure, so the form says where it goes.
+  // Which processes of this dosage form use each figure, so the form says where it goes.
   const route = format === "Other" ? [] : ROUTES[format];
   const countSteps = route.filter((step) => step === "tableting" || step === "coating" || step === "capsulation").map(stepLabel).join(", ");
   // The fields shared by adding and editing; a blank pack quantity is worked out from the pack size.
@@ -440,7 +432,7 @@ function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, 
   const lastDate = rows.reduce((latest, row) => row.lastDate > latest ? row.lastDate : latest, "");
   return <div className="order-detail">
     <div className="order-detail-head">
-      <p className="route-format">{directory.units.find((unit) => unit.id === order.unitId)?.name ?? "No production unit"} · Format: <strong>{format}</strong> · {routeLabel(format)}</p>
+      <p className="route-format">Dosage form: <strong>{format}</strong> · {routeLabel(format)}</p>
       <button type="button" className="calendar-button" onClick={onPrint}><Printer size={15} />Print this order</button>
     </div>
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
@@ -475,15 +467,13 @@ function OrderDetail({ order, product, jobOrders, jobActions, format, warnings, 
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
-      const result = onSave({ ...order, customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), quantity: Number(data.get("quantity")), format: String(data.get("format")) as ProductFormat, unitId: String(data.get("unit") ?? "") || undefined });
+      const result = onSave({ ...order, customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), quantity: Number(data.get("quantity")), format: String(data.get("format")) as ProductFormat });
       setErrors(result); setSaved(!result.length);
     }}>
       <label>Customer name<input name="customer" required defaultValue={order.customerName} list={`customers-${order.id}`} /></label>
       <datalist id={`customers-${order.id}`}>{customers.map((name) => <option key={name} value={name} />)}</datalist>
       <label>PO number<input name="po" required defaultValue={order.poNumber} /></label>
-      <label>Production unit<select name="unit" required defaultValue={order.unitId ?? ""} disabled={linked} title={linked ? "Planned activities keep this PO in its unit" : undefined}><option value="" disabled>Choose</option>{directory.units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
-      {linked && order.unitId ? <input type="hidden" name="unit" value={order.unitId} /> : null}
-      <label>Format<select name="format" defaultValue={format}>{PRODUCT_FORMATS.map((item) => <option key={item}>{item}</option>)}</select></label>
+      <label>Dosage form<select name="format" defaultValue={format}>{PRODUCT_FORMATS.map((item) => <option key={item}>{item}</option>)}</select></label>
       <label>Quantity ({order.uom})<input name="quantity" type="number" min="1" step="any" required defaultValue={order.quantity} /></label>
       <button type="submit" className="calendar-button">Save order</button>
       {confirming ? <><span>Delete {order.poNumber}?</span><button type="button" className="calendar-button" onClick={() => { setErrors(onDelete(order.id)); setConfirming(false); }}>Confirm delete</button><button type="button" className="calendar-button" onClick={() => setConfirming(false)}>Cancel</button></>

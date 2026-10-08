@@ -34,9 +34,8 @@ export function poLabel(order: PurchaseOrder, orders: PurchaseOrder[]) {
   return count > 1 ? `${order.poNumber} · item ${poItem(order)} of ${count}` : order.poNumber;
 }
 
-export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName" | "number" | "item" | "unitId">, orders: PurchaseOrder[], products: Product[], units?: { id: string }[]) {
+export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName" | "number" | "item" | "unitId">, orders: PurchaseOrder[], products: Product[]) {
   const errors: string[] = [];
-  if (units?.length && !units.some((unit) => unit.id === order.unitId)) errors.push("Choose the production unit.");
   if (order.number !== undefined && orders.some((item) => item.id !== order.id && item.number === order.number)) errors.push("This order number is already in use.");
   if (!order.customerName?.trim()) errors.push("Enter the customer name.");
   const po = order.poNumber.trim();

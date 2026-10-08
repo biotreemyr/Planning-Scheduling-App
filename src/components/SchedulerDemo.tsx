@@ -793,7 +793,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   }
   function saveOrder(order: PurchaseOrder) {
     if (!canEditOrders) return ["Planner or administrator access is required."];
-    const errors = validateOrder(order, data.orders, products, directory.units);
+    const errors = validateOrder(order, data.orders, products);
     if (errors.length) return errors;
     const old = data.orders.find((item) => item.id === order.id);
     if (old && old.unitId && old.unitId !== order.unitId && data.lines.some((line) => line.productionOrderId === order.id)) return ["This PO has planned activities in its unit. Remove them before moving it to another unit."];
@@ -810,7 +810,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     const accepted: PurchaseOrder[] = [];
     const errors = items.flatMap((order, index) => {
       const linked = { ...order, poNumber: order.poNumber.trim(), customerId: customer.id, customerName: (known ?? customer).name.trim() };
-      const problems = validateOrder(linked, [...data.orders, ...accepted], products, directory.units);
+      const problems = validateOrder(linked, [...data.orders, ...accepted], products);
       if (!problems.length) accepted.push(linked);
       return items.length > 1 ? problems.map((problem) => `Item ${index + 1}: ${problem}`) : problems;
     });

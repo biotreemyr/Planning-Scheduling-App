@@ -101,7 +101,7 @@ describe("creating a batch's route activities", async () => {
     expect("lines" in weekend && weekend.lines[0].plannedDate).toBe("2026-10-26");
     expect(createBatchLines({ label: "batch 8", quantity: 5, startDate: "2026-10-26" }, context())).toEqual({ error: "batch 8 already exists on this order." });
     expect(createBatchLines({ label: "Batch 11", quantity: 0, startDate: "2026-10-26" }, context())).toEqual({ error: "Quantity must be greater than zero." });
-    expect(createBatchLines({ label: "Batch 11", quantity: 5, startDate: "2026-10-26" }, context(tablets, "Other"))).toMatchObject({ error: expect.stringContaining("Set the order's format") });
+    expect(createBatchLines({ label: "Batch 11", quantity: 5, startDate: "2026-10-26" }, context(tablets, "Other"))).toMatchObject({ error: expect.stringContaining("Set the order's dosage form") });
   });
 });
 

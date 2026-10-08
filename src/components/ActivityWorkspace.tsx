@@ -46,7 +46,7 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, edi
   const day = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
   const required = format === "Other" ? null : ROUTES[format];
   return <section className="production-route"><h3>Production route{line.orderReference ? ` · ${line.orderReference}` : ""}</h3>
-    <p className="route-format">{format === "Other" ? "Format: Other (no fixed route)" : <>Format: <strong>{format}</strong> · {routeLabel(format)}</>}</p>
+    <p className="route-format">{format === "Other" ? "Dosage form: Other (no fixed route)" : <>Dosage form: <strong>{format}</strong> · {routeLabel(format)}</>}</p>
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <table>
       <thead><tr><th scope="col">Process</th><th scope="col">Days</th><th scope="col">Quantity</th><th scope="col">Machine</th></tr></thead>

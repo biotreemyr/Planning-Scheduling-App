@@ -42,7 +42,7 @@ const key = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1)
 export function createBatchLines(batch: NewBatch, context: BatchContext): { lines: PlanLine[] } | { error: string } {
   const { order, format, lines, directory } = context;
   const label = batch.label.trim();
-  if (format === "Other") return { error: "Set the order's format to Capsule, Tablet or Sachet to create batches from its route." };
+  if (format === "Other") return { error: "Set the order's dosage form to Capsule, Tablet or Sachet to create batches from its route." };
   if (!label) return { error: "Enter a batch name." };
   if (lines.some((line) => line.productionOrderId === order.id && line.orderReference?.trim().toLowerCase() === label.toLowerCase())) return { error: `${label} already exists on this order.` };
   if (!Number.isFinite(batch.quantity) || batch.quantity <= 0) return { error: "Quantity must be greater than zero." };

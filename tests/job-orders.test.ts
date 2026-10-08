@@ -139,10 +139,9 @@ describe("job orders", () => {
     expect(warnings[0]).toMatchObject({ kind: "tally", orderId: job.orderId, lineIds: expect.arrayContaining([filling.id]) });
     expect(warnings[0].message).toContain(`job order's pack quantity (blisters, bottles or sachets) is ${job.packQuantity!.toLocaleString("en-GB")} ${job.packUom}`);
   });
-  it("needs the production unit on a new PO when units are set up", () => {
+  it("keeps a PO's production unit optional, but only a unit that exists", () => {
     const base = { id: "new", customerName: "Acme", poNumber: "PO-UNIT-1", productId: state.products[0].id, quantity: 10 };
-    expect(validateOrder(base, state.data.orders, state.products, state.directory.units)).toEqual(["Choose the production unit."]);
-    expect(validateOrder({ ...base, unitId: state.directory.units[0].id }, state.data.orders, state.products, state.directory.units)).toEqual([]);
+    expect(validateOrder(base, state.data.orders, state.products)).toEqual([]);
     const next = structuredClone(state);
     next.data.orders[0].unitId = "no-such-unit";
     expect(() => parseWorkspace(next)).toThrow("Invalid order production unit");
