@@ -228,8 +228,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                     // process's quantity in its own unit (the actual once production completed it).
                     const facts = activityFacts(line, jobOrders, product?.uom);
                     const batch = [facts.batchNumber, facts.jobNumber].filter(Boolean).join(" · ");
-                    // A several-day activity shows its days: "3 days, to 10 Oct".
-                    const detail = line.endDate && line.endDate > line.plannedDate ? `${facts.quantity} · ${lineDays(line)} days, to ${new Date(`${line.endDate}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}` : facts.quantity;
+                    const detail = facts.quantity;
                     return <div key={line.id} data-movable={movable || undefined} data-span-id={lineDays(line) > 1 ? line.id : undefined} className={`plan-grid-item${lineDays(line) > 1 ? " plan-grid-spanning" : ""}${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
                       style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
                       onPointerDown={(event) => pointerDown(event, line, name)} onContextMenu={(event) => { if (drag.current?.touch) event.preventDefault(); }}>
@@ -246,7 +245,6 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                         <small>{detail}</small>
                       </button>
                       {lineDays(line) > 1 ? <div className="plan-span-extension" data-extension-for={line.id} onClick={() => { if (!suppressClick.current) onSelect(line.id); }} title={`${name} · ${batch} · ${detail}`}>
-                        <small>{lineDays(line)} days · until {new Date(`${lineEnd(line)}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</small>
                         {movable && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag to change the last day of ${name}`} /> : null}
                       </div> : movable && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag down to the last day of ${name}`} /> : null}
                     </div>;
