@@ -538,3 +538,8 @@
 @media (max-width: 760px) { .tab-sub { display: none; } }
 .status-mobile-switch { display: none; } @media (max-width: 760px) { .status-mobile-switch { display: inline-flex; } }
 .weighed-fields { align-items: end; } .weighed-count { margin: 0 0 10px; font-size: 14px; }
+/* Compression, coating, capsulation: output weight | UOM | unit weight | actual quantity in one row. */
+.quantity-fields.weighed-row { grid-template-columns: minmax(0, 1.2fr) minmax(70px, 0.7fr) minmax(0, 1.3fr) minmax(0, 1.3fr); grid-column: 1 / -1; }
+@media (max-width: 760px) { .quantity-fields.weighed-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.weighed-count { grid-column: 1 / -1; }
+.link-button { background: none; border: 0; padding: 0; color: var(--accent, #1b6b4a); text-decoration: underline; cursor: pointer; font: inherit; }
