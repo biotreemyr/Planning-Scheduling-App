@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
-import type { Machine, PlanLine, Product, RunSet } from "@/lib/domain/types";
+import type { Machine, PlanLine, Product } from "@/lib/domain/types";
 import type { CompletionInput, CorrectionInput, WipTransfer } from "@/lib/services/productionFlow";
 import { actualUoms, stepOf } from "@/lib/services/processRules";
 import { countFromWeight, unitSizeUom } from "@/lib/services/measurements";
@@ -25,7 +25,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   onSaved?: (message: string) => void;
   // The next process of this batch's route, offered first as the destination.
   nextCalendarId?: string;
-  onProgress: (startedAt: string, notes: string, machineId?: string, sets?: RunSet[]) => string[];
+  onProgress: (startedAt: string, notes: string, machineId?: string) => string[];
   onComplete: (input: CompletionInput) => string[];
   // Present when a completed update may be corrected.
   onCorrect?: (input: CorrectionInput) => string[];
@@ -54,27 +54,6 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const weighing = !!countUom && !!sizeUom;
   const unitLabel = `${unitName} ${sizeUom === "mL" ? "volume" : "weight"}`;
   const counted = weighing && quantityText.trim() !== "" ? countFromWeight(Number(quantityText), chosenUom, Number(unitMg)) : undefined;
-  // Coating runs in several sets: each set's output weight (or volume) and coated tablet weight give
-  // its count, and the actual quantity is their total. Sets entered so far are kept with progress.
-  const multiSet = step === "coating";
-  type SetDraft = { key: number; quantity: string; uom: string; unitSize: string };
-  const [sets, setSets] = useState<SetDraft[]>(() => line.runSets?.length
-    ? line.runSets.map((set, index) => ({ key: index, quantity: String(set.quantity), uom: set.uom, unitSize: String(set.unitSize) }))
-    : [{ key: 0, quantity: "", uom: "kg", unitSize: String(line.unitWeightMg ?? "") }]);
-  const setCount = (set: SetDraft) => set.quantity.trim() === "" ? undefined : countFromWeight(Number(set.quantity), set.uom, Number(set.unitSize));
-  const setsTotal = sets.reduce((sum, set) => sum + (setCount(set) ?? 0), 0);
-  const changeSet = (key: number, change: Partial<SetDraft>) => setSets((current) => current.map((set) => set.key === key ? { ...set, ...change } : set));
-  // The sets keyed in, checked: an empty set is skipped, a half-filled one is an error.
-  function readSets(): RunSet[] | { error: string } {
-    const read: RunSet[] = [];
-    for (const [index, set] of sets.entries()) {
-      if (set.quantity.trim() === "" && set.unitSize.trim() === "") continue;
-      const count = setCount(set);
-      if (count === undefined) return { error: `Set ${index + 1}: enter the output ${unitSizeUom(set.uom) === "mL" ? "volume" : "weight"} and the ${unitName.toLowerCase()} ${unitSizeUom(set.uom) === "mL" ? "volume" : "weight"} (${unitSizeUom(set.uom)} each).` };
-      read.push({ quantity: Number(set.quantity), uom: set.uom, unitSize: Number(set.unitSize), count });
-    }
-    return read;
-  }
   // Where the output can go: the WIP room, any other process of the unit after dispensing (in the
   // unit's process order), or final output. The next process of the batch's route is the default.
   const destinations = d.calendars.filter((calendar) => calendar.unitId === source?.unitId && calendar.id !== source?.id && stepOf(processName(calendar.id)) !== "dispensing");
@@ -89,8 +68,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     <dl className="production-facts">
       <div><dt>Started</dt><dd>{line.startedAt ? display(line.startedAt) : "-"}</dd></div>
       <div><dt>Completed</dt><dd>{display(completedDay)}</dd></div>
-      {line.runSets && line.runSets.length > 1 ? <div><dt>Sets</dt><dd>{line.runSets.map((set, index) => <small key={index} className="run-set-fact">Set {index + 1}: {set.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {set.uom} at {set.unitSize.toLocaleString()} {unitSizeUom(set.uom)} each = {set.count.toLocaleString()} {doneUom}</small>)}</dd></div> : null}
-      <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {doneUom}{line.weighedQuantity !== undefined && !(line.runSets && line.runSets.length > 1) ? <small> · {line.actualUnitVolumeMl ? "measured" : "weighed"} {line.weighedQuantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {line.weighedUom} at {(line.actualUnitVolumeMl ?? line.actualUnitWeightMg)?.toLocaleString()} {line.actualUnitVolumeMl ? "mL" : "mg"} each</small> : null}{doneUom === uom && line.quantity > 0 ? <small> ({((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1)}% of plan)</small> : <small> (planned {line.quantity.toLocaleString()} {uom})</small>}</dd></div>
+      <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {doneUom}{line.weighedQuantity !== undefined ? <small> · {line.actualUnitVolumeMl ? "measured" : "weighed"} {line.weighedQuantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {line.weighedUom} at {(line.actualUnitVolumeMl ?? line.actualUnitWeightMg)?.toLocaleString()} {line.actualUnitVolumeMl ? "mL" : "mg"} each</small> : null}{doneUom === uom && line.quantity > 0 ? <small> ({((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1)}% of plan)</small> : <small> (planned {line.quantity.toLocaleString()} {uom})</small>}</dd></div>
       <div><dt>Machine</dt><dd>{machines.find((machine) => machine.id === machineId)?.name ?? "Not assigned"}</dd></div>
       <div><dt>Output</dt><dd>{outgoing ? `${outgoing.wipRoom ? "WIP room, for " : "Transferred to "}${processName(outgoing.calendarId)} · ${outgoing.receivedAt ? `received by ${outgoing.receivedBy}` : "awaiting receipt"}` : "Final output - no transfer"}</dd></div>
     </dl>
@@ -107,14 +85,10 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       const [kind, destinationId = ""] = String(data.get("destination") ?? "final").split(":");
       const machine = String(data.get("machine") ?? "");
       const reported = String(data.get("yieldUom") ?? "") || uom;
-      const runSets = multiSet ? readSets() : undefined;
-      if (runSets && "error" in runSets) { setErrors([runSets.error]); return; }
-      if (!multiSet && (typed || correcting) && weighing && !(Number(unitMg) > 0)) { setErrors([`Enter the ${unitLabel.toLowerCase()} in ${sizeUom} to convert ${reported} to ${countUom}.`]); return; }
-      const single = runSets?.length === 1 ? runSets[0] : undefined;
-      const weighed = multiSet ? single ? { quantity: single.quantity, uom: single.uom, unitWeightMg: single.unitSize } : undefined
-        : typed && weighing ? { quantity: Number(typed), uom: reported, unitWeightMg: Number(unitMg) } : undefined;
-      const quantityText = multiSet ? runSets!.length ? String(runSets!.reduce((sum, set) => sum + set.count, 0)) : "" : weighed ? String(countFromWeight(weighed.quantity, weighed.uom, weighed.unitWeightMg)) : typed;
-      const output = { quantity: Number(quantityText), uom: weighed || multiSet ? countUom! : reported, ...(weighed ? { weighed } : {}), ...(runSets?.length ? { sets: runSets } : {}), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineId: machine };
+      if ((typed || correcting) && weighing && !(Number(unitMg) > 0)) { setErrors([`Enter the ${unitLabel.toLowerCase()} in ${sizeUom} to convert ${reported} to ${countUom}.`]); return; }
+      const weighed = typed && weighing ? { quantity: Number(typed), uom: reported, unitWeightMg: Number(unitMg) } : undefined;
+      const quantityText = weighed ? String(countFromWeight(weighed.quantity, weighed.uom, weighed.unitWeightMg)) : typed;
+      const output = { quantity: Number(quantityText), uom: weighed ? countUom! : reported, ...(weighed ? { weighed } : {}), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineId: machine };
       const done = (result: string[], message: string) => { setErrors(result); if (!result.length) { if (onSaved) onSaved(message); else setSaved(message); } return result; };
       if (correcting) {
         if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity."]); return; }
@@ -122,7 +96,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
         return;
       }
       const completing = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "complete";
-      if (!completing) { done(onProgress(startedAt, notes, machine, runSets), runSets?.length ? `Progress saved with ${runSets.length} set${runSets.length === 1 ? "" : "s"}.` : "Progress saved."); return; }
+      if (!completing) { done(onProgress(startedAt, notes, machine), "Progress saved."); return; }
       if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity to complete."]); return; }
       const progress = startedAt !== (line.startedAt ?? "") || notes !== (line.productionNotes ?? "") ? onProgress(startedAt || completedDate, notes) : [];
       if (progress.length) { setErrors(progress); return; }
@@ -130,24 +104,11 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     }}>
       <label>Date started<input name="startedAt" type="date" defaultValue={line.startedAt ?? ""} /></label>
       <label>Date completed<input name="completedAt" type="date" defaultValue={completedDay} max={today()} /></label>
-      {multiSet ? <fieldset className="run-sets"><legend>Coating sets</legend>
-        {sets.map((set, index) => { const count = setCount(set); const size = unitSizeUom(set.uom) ?? "mg"; return <div className="run-set" key={set.key} role="group" aria-label={`Set ${index + 1}`}>
-          <strong>Set {index + 1}</strong>
-          <label>Output {size === "mL" ? "volume" : "weight"}<input type="number" min="0" step="any" value={set.quantity} readOnly={handedOver} placeholder="e.g. 120" onChange={(event) => changeSet(set.key, { quantity: event.target.value })} /></label>
-          <label>UOM<select value={set.uom} disabled={handedOver} onChange={(event) => changeSet(set.key, { uom: event.target.value })}>{reportUoms.map((name) => <option key={name}>{name}</option>)}</select></label>
-          <label>{unitName} {size === "mL" ? "volume" : "weight"} ({size} each)<input type="number" min="0" step="any" value={set.unitSize} readOnly={handedOver} placeholder={size === "mL" ? "e.g. 5" : "e.g. 350"} onChange={(event) => changeSet(set.key, { unitSize: event.target.value })} /></label>
-          <span className="run-set-count">{count !== undefined ? <>= <strong>{count.toLocaleString()}</strong> {countUom}</> : <span className="route-muted">= -</span>}</span>
-          {sets.length > 1 && !handedOver ? <button type="button" className="icon-button danger" aria-label={`Remove set ${index + 1}`} title={`Remove set ${index + 1}`} onClick={() => setSets((current) => current.filter((other) => other.key !== set.key))}>×</button> : null}
-        </div>; })}
-        {!handedOver ? <button type="button" className="calendar-button" onClick={() => setSets((current) => [...current, { key: Math.max(0, ...current.map((set) => set.key)) + 1, quantity: "", uom: current.at(-1)?.uom ?? "kg", unitSize: current.at(-1)?.unitSize ?? "" }])}>+ Add set {sets.length + 1}</button> : null}
-        <p className="weighed-count" role="status">Actual quantity: {setsTotal ? <strong>{setsTotal.toLocaleString()} {countUom}</strong> : <span className="route-muted">total of the sets · planned {line.quantity.toLocaleString()} {uom}</span>}{sets.length > 1 && setsTotal ? <small> from {sets.filter((set) => setCount(set) !== undefined).length} sets</small> : null}</p>
-      </fieldset> : <>
       <div className="quantity-fields"><label>{weighing ? `Output ${sizeUom === "mL" ? "volume" : "weight"}` : "Actual quantity"}<input name="quantity" type="number" min="0" step="any" value={quantityText} onChange={(event) => setQuantityText(event.target.value)} readOnly={handedOver} placeholder={weighing ? "e.g. 23.975" : `Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
         <label>UOM<select name="yieldUom" value={chosenUom} onChange={(event) => setChosenUom(event.target.value)} disabled={handedOver}>{[...new Set([...reportUoms, ...(line.completedAt && !counting ? [doneUom] : []), ...(line.weighedUom ? [line.weighedUom] : [])])].map((name) => <option key={name}>{name}</option>)}</select></label>
         {handedOver ? <input type="hidden" name="yieldUom" value={chosenUom} /> : null}</div>
       {weighing ? <div className="quantity-fields weighed-fields"><label>{unitLabel} ({sizeUom} each)<input name="unitWeightMg" type="number" min="0" step="any" required value={unitMg} onChange={(event) => setUnitMg(event.target.value)} readOnly={handedOver} placeholder={sizeUom === "mL" ? "e.g. 5" : "e.g. 350"} /></label>
         <p className="weighed-count" role="status">Actual quantity: {counted !== undefined ? <strong>{counted.toLocaleString()} {countUom}</strong> : <span className="route-muted">worked out from the {sizeUom === "mL" ? "volume" : "weight"} · planned {line.quantity.toLocaleString()} {uom}</span>}</p></div> : null}
-      </>}
       <label>Machine<select name="machine" defaultValue={machineId}>
         <option value="">{machines.length ? "Not assigned" : "No machine set up"}</option>
         {machines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}

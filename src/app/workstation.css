@@ -536,12 +536,3 @@
 @media (max-width: 760px) { .tab-sub { display: none; } }
 .status-mobile-switch { display: none; } @media (max-width: 760px) { .status-mobile-switch { display: inline-flex; } }
 .weighed-fields { align-items: end; } .weighed-count { margin: 0 0 10px; font-size: 14px; }
-/* Coating's sets: one row per set, then the total. */
-.run-sets { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin: 0; display: grid; gap: 8px; }
-.run-sets legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
-.run-set { display: grid; grid-template-columns: 52px minmax(0, 1fr) 88px minmax(0, 1.3fr) minmax(110px, auto) 32px; gap: 8px; align-items: end; }
-.run-set > strong { align-self: center; font-size: 13px; }
-.run-set-count { align-self: center; font-size: 13px; white-space: nowrap; }
-.run-sets > .calendar-button { justify-self: start; }
-.run-set-fact { display: block; }
-@media (max-width: 760px) { .run-set { grid-template-columns: 1fr 1fr; } .run-set > strong { grid-column: 1 / -1; } }

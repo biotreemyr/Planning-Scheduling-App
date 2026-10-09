@@ -84,8 +84,6 @@ export type ProductionPlan = {
   ownerName: string;
 };
 
-export type RunSet = { quantity: number; uom: string; unitSize: number; count: number };
-
 export type PlanLine = {
   calendarId?: string;
   // Production's progress: the day work started (YYYY-MM-DD) and anything noted during it.
@@ -99,9 +97,6 @@ export type PlanLine = {
   // coated tablet / filled capsule production keyed in; yieldQuantity is then the count it gives.
   // Measured by volume (L, mL) instead, the volume of one unit is in actualUnitVolumeMl.
   weighedQuantity?: number; weighedUom?: string; actualUnitWeightMg?: number; actualUnitVolumeMl?: number;
-  // A process run in several sets (coating): each set's output weight or volume, the size of one
-  // unit (mg, or mL for a volume) and the count it gives. The actual quantity is their total.
-  runSets?: RunSet[];
   incomingWipId?: string;
   uom?: string;
   activityType?: string;
