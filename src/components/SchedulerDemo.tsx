@@ -41,7 +41,7 @@ import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
 import { getScheduleReport } from "@/lib/services/reports";
 import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
-import { passTesting, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
+import { recordTest, type TestResult, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, stepOf, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
 type Tab = "planner" | "orders" | "status" | "master" | "reports" | "audit";
@@ -1039,11 +1039,11 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     return [];
   }
   // Status: a finished batch passes testing, then is released with its release quantity.
-  function passJob(id: string) {
-    if (!caps.passTesting) return ["Your access does not include passing testing."];
+  function testJob(id: string, outcome: TestResult) {
+    if (!caps.passTesting) return ["Your access does not include recording testing results."];
     const job = data.jobOrders.find((item) => item.id === id);
     if (!job) return ["This job order no longer exists."];
-    const result = passTesting(job, data.lines, data.transfers, member.name, new Date());
+    const result = recordTest(job, outcome, data.lines, data.transfers, member.name, new Date());
     if ("error" in result) return [result.error];
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
     return [];
@@ -1169,7 +1169,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
       {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
-        section={statusSection} onSection={setStatusSection} onPass={passJob} onRelease={releaseJob} /> : null}
+        section={statusSection} onSection={setStatusSection} onTest={testJob} onRelease={releaseJob} /> : null}
       {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "audit" ? <HistoryPanel refreshKey={activeTab} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>

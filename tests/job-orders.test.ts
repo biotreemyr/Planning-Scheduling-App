@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { batchStatus, orderStatusSummary, passTesting, releaseBatch, releaseQueue, testingQueue, activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { recordTest, testResult, batchStatus, orderStatusSummary, passTesting, releaseBatch, releaseQueue, testingQueue, activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { validateOrder } from "../src/lib/services/orders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
@@ -195,10 +195,10 @@ describe("job orders", () => {
     expect(releaseQueue([job])).toEqual([]);
     const unfinished = state.data.jobOrders.find((item) => !lines.some((line) => line.jobOrderId === item.id && line.completedAt))!;
     expect(passTesting(unfinished, lines, [], "QC", today)).toEqual({ error: `${unfinished.number} has no final output to test yet.` });
-    expect(releaseBatch(job, 1, "boxes", "QA", today)).toEqual({ error: `${job.number} has not passed testing yet.` });
+    expect(releaseBatch(job, 1, "boxes", "QA", today)).toEqual({ error: `${job.number} has not passed testing.` });
 
     const passed = passTesting(job, lines, handed, "QC", today) as JobOrder;
-    expect(passed).toMatchObject({ testedBy: "QC", testedAt: today.toISOString() });
+    expect(passed).toMatchObject({ testResult: "Passed", testedBy: "QC", testedAt: today.toISOString() });
     expect(passTesting(passed, lines, handed, "QC", today)).toMatchObject({ error: expect.stringContaining("already passed") });
     expect(testingQueue([passed], lines, handed)).toEqual([]);
     expect(releaseQueue([passed])).toEqual([passed]);
@@ -215,6 +215,28 @@ describe("job orders", () => {
     // The workspace stores it.
     const next = structuredClone(state);
     next.data.jobOrders = next.data.jobOrders.map((item) => item.id === released.id ? released : item);
+    expect(() => parseWorkspace(next)).not.toThrow();
+  });
+  it("records failed and under-investigation results: failed batches never reach release", () => {
+    const job = state.data.jobOrders.find((item) => state.data.lines.some((line) => line.jobOrderId === item.id && line.activityType === "Packing" && line.completedAt))!;
+    const lines = state.data.lines;
+    const handed = lines.filter((line) => line.jobOrderId === job.id && line.completedAt && line.activityType !== "Packing").map((line) => ({ sourceLineId: line.id }));
+    // Under investigation stays in the testing list until QC passes or fails it.
+    const investigating = recordTest(job, "Under investigation", lines, handed, "QC", today) as JobOrder;
+    expect(batchStatus(investigating, lines, handed)).toBe("Under investigation");
+    expect(testingQueue([investigating], lines, handed)).toEqual([investigating]);
+    expect(releaseQueue([investigating])).toEqual([]);
+    expect(recordTest(investigating, "Under investigation", lines, handed, "QC", today)).toMatchObject({ error: expect.stringContaining("already under investigation") });
+    const failed = recordTest(investigating, "Failed", lines, handed, "QC", today) as JobOrder;
+    expect([testResult(failed), batchStatus(failed, lines, handed)]).toEqual(["Failed", "Failed testing"]);
+    expect(testingQueue([failed], lines, handed)).toEqual([]);
+    expect(releaseQueue([failed])).toEqual([]);
+    expect(recordTest(failed, "Passed", lines, handed, "QC", today)).toMatchObject({ error: expect.stringContaining("already failed") });
+    expect(releaseBatch(failed, 1, "boxes", "QA", today)).toMatchObject({ error: expect.stringContaining("has not passed") });
+    // Older records with only a testing date count as passed.
+    expect(testResult({ testedAt: "2026-10-08T00:00:00Z" })).toBe("Passed");
+    const next = structuredClone(state);
+    next.data.jobOrders = next.data.jobOrders.map((item) => item.id === failed.id ? failed : item);
     expect(() => parseWorkspace(next)).not.toThrow();
   });
 });

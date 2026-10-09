@@ -10,7 +10,7 @@ import { nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix
 import { ProductSelect } from "./ProductSelect";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
-import { PRODUCT_FORMATS, ROUTES, inferFormat, routeLabel, stepLabel, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
+import { PRODUCT_FORMATS, ROUTES, inferFormat, routeLabel, stepLabel, stepOf, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
 
 const displayDate = (value: string) => value.split("-").reverse().join("-");
 const statuses: OrderStatus[] = ["Not scheduled", "Scheduled", "In production", "Completed"];
@@ -260,13 +260,15 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
 
 // "1 awaiting testing · 2/3 passed · 2/3 released · 8,200 boxes released", or "-" before anything is finished.
 function statusText(status: Row["status"]) {
-  if (!status.jobs || (!status.awaitingTesting && !status.passed)) return <span className="route-muted">-</span>;
+  if (!status.jobs || (!status.awaitingTesting && !status.passed && !status.failed && !status.investigating)) return <span className="route-muted">-</span>;
   return <>{status.awaitingTesting ? <span className="badge warning">{status.awaitingTesting} awaiting testing</span> : null}
+    {status.investigating ? <span className="badge warning">{status.investigating} under investigation</span> : null}
+    {status.failed ? <span className="badge danger">{status.failed} failed</span> : null}
     <small>{status.passed}/{status.jobs} passed · {status.released}/{status.jobs} released</small>
     {status.releasedQuantity.map((item) => <small key={item.uom}>{item.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {item.uom} released</small>)}</>;
 }
-const statusPrint = (status: Row["status"]) => !status.jobs || (!status.awaitingTesting && !status.passed) ? "-"
-  : [status.awaitingTesting ? `${status.awaitingTesting} awaiting testing` : "", `${status.passed}/${status.jobs} passed`, `${status.released}/${status.jobs} released`, ...status.releasedQuantity.map((item) => `${item.quantity.toLocaleString()} ${item.uom} released`)].filter(Boolean).join(" · ");
+const statusPrint = (status: Row["status"]) => !status.jobs || (!status.awaitingTesting && !status.passed && !status.failed && !status.investigating) ? "-"
+  : [status.awaitingTesting ? `${status.awaitingTesting} awaiting testing` : "", status.investigating ? `${status.investigating} under investigation` : "", status.failed ? `${status.failed} failed` : "", `${status.passed}/${status.jobs} passed`, `${status.released}/${status.jobs} released`, ...status.releasedQuantity.map((item) => `${item.quantity.toLocaleString()} ${item.uom} released`)].filter(Boolean).join(" · ");
 
 const progressText = (progress: OrderProgress) => !progress.processCount ? "Not scheduled" : progress.status === "Completed" ? `All ${progress.batchCount} batch${progress.batchCount === 1 ? "" : "es"} finished`
   : `${progress.batchesFinished}/${progress.batchCount} batches finished${progress.nextStep ? ` · ${progress.nextStep.batch} at ${progress.nextStep.processName}` : ""}`;
@@ -363,8 +365,9 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
   </>;
   const measure = (value?: { quantity: number; uom: string }) => value ? `${value.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} ${value.uom}` : <span className="route-muted">Not keyed in</span>;
   return <section className="job-orders" aria-label={`Job orders for ${order.poNumber}`}>
-    <div className="order-detail-head"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
-      <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span></div>
+    <details className="order-section">
+    <summary className="order-section-summary"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
+      <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span></summary>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
       <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col" className="numeric">Final output<small>Produced</small></th><th scope="col">Status<small>Testing · release</small></th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
       <tbody>{jobs.map((job) => {
@@ -407,6 +410,8 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
             if (state === "Released") return <><span className="badge success">Released</span><small>{(job.releaseQuantity ?? 0).toLocaleString("en-MY", { maximumFractionDigits: 3 })} {job.releaseUom} · {day(job.releasedAt)}</small><small>Passed {day(job.testedAt)}</small></>;
             if (state === "Awaiting release") return <><span className="badge info">Awaiting release</span><small>Passed testing {day(job.testedAt)}</small></>;
             if (state === "Awaiting testing") return <span className="badge warning">Awaiting testing</span>;
+            if (state === "Under investigation") return <><span className="badge warning">Under investigation</span><small>since {day(job.testedAt)}</small></>;
+            if (state === "Failed testing") return <><span className="badge danger">Failed testing</span><small>{day(job.testedAt)}</small></>;
             return <span className="route-muted">In production</span>;
           })()}</td>
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
@@ -431,6 +436,7 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
     </form> : null}
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
     {notice && !errors.length ? <p role="status">{notice}</p> : null}
+    </details>
   </section>;
 }
 
@@ -454,6 +460,56 @@ function BatchStatus({ cell, uom }: { cell?: BatchCell; uom: string }) {
   </div>;
 }
 
+// The order's summary as its flow, one row per job order: planning (job order, batch number, planned
+// quantity), production (each process of the route), QC testing and QA release.
+function OrderFlow({ order, jobOrders, lines, transfers, directory, format }: { order: PurchaseOrder; jobOrders: JobOrder[]; lines: PlanLine[]; transfers: { sourceLineId: string }[]; directory: CalendarDirectory; format: ProductFormat }) {
+  const jobs = jobsFor(order.id, jobOrders);
+  const today = localDateKey(new Date());
+  const processName = (calendarId?: string) => { const calendar = directory.calendars.find((item) => item.id === calendarId); return directory.processes.find((item) => item.id === calendar?.processId)?.name ?? calendar?.name ?? ""; };
+  // The route's processes in order, using the unit the job order was planned in.
+  const steps = (job: JobOrder) => {
+    const own = linesForJob(job.id, lines);
+    const unitId = directory.calendars.find((item) => own.some((line) => line.calendarId === item.id))?.unitId ?? order.unitId;
+    const route = format === "Other" ? [] : ROUTES[format];
+    const calendars = directory.calendars.filter((item) => { const step = stepOf(processName(item.id)); return item.unitId === unitId && (!route.length || (!!step && route.includes(step))); });
+    return calendars.map((calendar) => ({ name: processName(calendar.id), lines: own.filter((line) => line.calendarId === calendar.id) })).filter((step) => step.lines.length || route.length);
+  };
+  const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
+  if (!jobs.length) return <p className="order-empty">No job orders yet. Key them in below, then plan them on the Planner Board.</p>;
+  return <div className="order-batch-scroll"><table className="order-flow-table">
+    <thead><tr><th scope="col">Planning</th><th scope="col">Production</th><th scope="col">QC testing</th><th scope="col">QA release</th></tr></thead>
+    <tbody>{jobs.map((job) => {
+      const state = batchStatus(job, lines, transfers);
+      const output = finalOutput(job.id, lines, transfers)[0];
+      return <tr key={job.id}>
+        <th scope="row"><strong>{job.number}</strong>
+          <small>Batch no. {job.batchNumber ? <strong>{job.batchNumber}</strong> : "not keyed in"}</small>
+          <small>Planned {amount(job.quantity)} {job.uom}</small></th>
+        <td><ol className="order-flow-steps">{steps(job).map((step) => {
+          const done = step.lines.length > 0 && step.lines.every((line) => line.completedAt);
+          const started = step.lines.some((line) => line.completedAt || line.startedAt);
+          const late = !done && step.lines.some((line) => !line.completedAt && (line.endDate ?? line.plannedDate) < today);
+          const actual = step.lines.reduce((sum, line) => sum + (line.yieldQuantity ?? 0), 0);
+          const uom = step.lines.find((line) => line.completedAt)?.yieldUom ?? step.lines[0]?.uom ?? "";
+          const first = step.lines.map((line) => line.plannedDate).sort()[0];
+          const status = !step.lines.length ? ["Not planned", "neutral"] : done ? ["Done", "success"] : late ? ["Late", "danger"] : started ? ["In progress", "warning"] : ["Planned", "info"];
+          return <li key={step.name}><span className="order-flow-process">{step.name}</span><span className={`badge ${status[1]}`}>{status[0]}</span>
+            <small>{step.lines.some((line) => line.completedAt) ? `${amount(actual)} ${uom}` : started ? `Started ${shortDate(step.lines.map((line) => line.startedAt).filter((value): value is string => !!value).sort()[0] ?? first)}` : first ? shortDate(first) : ""}</small></li>;
+        })}</ol></td>
+        <td>{state === "Awaiting release" || state === "Released" ? <><span className="badge success">Passed</span><small>{job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></>
+          : state === "Failed testing" ? <><span className="badge danger">Failed</span><small>{job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}</small></>
+          : state === "Under investigation" ? <><span className="badge warning">Under investigation</span><small>since {job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}</small></>
+          : state === "Awaiting testing" ? <><span className="badge warning">Awaiting testing</span>{output ? <small>{amount(output.quantity)} {output.uom} finished</small> : null}</>
+          : <span className="route-muted">-</span>}</td>
+        <td>{state === "Released" ? <><span className="badge success">Released</span><small>{amount(job.releaseQuantity ?? 0)} {job.releaseUom}</small><small>{job.releasedAt ? shortDate(job.releasedAt.slice(0, 10)) : ""}{job.releasedBy ? ` · ${job.releasedBy}` : ""}</small></>
+          : state === "Awaiting release" ? <span className="badge info">Awaiting release</span>
+          : state === "Failed testing" ? <span className="route-muted">Not released (failed testing)</span>
+          : <span className="route-muted">-</span>}</td>
+      </tr>;
+    })}</tbody>
+  </table></div>;
+}
+
 function OrderDetail({ printable, order, product, jobOrders, transfers, jobActions, format, warnings, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete, onPrint }: {
   product?: Product; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions;
   format: ProductFormat; warnings: FlowWarning[];
@@ -474,7 +530,11 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
     </div>
     {order.deliveryDate && lastDate > order.deliveryDate ? <p className="order-warning" role="alert">Production is scheduled until {displayDate(lastDate)}, after the expected customer delivery on {displayDate(order.deliveryDate)}.</p> : null}
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
-    {rows.length ? <div className="order-batch-scroll"><table className="order-batch-table">
+    <details className="order-section">
+      <summary className="order-section-summary"><h3>Summary</h3><span className="route-muted">Planning · Production · QC testing · QA release</span></summary>
+      <OrderFlow order={order} jobOrders={jobOrders} lines={lines} transfers={transfers} directory={directory} format={format} />
+    </details>
+    {rows.length ? <details className="order-process-detail"><summary>Process detail by batch</summary><div className="order-batch-scroll"><table className="order-batch-table">
       <thead>
         <tr><th scope="col" rowSpan={2} className="order-batch-process">Process</th><th scope="colgroup" colSpan={matrix.batches.length + 1}>Planned quantity</th></tr>
         <tr>
@@ -493,7 +553,7 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
           </td>
         </tr>;
       })}</tbody>
-    </table></div> : <p className="order-empty">No production has been scheduled against this PO yet. Create its job orders below, then plan each one.</p>}
+    </table></div></details> : null}
     {jobActions ? <JobOrders order={order} product={product} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();

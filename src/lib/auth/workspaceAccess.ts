@@ -52,7 +52,7 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
     // Production keys in the batch number; testing passes the batch; release releases it; the rest is orders.
     const keys = changedKeys(old, job);
     if (only(keys, ["batchNumber", "batchNumberBy", "batchNumberAt"])) need(can.produce || can.editPlan, "enter batch numbers");
-    else if (only(keys, ["testedAt", "testedBy"])) need(can.passTesting, "pass testing");
+    else if (only(keys, ["testedAt", "testedBy", "testResult"])) need(can.passTesting, "record testing results");
     else if (only(keys, ["releaseQuantity", "releaseUom", "releasedAt", "releasedBy"])) need(can.release, "release batches");
     else need(can.editOrders, "edit job orders");
   }

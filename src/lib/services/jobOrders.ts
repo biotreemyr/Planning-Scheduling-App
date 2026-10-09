@@ -25,8 +25,9 @@ export type JobOrder = {
   boxQuantity?: number;
   // Packing's own job order number, e.g. PJO0009; when not keyed in it follows the job order number.
   packingNumber?: string;
-  // Status: when the finished batch passed testing, and when (and how much of it) was released.
-  testedAt?: string; testedBy?: string;
+  // Status: QC's testing result (Passed, Failed or Under investigation) with when and by whom it was
+  // last recorded, and when (and how much of it) QA released. Older records hold testedAt alone: passed.
+  testedAt?: string; testedBy?: string; testResult?: TestResult;
   releaseQuantity?: number; releaseUom?: string; releasedAt?: string; releasedBy?: string;
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
@@ -237,11 +238,18 @@ export function activityFacts(line: PlanLine, jobs: JobOrder[], productUom = "")
 
 // ---- Status: testing and release of finished batches ----
 
-export type BatchStatus = "In production" | "Awaiting testing" | "Awaiting release" | "Released";
+export type TestResult = "Passed" | "Failed" | "Under investigation";
+export const TEST_RESULTS: TestResult[] = ["Passed", "Failed", "Under investigation"];
+export const testResult = (job: Pick<JobOrder, "testResult" | "testedAt">): TestResult | undefined => job.testResult ?? (job.testedAt ? "Passed" : undefined);
+export type BatchStatus = "In production" | "Awaiting testing" | "Under investigation" | "Failed testing" | "Awaiting release" | "Released";
 // A job order is finished once it has final output; it then waits for testing, then for release.
+// A failed batch stops there; one under investigation waits for QC's final result.
 export function batchStatus(job: JobOrder, lines: PlanLine[], transfers: { sourceLineId: string }[]): BatchStatus {
   if (job.releasedAt) return "Released";
-  if (job.testedAt) return "Awaiting release";
+  const result = testResult(job);
+  if (result === "Passed") return "Awaiting release";
+  if (result === "Failed") return "Failed testing";
+  if (result === "Under investigation") return "Under investigation";
   return finalOutput(job.id, lines, transfers).length ? "Awaiting testing" : "In production";
 }
 // The day the batch's final output was last completed (YYYY-MM-DD), for the testing list.
@@ -249,18 +257,25 @@ export function finishedOn(job: JobOrder, lines: PlanLine[], transfers: { source
   const done = linesForJob(job.id, lines).filter((line) => line.completedAt && !transfers.some((transfer) => transfer.sourceLineId === line.id)).map((line) => line.completedAt!).sort();
   return done.at(-1);
 }
-export const testingQueue = (jobs: JobOrder[], lines: PlanLine[], transfers: { sourceLineId: string }[]) => jobs.filter((job) => batchStatus(job, lines, transfers) === "Awaiting testing");
-export const releaseQueue = (jobs: JobOrder[]) => jobs.filter((job) => job.testedAt && !job.releasedAt);
+// Testing lists finished batches with no result yet, and those under investigation.
+export const testingQueue = (jobs: JobOrder[], lines: PlanLine[], transfers: { sourceLineId: string }[]) => jobs.filter((job) => ["Awaiting testing", "Under investigation"].includes(batchStatus(job, lines, transfers)));
+// Release lists only batches that passed; failed ones never reach it.
+export const releaseQueue = (jobs: JobOrder[]) => jobs.filter((job) => testResult(job) === "Passed" && !job.releasedAt);
 
-// Passing testing: once, and only for a finished batch.
-export function passTesting(job: JobOrder, lines: PlanLine[], transfers: { sourceLineId: string }[], by: string, at: Date): JobOrder | { error: string } {
-  if (job.testedAt) return { error: `${job.number} has already passed testing.` };
+// Recording QC's result for a finished batch. Under investigation can later become Passed or
+// Failed; Passed and Failed are final.
+export function recordTest(job: JobOrder, result: TestResult, lines: PlanLine[], transfers: { sourceLineId: string }[], by: string, at: Date): JobOrder | { error: string } {
+  const current = testResult(job);
+  if (current === "Passed" || current === "Failed") return { error: `${job.number} has already ${current === "Passed" ? "passed" : "failed"} testing.` };
+  if (current === result) return { error: `${job.number} is already under investigation.` };
   if (!finalOutput(job.id, lines, transfers).length) return { error: `${job.number} has no final output to test yet.` };
-  return { ...job, testedAt: at.toISOString(), testedBy: by };
+  return { ...job, testResult: result, testedAt: at.toISOString(), testedBy: by };
 }
+// Passing testing (kept for callers that only pass).
+export const passTesting = (job: JobOrder, lines: PlanLine[], transfers: { sourceLineId: string }[], by: string, at: Date) => recordTest(job, "Passed", lines, transfers, by, at);
 // Releasing: a tested batch, once, with the quantity released (the final output unless changed).
 export function releaseBatch(job: JobOrder, quantity: number, uom: string, by: string, at: Date): JobOrder | { error: string } {
-  if (!job.testedAt) return { error: `${job.number} has not passed testing yet.` };
+  if (testResult(job) !== "Passed") return { error: `${job.number} has not passed testing.` };
   if (job.releasedAt) return { error: `${job.number} is already released.` };
   if (!Number.isFinite(quantity) || quantity < 0) return { error: "Release quantity must be zero or more." };
   if (!uom.trim()) return { error: "The release quantity needs its unit." };
@@ -276,7 +291,9 @@ export function orderStatusSummary(orderId: string, jobs: JobOrder[], lines: Pla
   return {
     jobs: own.length,
     awaitingTesting: states.filter((state) => state === "Awaiting testing").length,
-    passed: own.filter((job) => job.testedAt).length,
+    passed: own.filter((job) => testResult(job) === "Passed").length,
+    failed: own.filter((job) => testResult(job) === "Failed").length,
+    investigating: own.filter((job) => testResult(job) === "Under investigation").length,
     released: own.filter((job) => job.releasedAt).length,
     releasedQuantity: [...released].map(([uom, quantity]) => ({ quantity, uom }))
   };

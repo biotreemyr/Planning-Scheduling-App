@@ -556,3 +556,22 @@
 .plan-grid-item.completed .plan-span-extension { background: #ecefed; }
 .plan-span-extension .plan-list-resize { bottom: -3px; }
 .plan-list-resize-range { background: #dcefe5 !important; }
+.status-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; } .danger-button { color: #a12626; border-color: #e3b4b4; }
+/* An order's flow: one row per job order through planning, production, QC testing and QA release. */
+.order-flow-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.order-flow-table th, .order-flow-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.order-flow-table thead th { color: var(--muted); font-weight: 600; background: #eef3f7; }
+.order-flow-table tbody th small, .order-flow-table td small { display: block; color: var(--muted); font-weight: 400; }
+.order-flow-table tbody th { min-width: 150px; }
+.order-flow-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.order-flow-steps li { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-width: 104px; background: #fff; }
+.order-flow-process { display: block; font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+.order-process-detail { margin-top: 4px; } .order-process-detail > summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+/* An order's Summary and Job orders open on click. */
+.order-section { border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; background: #fff; }
+.order-section[open] { padding-bottom: 12px; }
+.order-section-summary { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; cursor: pointer; padding: 10px 0; list-style: none; }
+.order-section-summary::-webkit-details-marker { display: none; }
+.order-section-summary::before { content: "▸"; color: var(--muted); }
+.order-section[open] > .order-section-summary::before { content: "▾"; }
+.order-section-summary h3 { margin: 0; font-size: 15px; }

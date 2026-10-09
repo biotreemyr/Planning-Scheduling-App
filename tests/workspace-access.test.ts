@@ -43,7 +43,7 @@ describe("workspace change review", () => {
     const passed = copy();
     Object.assign(passed.data.jobOrders[0], { testedAt: "2026-10-08T10:00:00.000Z", testedBy: "QC" });
     expect(reviewWorkspaceChange(base, passed, role("testing.edit")).allowed).toBe(true);
-    expect(reviewWorkspaceChange(base, passed, admin).denied).toEqual(["pass testing"]);
+    expect(reviewWorkspaceChange(base, passed, admin).denied).toEqual(["record testing results"]);
     const released = structuredClone(passed);
     Object.assign(released.data.jobOrders[0], { releaseQuantity: 4100, releaseUom: "boxes", releasedAt: "2026-10-09T10:00:00.000Z", releasedBy: "QA" });
     expect(reviewWorkspaceChange(passed, released, role("release.edit")).allowed).toBe(true);
