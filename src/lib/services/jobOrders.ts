@@ -2,6 +2,7 @@ import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
+import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
 
 /**
  * A job order is one batch of one PO item, released to production. Planning keys in its number
@@ -67,7 +68,9 @@ function overOrdered(order: PurchaseOrder, jobs: JobOrder[]) {
  * Check an edited job order: number keyed in and unique, quantity within one allowable batch and
  * the PO item's quantity, batch number unique. Returns the saved job order or an error.
  */
-export function updateJobOrder(next: JobOrder, jobs: JobOrder[], orders: PurchaseOrder[], products: Product[]): JobOrder | { error: string } {
+// routeFor: the PO item's route from Admin, so only figures its processes use are required.
+type RouteFor = (order: PurchaseOrder) => { name: string; settings: { planned: PlannedSource } }[] | undefined;
+export function updateJobOrder(next: JobOrder, jobs: JobOrder[], orders: PurchaseOrder[], products: Product[], routeFor?: RouteFor): JobOrder | { error: string } {
   const number = next.number.trim();
   if (!number) return { error: "Key in the job order number." };
   if (number.length > 60) return { error: "Keep the job order number to 60 characters." };
@@ -78,7 +81,7 @@ export function updateJobOrder(next: JobOrder, jobs: JobOrder[], orders: Purchas
   if (!next.uom.trim()) return { error: "Choose a UOM." };
   const packIssue = measureProblem(next) || packProblem(next);
   if (packIssue) return { error: packIssue };
-  const missing = missingQuantity(next, formatOf(order, products));
+  const missing = missingQuantity(next, formatOf(order, products), routeFor?.(order));
   if (missing) return { error: missing };
   const allowable = products.find((product) => product.id === order.productId)?.batchQuantity;
   if (allowable && next.uom === order.uom && next.quantity > allowable) return { error: `One job order holds at most the allowable batch quantity of ${allowable.toLocaleString()} ${order.uom}.` };
@@ -110,28 +113,35 @@ export const findJobByNumber = (value: string, jobs: JobOrder[]) => {
 export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number; batchVolumeL?: number; packQuantity?: number; packUom?: string; packSize?: number; boxQuantity?: number; packingNumber?: string };
 
 export type ProcessQuantity = { quantity: number; uom: string };
+// A built-in step name stands for the job order figure it plans with (dispensing: batch size...).
+const SOURCE_OF_STEP: Record<RouteStepName, PlannedSource> = {
+  dispensing: "batchSize", granulation: "batchSize", tableting: "batchQuantity", coating: "batchQuantity", capsulation: "batchQuantity", filling: "packQuantity", packing: "boxes"
+};
+const sourceOf = (value: PlannedSource | RouteStepName): PlannedSource => value in SOURCE_OF_STEP ? SOURCE_OF_STEP[value as RouteStepName] : value as PlannedSource;
 /**
- * The theoretical quantity a process of this job order makes, as keyed in on the job order:
- * dispensing its batch size (kg or L), compression, coating and capsulation its batch quantity
- * (tablets or capsules), filling its pack quantity (blisters, bottles, sachets), packing its boxes.
+ * The theoretical quantity a process of this job order makes, from the job order figure its
+ * process plans with (set per process in Admin): the batch size (kg or L), the batch quantity
+ * (tablets or capsules), the pack quantity (blisters, bottles, sachets) or the boxes.
  */
-export function processQuantity(job: JobOrder, step: RouteStepName): ProcessQuantity | undefined {
-  // Granulation works the dispensed batch, so its figure is the batch size too.
-  if (step === "dispensing" || step === "granulation") return job.batchSizeKg ? { quantity: job.batchSizeKg, uom: "kg" } : job.batchVolumeL ? { quantity: job.batchVolumeL, uom: "L" } : undefined;
-  if (step === "filling") return job.packQuantity && job.packUom ? { quantity: job.packQuantity, uom: job.packUom } : undefined;
-  if (step === "packing") return job.boxQuantity ? { quantity: job.boxQuantity, uom: "boxes" } : undefined;
+export function processQuantity(job: JobOrder, source: PlannedSource | RouteStepName): ProcessQuantity | undefined {
+  const from = sourceOf(source);
+  if (from === "batchSize") return job.batchSizeKg ? { quantity: job.batchSizeKg, uom: "kg" } : job.batchVolumeL ? { quantity: job.batchVolumeL, uom: "L" } : undefined;
+  if (from === "packQuantity") return job.packQuantity && job.packUom ? { quantity: job.packQuantity, uom: job.packUom } : undefined;
+  if (from === "boxes") return job.boxQuantity ? { quantity: job.boxQuantity, uom: "boxes" } : undefined;
+  if (from === "none") return undefined;
   return { quantity: job.quantity, uom: job.uom };
 }
-const MEASURE_NAME: Record<RouteStepName, string> = {
-  dispensing: "batch size (kg or L)", granulation: "batch size (kg or L)", tableting: "batch quantity", coating: "batch quantity", capsulation: "batch quantity",
-  filling: "pack quantity (blisters, bottles or sachets)", packing: "total pack quantity (boxes)"
+const MEASURE_NAME: Record<PlannedSource, string> = {
+  batchSize: "batch size (kg or L)", batchQuantity: "batch quantity", packQuantity: "pack quantity (blisters, bottles or sachets)", boxes: "total pack quantity (boxes)", none: "quantity"
 };
-export const measureName = (step: RouteStepName) => MEASURE_NAME[step];
-// The first process of the route whose quantity the job order is missing, as a message.
-export function missingQuantity(job: JobOrder, format: ProductFormat) {
+export const measureName = (source: PlannedSource | RouteStepName) => MEASURE_NAME[sourceOf(source)];
+// The first process of the route whose quantity the job order is missing, as a message. The route
+// is the unit's (from Admin); without one, the built-in route of the dosage form.
+export function missingQuantity(job: JobOrder, format: ProductFormat, route?: { name: string; settings: { planned: PlannedSource } }[]) {
   if (format === "Other") return "";
-  const step = ROUTES[format].find((item) => !processQuantity(job, item));
-  return step ? `Key in the ${measureName(step)} for ${stepLabel(step)}.` : "";
+  const steps = route ?? ROUTES[format].map((step) => ({ name: stepLabel(step), settings: { planned: SOURCE_OF_STEP[step] } }));
+  const missing = steps.find((item) => item.settings.planned !== "none" && !processQuantity(job, item.settings.planned));
+  return missing ? `Key in the ${measureName(missing.settings.planned)} for ${missing.name}.` : "";
 }
 const formatOf = (order: PurchaseOrder, products: Product[]) => order.format ?? inferFormat(products.find((product) => product.id === order.productId));
 
@@ -164,7 +174,7 @@ const packFields = (job: Pick<ManualJob, "packQuantity" | "packUom" | "packSize"
  * A job order keyed in by its number while planning, for job orders numbered outside the
  * scheduler. It still belongs to one PO item and holds no more than one allowable batch.
  */
-export function createManualJobOrder(input: ManualJob, orders: PurchaseOrder[], jobs: JobOrder[], products: Product[], context: { today: Date; userName: string; newId: () => string }): JobOrder | { error: string } {
+export function createManualJobOrder(input: ManualJob, orders: PurchaseOrder[], jobs: JobOrder[], products: Product[], context: { today: Date; userName: string; newId: () => string; routeFor?: RouteFor }): JobOrder | { error: string } {
   const number = input.number.trim();
   if (!number) return { error: "Key in the job order number." };
   if (number.length > 60) return { error: "Keep the job order number to 60 characters." };
@@ -180,7 +190,7 @@ export function createManualJobOrder(input: ManualJob, orders: PurchaseOrder[], 
     id: context.newId(), number, orderId: order.id, sequence: Math.max(0, ...jobsFor(order.id, jobs).map((job) => job.sequence)) + 1,
     quantity: input.quantity, uom: input.uom, ...packFields({ ...input, number }), createdAt: context.today.toISOString(), createdBy: context.userName
   };
-  const missing = missingQuantity(created, formatOf(order, products)) || packingNumberProblem(created, jobs);
+  const missing = missingQuantity(created, formatOf(order, products), context.routeFor?.(order)) || packingNumberProblem(created, jobs);
   if (missing) return { error: missing };
   const over = overOrdered(order, [...jobs, created]);
   return over ? { error: over } : created;
@@ -193,22 +203,20 @@ const amount = (value: number) => Number(value.toPrecision(12)).toLocaleString("
  * (one day or several) add up to the job order's figure for it, in its unit. Warns, never blocks.
  */
 export function checkTally(lines: PlanLine[], jobs: JobOrder[], directory: CalendarDirectory): FlowWarning[] {
-  const stepFor = (line: PlanLine) => {
-    const calendar = directory.calendars.find((item) => item.id === line.calendarId);
-    return stepOf(directory.processes.find((item) => item.id === calendar?.processId)?.name ?? calendar?.name ?? line.activityType ?? "");
-  };
+  // Each process plans with the job order figure set for it in Admin.
   return jobs.flatMap((job) => {
-    const steps = new Map<RouteStepName, PlanLine[]>();
-    for (const line of linesForJob(job.id, lines)) { const step = stepFor(line); if (step) steps.set(step, [...steps.get(step) ?? [], line]); }
-    return [...steps].flatMap(([step, items]) => {
-      const expected = processQuantity(job, step);
+    const byProcess = new Map<string, PlanLine[]>();
+    for (const line of linesForJob(job.id, lines)) if (line.calendarId) byProcess.set(line.calendarId, [...byProcess.get(line.calendarId) ?? [], line]);
+    return [...byProcess].flatMap(([calendarId, items]) => {
+      const source = calendarSettings(directory, calendarId).planned;
+      const expected = processQuantity(job, source);
       if (!expected) return [];
       const planned = items.reduce((sum, line) => sum + (line.uom === expected.uom ? line.quantity : 0), 0);
       const otherUnit = items.some((line) => line.uom !== expected.uom);
       if (!otherUnit && Math.abs(planned - expected.quantity) < 1e-9 * Math.max(1, expected.quantity)) return [];
       const batch = job.batchNumber ? `${job.number} (batch ${job.batchNumber})` : job.number;
       return [{ kind: "tally" as const, lineIds: items.map((line) => line.id), orderId: job.orderId, batch: job.number,
-        message: `${batch}: ${stepLabel(step)} is planned for ${otherUnit ? items.map((line) => `${amount(line.quantity)} ${line.uom ?? ""}`.trim()).join(" + ") : `${amount(planned)} ${expected.uom}`} but the job order's ${measureName(step)} is ${amount(expected.quantity)} ${expected.uom}.` }];
+        message: `${batch}: ${calendarProcessName(directory, calendarId)} is planned for ${otherUnit ? items.map((line) => `${amount(line.quantity)} ${line.uom ?? ""}`.trim()).join(" + ") : `${amount(planned)} ${expected.uom}`} but the job order's ${measureName(source)} is ${amount(expected.quantity)} ${expected.uom}.` }];
     });
   });
 }

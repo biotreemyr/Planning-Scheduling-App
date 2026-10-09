@@ -3,7 +3,8 @@ import { useState } from "react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Machine, PlanLine, Product } from "@/lib/domain/types";
 import type { CompletionInput, CorrectionInput, WipTransfer } from "@/lib/services/productionFlow";
-import { actualUoms, stepOf } from "@/lib/services/processRules";
+import { stepOf } from "@/lib/services/processRules";
+import { REPORT_UOMS, calendarSettings } from "@/lib/services/processSetup";
 import { countFromWeight, unitSizeUom } from "@/lib/services/measurements";
 
 // Today as YYYY-MM-DD in local time.
@@ -37,15 +38,17 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const source = d.calendars.find((calendar) => calendar.id === line.calendarId);
   const processName = (id?: string) => d.processes.find((process) => process.id === d.calendars.find((calendar) => calendar.id === id)?.processId)?.name ?? d.calendars.find((calendar) => calendar.id === id)?.name ?? "";
   // The units this process reports in; the planned unit first when it is one of them.
-  const reportUoms = actualUoms(processName(line.calendarId), uom);
+  // What production enters for this process comes from its settings in Admin.
+  const settings = calendarSettings(d, line.calendarId);
+  const reportUoms = [...new Set([...REPORT_UOMS[settings.report], ...(settings.report === "measure" && !REPORT_UOMS.measure.includes(uom) && uom ? [uom] : [])])];
   const doneUom = line.yieldUom ?? uom;
-  const counting = ["capsulation", "tableting", "coating"].includes(stepOf(processName(line.calendarId)) ?? "");
+  const counting = settings.report === "count";
   const defaultUom = counting ? line.weighedUom ?? "kg" : line.completedAt ? doneUom : reportUoms.includes(uom) ? uom : reportUoms[0] ?? uom;
   // Compression, coating and capsulation count tablets or capsules; output weighed in kg or g is
   // converted with the weight of one compressed/coated tablet or filled capsule.
   const step = stepOf(processName(line.calendarId));
-  const countUom = step === "capsulation" ? "capsules" : step === "tableting" || step === "coating" ? "tablets" : undefined;
-  const unitName = step === "capsulation" ? "Filled capsule" : step === "coating" ? "Coated tablet" : "Compressed tablet";
+  const countUom = !counting ? undefined : ["tablets", "capsules"].includes(uom) ? uom : step === "capsulation" ? "capsules" : "tablets";
+  const unitName = step === "capsulation" ? "Filled capsule" : step === "coating" ? "Coated tablet" : step === "tableting" ? "Compressed tablet" : countUom === "capsules" ? "Capsule" : "Tablet";
   const [chosenUom, setChosenUom] = useState(defaultUom);
   const [quantityText, setQuantityText] = useState(line.completedAt ? String((counting ? line.weighedQuantity : line.yieldQuantity) ?? "") : "");
   const [unitMg, setUnitMg] = useState(String(line.actualUnitWeightMg ?? line.actualUnitVolumeMl ?? line.unitWeightMg ?? ""));

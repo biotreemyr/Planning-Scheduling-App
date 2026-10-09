@@ -10,7 +10,8 @@ import { type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, po
 import { ProductSelect } from "./ProductSelect";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
-import { PRODUCT_FORMATS, ROUTES, inferFormat, routeLabel, stepLabel, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
+import { PRODUCT_FORMATS, inferFormat, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
+import { unitRoute, unitRouteLabel } from "@/lib/services/processSetup";
 
 const displayDate = (value: string) => value.split("-").reverse().join("-");
 const statuses: OrderStatus[] = ["Not scheduled", "Scheduled", "In production", "Completed"];
@@ -42,7 +43,7 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
   const newOrderButton = canAdd ? <button type="button" className="primary-button" onClick={() => { setFormVersion((value) => value + 1); setAdded(""); dialog.current?.showModal(); }}><Plus size={17} />New order</button> : null;
   return <section className="orders-layout">
     {canAdd ? <dialog ref={dialog} className="activity-dialog order-dialog" aria-labelledby="new-order-title">
-      <NewOrderForm key={formVersion} orders={orders} customers={customers} products={products} units={directory.units} userName={userName} onAdd={onAdd}
+      <NewOrderForm key={formVersion} orders={orders} customers={customers} products={products} units={directory.units} directory={directory} userName={userName} onAdd={onAdd}
         onClose={() => dialog.current?.close()} onDone={(message) => { setAdded(message); dialog.current?.close(); }} />
     </dialog> : null}
     {added ? <p role="status" className="calendar-notice">{added}</p> : null}
@@ -55,7 +56,8 @@ const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", u
 
 // One PO keyed in once: customer and PO number, then as many product line items as it lists.
 // Typing an existing PO number of the same customer adds further items to that PO.
-function NewOrderForm({ orders, products, customers, units, userName, onAdd, onClose, onDone }: {
+function NewOrderForm({ orders, products, customers, units, directory, userName, onAdd, onClose, onDone }: {
+  directory: CalendarDirectory;
   orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; units: CalendarDirectory["units"]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer) => string[];
   onClose: () => void; onDone: (message: string) => void;
 }) {
@@ -119,10 +121,10 @@ function NewOrderForm({ orders, products, customers, units, userName, onAdd, onC
             {items.length > 1 ? <button type="button" className="icon-button" aria-label={`Remove item ${firstItem + index}`} title="Remove this item" onClick={() => setItems((current) => current.filter((other) => other.key !== item.key))}><Trash2 size={15} /></button> : null}
           </div>
           <ProductSelect products={products} name={`product-${item.key}`} value={item.productId} onChange={(id) => update(item.key, { productId: id, uom: "", format: "" })} />
-          <label title={routeLabel(format)}>Dosage form<select value={format} onChange={(event) => update(item.key, { format: event.target.value as ProductFormat })}>{PRODUCT_FORMATS.map((option) => <option key={option}>{option}</option>)}</select></label>
+          <label title={unitRouteLabel(directory, units[0]?.id, format)}>Dosage form<select value={format} onChange={(event) => update(item.key, { format: event.target.value as ProductFormat })}>{PRODUCT_FORMATS.map((option) => <option key={option}>{option}</option>)}</select></label>
           <div className="quantity-fields"><label>Quantity<input name={`quantity-${item.key}`} type="number" min="1" step="any" required /></label>
             <label>UOM<select value={item.uom || productUom} onChange={(event) => update(item.key, { uom: event.target.value })} required>{!productUom && !item.uom ? <option value="">Select</option> : null}{[...new Set([productUom, ...uoms.filter((unit) => unit.active).map((unit) => unit.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select></label></div>
-          <small className="route-muted">Route: {routeLabel(format)}</small>
+          <small className="route-muted">Route: {unitRouteLabel(directory, units[0]?.id, format)}</small>
         </div>;
       })}
       <button type="button" className="calendar-button" onClick={() => setItems((current) => [...current, draftItem()])}><Plus size={16} />Add another product</button>
@@ -170,7 +172,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
     { key: "po", label: "PO number", required: true, sort: (row) => `${row.order.poNumber}#${String(poItem(row.order)).padStart(4, "0")}`, cell: (row) => <><strong>{row.order.poNumber}</strong>{poItems(row.order.poNumber, orders).length > 1 ? <small>Item {poItem(row.order)} of {poItems(row.order.poNumber, orders).length}</small> : null}</>, filter: { kind: "text", text: (row) => row.order.poNumber } },
     { key: "received", label: "PO received", sort: (row) => row.order.receivedDate ?? "", cell: (row) => row.order.receivedDate ? displayDate(row.order.receivedDate) : <span className="route-muted">Not set</span> },
     { key: "product", label: "Product", sort: (row) => row.product?.name ?? "", cell: (row) => row.product?.name ?? "Unknown product", filter: { kind: "text", text: (row) => `${row.product?.name ?? ""} ${row.product?.sku ?? ""}` } },
-    { key: "format", label: "Dosage form", sort: (row) => row.format, cell: (row) => <span title={routeLabel(row.format)}>{row.format}</span>, filter: { kind: "select", options: [...PRODUCT_FORMATS], value: (row) => row.format } },
+    { key: "format", label: "Dosage form", sort: (row) => row.format, cell: (row) => <span title={unitRouteLabel(directory, row.order.unitId ?? directory.units[0]?.id, row.format)}>{row.format}</span>, filter: { kind: "select", options: [...PRODUCT_FORMATS], value: (row) => row.format } },
     { key: "quantity", label: "Order qty", numeric: true, sort: (row) => row.order.quantity, cell: (row) => `${row.order.quantity.toLocaleString()} ${row.order.uom}` },
     { key: "progress", label: "Progress", sort: (row) => row.progress.batchCount ? row.progress.batchesFinished / row.progress.batchCount : -1, cell: (row) => <>
       <div className="order-steps" role="img" aria-label={row.rows.map((item) => `${item.processName} ${Math.round(item.completedCount / item.lineCount * 100)}%`).join(", ")}>
@@ -322,7 +324,7 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
 // every process makes. Planning them happens on the Planner Board.
 const FILL_UOMS = ["blisters", "bottles", "sachets"];
 const COUNT_UOMS = ["tablets", "capsules"];
-function JobOrders({ order, product, format, jobOrders, transfers, lines, actions }: { order: PurchaseOrder; product?: Product; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
+function JobOrders({ order, product, format, jobOrders, transfers, lines, actions, directory }: { directory: CalendarDirectory; order: PurchaseOrder; product?: Product; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
@@ -337,8 +339,8 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
   const number = (value: FormDataEntryValue | null) => { const text = String(value ?? "").trim(); return text ? Number(text) : undefined; };
   const options = (list: string[], current?: string) => [...new Set([current ?? "", ...list].filter(Boolean))];
   // Which processes of this dosage form use each figure, so the form says where it goes.
-  const route = format === "Other" ? [] : ROUTES[format];
-  const countSteps = route.filter((step) => step === "tableting" || step === "coating" || step === "capsulation").map(stepLabel).join(", ");
+  // The processes that plan with the batch quantity, from the unit's route in Admin.
+  const countSteps = unitRoute(directory, order.unitId ?? directory.units[0]?.id, format).filter((entry) => entry.settings.planned === "batchQuantity").map((entry) => entry.name).join(", ");
   // The fields shared by adding and editing.
   function readJob(data: FormData) {
     const quantity = Number(data.get("quantity")), uom = String(data.get("uom") ?? order.uom);
@@ -508,7 +510,7 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
       <summary className="order-section-summary"><h3>Progress</h3><span className="route-muted">Planning · Production · QC testing · QA release</span></summary>
       <OrderFlow order={order} jobOrders={jobOrders} lines={lines} transfers={transfers} matrix={matrix} />
     </details>
-    {jobActions ? <JobOrders order={order} product={product} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
+    {jobActions ? <JobOrders directory={directory} order={order} product={product} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);

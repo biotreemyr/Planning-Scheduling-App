@@ -2,6 +2,7 @@ import type { CalendarDirectory, UnitCalendar } from "@/lib/domain/calendarAcces
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { ProductFormat } from "./processRules";
 import { lineDays, lineEnd } from "./scheduling";
+import { calendarSettings, type ProcessSettings } from "./processSetup";
 
 // One product line item of a customer purchase order. A PO with several products is several of
 // these sharing a PO number, numbered by `item`. Plan lines link to one through `productionOrderId`.
@@ -95,7 +96,7 @@ export function orderProcessRows(order: PurchaseOrder, lines: PlanLine[], direct
   });
 }
 
-export type RouteStep = { calendar: UnitCalendar; processName: string; lines: PlanLine[] };
+export type RouteStep = { calendar: UnitCalendar; processName: string; lines: PlanLine[]; settings: ProcessSettings };
 
 // The batch's path through every process of its unit; steps it has not been planned into have no lines.
 export function batchRoute(line: PlanLine, lines: PlanLine[], directory: CalendarDirectory): RouteStep[] {
@@ -103,7 +104,7 @@ export function batchRoute(line: PlanLine, lines: PlanLine[], directory: Calenda
   const sameBatch = (other: PlanLine) => other.id === line.id || (!!line.orderReference?.trim() && other.productId === line.productId &&
     other.orderReference?.trim() === line.orderReference.trim() && other.productionOrderId === line.productionOrderId);
   return directory.calendars.filter((calendar) => calendar.unitId === unitId).map((calendar) => ({
-    calendar, processName: directory.processes.find((item) => item.id === calendar.processId)?.name ?? calendar.name,
+    calendar, processName: directory.processes.find((item) => item.id === calendar.processId)?.name ?? calendar.name, settings: calendarSettings(directory, calendar.id),
     lines: lines.filter((other) => other.calendarId === calendar.id && sameBatch(other)).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate))
   }));
 }

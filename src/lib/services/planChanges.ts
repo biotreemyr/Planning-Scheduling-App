@@ -4,6 +4,7 @@ import { daysBetween, lineEnd, shiftTimestamp } from "./scheduling";
 import { batchKilograms } from "./measurements";
 import type { PurchaseOrder } from "./orders";
 import { OPTIONAL_STEPS, ROUTES, routeLabel, stepLabel, stepOf, type ProductFormat, type RouteStepName } from "./processRules";
+import type { PlannedSource, ProcessSettings } from "./processSetup";
 
 /**
  * Move an activity to a new date. Its open machine bookings move by the same number of
@@ -100,22 +101,30 @@ export function createBatchLines(batch: NewBatch, context: BatchContext): { line
   }) };
 }
 
-export type RouteDraft = { step: RouteStepName; label: string; calendarId?: string; processName?: string; date: string };
+// key: the step (built-in route) or the calendar (a unit's route from Admin); planned: the job order
+// figure the process plans with.
+export type RouteDraft = { step?: RouteStepName; key: string; label: string; calendarId?: string; processName?: string; date: string; planned?: PlannedSource; optional?: boolean };
 
 /**
  * The format's route as one row per process, for planning a job order in one go: the process in
  * this unit that does each step (if any) and a default date, one working day after the other
  * from the start date (a weekend start moves to Monday).
  */
-export function routeDrafts(format: ProductFormat, calendars: { id: string; name: string }[], processName: (calendarId: string) => string, startDate: string): RouteDraft[] {
+export function routeDrafts(format: ProductFormat, calendars: { id: string; name: string }[], processName: (calendarId: string) => string, startDate: string, settingsOf?: (calendarId: string) => ProcessSettings): RouteDraft[] {
   if (format === "Other" || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return [];
   const day = new Date(`${startDate}T12:00:00`);
   if (day.getDay() === 0 || day.getDay() === 6) nextWorkday(day);
+  // With the unit's process settings: its processes used for this dosage form, in the unit's order.
+  if (settingsOf) return calendars.filter((calendar) => settingsOf(calendar.id).forms.includes(format)).map((calendar, index) => {
+    if (index) nextWorkday(day);
+    const settings = settingsOf(calendar.id);
+    return { key: calendar.id, label: processName(calendar.id), calendarId: calendar.id, processName: processName(calendar.id), date: key(day), planned: settings.planned, optional: settings.optional };
+  });
   // An optional step (granulation) the unit does not have is left out and takes no day.
   const steps = ROUTES[format].filter((step) => !OPTIONAL_STEPS.has(step) || calendars.some((item) => stepOf(processName(item.id)) === step));
   return steps.map((step, index) => {
     if (index) nextWorkday(day);
     const calendar = calendars.find((item) => stepOf(processName(item.id)) === step);
-    return { step, label: stepLabel(step), ...(calendar ? { calendarId: calendar.id, processName: processName(calendar.id) } : {}), date: key(day) };
+    return { step, key: step, label: stepLabel(step), ...(calendar ? { calendarId: calendar.id, processName: processName(calendar.id) } : {}), date: key(day) };
   });
 }

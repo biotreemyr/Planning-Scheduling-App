@@ -2,6 +2,7 @@ import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product, ScheduleEntry } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
 import { lineEnd } from "./scheduling";
+import { unitRoute, unitRouteLabel } from "./processSetup";
 
 export const PRODUCT_FORMATS = ["Capsule", "Tablet", "Sachet", "Other"] as const;
 export type ProductFormat = (typeof PRODUCT_FORMATS)[number];
@@ -86,35 +87,37 @@ export function checkProcessFlow(lines: PlanLine[], entries: ScheduleEntry[], or
     const order = orders.find((item) => item.id === first.productionOrderId);
     const format = order?.format ?? inferFormat(products.find((item) => item.id === first.productId));
     if (format === "Other") continue;
-    const route = ROUTES[format];
+    // The route is the unit's processes used for this dosage form, in the unit's order (Admin).
+    const unitId = directory.calendars.find((item) => item.id === first.calendarId)?.unitId;
+    const route = unitRoute(directory, unitId, format);
+    const label = unitRouteLabel(directory, unitId, format);
     const batch = first.orderReference?.trim() || undefined;
     const prefix = batch ? `${order ? `${order.poNumber} ` : ""}${batch}: ` : "";
-    const byStep = new Map<Step, PlanLine[]>();
+    const byStep = new Map<string, PlanLine[]>();
     const outside = new Map<string, PlanLine[]>();
     for (const line of group) {
-      const step = stepOf(processName(line));
-      if (!step || !route.includes(step)) { outside.set(processName(line), [...outside.get(processName(line)) ?? [], line]); continue; }
-      byStep.set(step, [...byStep.get(step) ?? [], line]);
+      if (!route.some((entry) => entry.calendar.id === line.calendarId)) { outside.set(processName(line), [...outside.get(processName(line)) ?? [], line]); continue; }
+      byStep.set(line.calendarId!, [...byStep.get(line.calendarId!) ?? [], line]);
     }
     // One warning per wrong process per batch, however many days it runs.
-    for (const [name, wrong] of outside) warnings.push({ kind: "route", lineIds: wrong.map((line) => line.id), orderId: order?.id, batch, message: `${prefix}${name || "This process"} is not part of the ${format.toLowerCase()} route (${routeLabel(format)}).` });
-    const present = route.filter((step) => byStep.has(step));
+    for (const [name, wrong] of outside) warnings.push({ kind: "route", lineIds: wrong.map((line) => line.id), orderId: order?.id, batch, message: `${prefix}${name || "This process"} is not part of the ${format.toLowerCase()} route (${label}).` });
+    const present = route.filter((entry) => byStep.has(entry.calendar.id));
     if (!present.length) continue;
     // A step's days run from its first planned day to the last day of its longest activity.
-    const span = (step: Step) => { const lines = byStep.get(step)!; return { first: lines.map((line) => line.plannedDate).sort()[0], last: lines.map(lineEnd).sort().at(-1)! }; };
+    const span = (calendarId: string) => { const lines = byStep.get(calendarId)!; return { first: lines.map((line) => line.plannedDate).sort()[0], last: lines.map(lineEnd).sort().at(-1)! }; };
     // Required steps skipped before the furthest planned step.
     const furthest = route.indexOf(present.at(-1)!);
-    route.slice(0, furthest).forEach((step, index) => {
-      if (byStep.has(step) || OPTIONAL_STEPS.has(step)) return;
-      const next = route.slice(index + 1).find((item) => byStep.has(item))!;
-      warnings.push({ kind: "missing", lineIds: byStep.get(next)!.map((line) => line.id), orderId: order?.id, batch, message: `${prefix}${STEP_LABEL[step]} is not planned before ${STEP_LABEL[next]}.` });
+    route.slice(0, furthest).forEach((entry, index) => {
+      if (byStep.has(entry.calendar.id) || entry.settings.optional) return;
+      const next = route.slice(index + 1).find((item) => byStep.has(item.calendar.id))!;
+      warnings.push({ kind: "missing", lineIds: byStep.get(next.calendar.id)!.map((line) => line.id), orderId: order?.id, batch, message: `${prefix}${entry.name} is not planned before ${next.name}.` });
     });
     // Each planned step must not start before the previous planned step finishes (same day is allowed).
-    present.slice(1).forEach((step, index) => {
+    present.slice(1).forEach((entry, index) => {
       const previous = present[index];
-      const before = span(previous), current = span(step);
-      if (current.first < before.last) warnings.push({ kind: "sequence", lineIds: byStep.get(step)!.filter((line) => line.plannedDate < before.last).map((line) => line.id), orderId: order?.id, batch,
-        message: `${prefix}${STEP_LABEL[step]} on ${pretty(current.first)} is before ${STEP_LABEL[previous]} finishes on ${pretty(before.last)}.` });
+      const before = span(previous.calendar.id), current = span(entry.calendar.id);
+      if (current.first < before.last) warnings.push({ kind: "sequence", lineIds: byStep.get(entry.calendar.id)!.filter((line) => line.plannedDate < before.last).map((line) => line.id), orderId: order?.id, batch,
+        message: `${prefix}${entry.name} on ${pretty(current.first)} is before ${previous.name} finishes on ${pretty(before.last)}.` });
     });
   }
   for (const entry of entries) {

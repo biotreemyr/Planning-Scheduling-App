@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
 import { orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
-import { ROUTES, routeLabel, stepOf, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
+import type { FlowWarning, ProductFormat } from "@/lib/services/processRules";
 import { OrderBadge } from "./OrderBadge";
 import type { JobOrder } from "@/lib/services/jobOrders";
 
@@ -44,7 +44,6 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, edi
 }) {
   const [messages, setMessages] = useState<Record<string, string[]>>({});
   const day = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-  const required = format === "Other" ? null : ROUTES[format];
   return <section className="production-route"><h3>Production route{line.orderReference ? ` · ${line.orderReference}` : ""}</h3>
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <table>
@@ -56,8 +55,8 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, edi
         const open = step.lines.filter((item) => !item.completedAt);
         const done = step.lines.length > 0 && !open.length;
         const current = step.lines.some((item) => item.id === line.id);
-        const stepKey = stepOf(step.processName);
-        const outside = !!required && (!stepKey || !required.includes(stepKey));
+        // A process not used for this dosage form (set in Admin) is shown as not used.
+        const outside = format !== "Other" && !step.settings.forms.includes(format);
         return <tr key={step.calendar.id} className={[current ? "route-current" : "", step.lines.length ? "" : "route-empty"].join(" ").trim() || undefined}>
           <th scope="row">{step.processName}{done ? <span className="badge success">Done</span> : null}</th>
           <td>{step.lines.length ? step.lines.map((item) => <button key={item.id} type="button" className="route-day" aria-current={item.id === line.id || undefined} title={item.completedAt ? "Completed" : "Open this day"} onClick={() => onOpenLine?.(item.id)}>{day(item.plannedDate)}</button>) : <span className="route-muted">{outside ? `Not used for ${format.toLowerCase()}s` : "Not planned"}</span>}</td>

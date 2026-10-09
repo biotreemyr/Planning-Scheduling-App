@@ -7,11 +7,12 @@ import { batchKilograms } from "@/lib/services/measurements";
 import { poLabel, type PurchaseOrder } from "@/lib/services/orders";
 import { linesForJob, measureName, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
 import { routeDrafts } from "@/lib/services/planChanges";
-import { inferFormat, routeLabel, stepOf } from "@/lib/services/processRules";
+import { inferFormat } from "@/lib/services/processRules";
+import { defaultSettings, type PlannedSource, type ProcessSettings } from "@/lib/services/processSetup";
 
 // One row per process of the job order's route. In edit mode a row may already have its activity.
 // Quantity and UOM are the job order's theoretical figure for the process (blank when not keyed in).
-export type PlanRow = { key: string; label: string; calendarId?: string; date: string; quantity: string; uom: string; on: boolean; lineId?: string; locked?: boolean; machineId: string };
+export type PlanRow = { key: string; label: string; calendarId?: string; date: string; quantity: string; uom: string; on: boolean; lineId?: string; locked?: boolean; machineId: string; planned?: PlannedSource };
 // What planning sends back: the rows to plan (or keep), with the activity type and kilograms worked out.
 // machineId "" means no machine booked for that process yet.
 export type PlannedRow = { calendarId: string; lineId?: string; on: boolean; activityType: string; plannedDate: string; quantity: number; uom: string; batchSizeKg?: number; machineId: string };
@@ -27,9 +28,11 @@ const shift = (rows: PlanRow[], index: number, value: string, nextDates: string[
  * theoretical figure for it and cannot be changed here. Opened with an edit request, it shows a
  * planned job order's activities instead, to correct them; completed processes stay locked.
  */
-export function JobPlanDialog({ request, jobOrders, orders, products, calendars, processNames, lines, machines = [], entries = [], onPlan, onDone }: {
+export function JobPlanDialog({ request, jobOrders, orders, products, calendars, processNames, processSettings = {}, lines, machines = [], entries = [], onPlan, onDone }: {
   request: PlanRequest | null; jobOrders: JobOrder[]; orders: PurchaseOrder[]; products: Product[]; calendars: UnitCalendar[];
   processNames: Record<string, string>;
+  // Each process's settings from Admin (route membership and the job order figure it plans with).
+  processSettings?: Record<string, ProcessSettings>;
   // The unit's machines, and bookings, to choose and show each process's machine.
   machines?: Machine[]; entries?: ScheduleEntry[];
   // Every activity, so a job order planned in any process counts as planned.
@@ -59,18 +62,19 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
 
   // Each process carries the job order's theoretical quantity for it: dispensing the batch size,
   // compression, coating and capsulation the batch quantity, filling the packs, packing the boxes.
-  function defaults(chosen: JobOrder, step: string): [string, string] {
-    const value = stepOf(step) ? processQuantity(chosen, stepOf(step)!) : { quantity: chosen.quantity, uom: chosen.uom };
+  const settingsOf = (calendarId: string) => processSettings[calendarId] ?? defaultSettings(nameOf(calendarId));
+  function defaults(chosen: JobOrder, planned?: PlannedSource): [string, string] {
+    const value = planned ? processQuantity(chosen, planned) : { quantity: chosen.quantity, uom: chosen.uom };
     return value ? [String(value.quantity), value.uom] : ["", ""];
   }
   function rowsFor(chosen: JobOrder, from: string): PlanRow[] {
     const chosenOrder = orders.find((item) => item.id === chosen.orderId);
     const chosenFormat = chosenOrder ? chosenOrder.format ?? inferFormat(products.find((item) => item.id === chosenOrder.productId)) : "Other";
-    const drafts = routeDrafts(chosenFormat, calendars, nameOf, from);
+    const drafts = routeDrafts(chosenFormat, calendars, nameOf, from, settingsOf);
     // No fixed route (format Other): one process, chosen in the row.
     const machineFor = (calendarId?: string) => { const options = machinesFor(calendarId); return options.length === 1 ? options[0].id : ""; };
     if (!drafts.length) return [{ key: "single", label: "Process", calendarId: calendars[0]?.id, date: from, quantity: String(chosen.quantity), uom: chosen.uom, on: true, machineId: machineFor(calendars[0]?.id) }];
-    return drafts.map((draft) => { const [quantity, uom] = defaults(chosen, draft.step); return { key: draft.step, label: draft.label, calendarId: draft.calendarId, date: draft.date, quantity, uom, on: !!draft.calendarId, machineId: machineFor(draft.calendarId) }; });
+    return drafts.map((draft) => { const [quantity, uom] = defaults(chosen, draft.planned); return { key: draft.key, label: draft.label, calendarId: draft.calendarId, date: draft.date, quantity, uom, on: !!draft.calendarId, machineId: machineFor(draft.calendarId), planned: draft.planned }; });
   }
   // Edit mode: the route's rows filled from the job order's activities; other activities added after.
   function rowsFromPlan(chosen: JobOrder): PlanRow[] {
@@ -124,7 +128,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       if (!job) { setError("Choose the job order to plan."); return; }
       if (!editing && !ticked.length) { setError("Tick at least one process to plan."); return; }
       const unset = rows.find((row) => row.on && row.calendarId && !row.locked && (!(Number(row.quantity) > 0) || !row.uom));
-      if (unset) { const step = stepOf(unset.key); setError(`${job.number} has no ${step ? measureName(step) : "quantity"} for ${unset.calendarId ? nameOf(unset.calendarId) : unset.label}. Key it in on the job order (Orders tab) first.`); return; }
+      if (unset) { setError(`${job.number} has no ${unset.planned ? measureName(unset.planned) : "quantity"} for ${unset.calendarId ? nameOf(unset.calendarId) : unset.label}. Key it in on the job order (Orders tab) first.`); return; }
       const bad = rows.find((row) => row.on && row.calendarId && !row.locked && !/^\d{4}-\d{2}-\d{2}$/.test(row.date));
       if (bad) { setError(`Choose a date for ${bad.calendarId ? nameOf(bad.calendarId) : bad.label}.`); return; }
       const planned: PlannedRow[] = rows.filter((row) => row.calendarId && (row.on || row.lineId)).map((row) => {
@@ -145,7 +149,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
         <p className="orders-help">{product?.name ?? "Unknown product"} · PO <strong>{poLabel(order, orders)}</strong>{order.customerName ? ` · ${order.customerName}` : ""} · {job.quantity.toLocaleString()} {job.uom}{job.batchSizeKg ? ` · ${job.batchSizeKg.toLocaleString()} kg` : ""}{job.packQuantity ? ` · ${job.packQuantity.toLocaleString()} ${job.packUom}` : ""}</p>
         <label>Batch number<input maxLength={60} autoComplete="off" value={batchNumber} onChange={(event) => setBatchNumber(event.target.value)} placeholder={`Batch number for ${job.number}`} /></label>
         <div className="route-plan">
-          <p className="orders-help">{format === "Other" ? "No fixed route for this dosage form: choose the process." : `${format}: ${routeLabel(format)}.`} {editing ? "Correct any date or machine; untick to remove an activity, tick to add a missed process. Completed processes are locked." : "One working day each, starting from the first process's date; change any date and the later processes follow."} Theoretical quantities come from the job order; production keys in the actual quantity when it completes each process.</p>
+          <p className="orders-help">{format === "Other" ? "No fixed route for this dosage form: choose the process." : `${format}: ${rows.filter((row) => row.calendarId && row.key !== "single").map((row) => row.label).join(" → ")}.`} {editing ? "Correct any date or machine; untick to remove an activity, tick to add a missed process. Completed processes are locked." : "One working day each, starting from the first process's date; change any date and the later processes follow."} Theoretical quantities come from the job order; production keys in the actual quantity when it completes each process.</p>
           <div className="route-plan-scroll"><table className="route-plan-table"><thead><tr><th scope="col">Plan</th><th scope="col">Process</th><th scope="col">Date planned</th><th scope="col">Machine</th><th scope="col" className="numeric">Theoretical quantity</th></tr></thead>
             <tbody>{rows.map((row, index) => <tr key={row.key} className={row.calendarId ? undefined : "route-missing"}>
               <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => update(index, { on: event.target.checked })} /></td>
@@ -154,7 +158,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
               <td>{row.calendarId ? <input type="date" aria-label={`${row.label} date`} disabled={row.locked || !row.on} value={row.date} onChange={(event) => {
                 // Later processes follow on the working days after, so the route keeps its order.
                 const value = event.target.value;
-                const next = routeDrafts(format, calendars, nameOf, value).map((draft) => draft.date);
+                const next = routeDrafts(format, calendars, nameOf, value, settingsOf).map((draft) => draft.date);
                 setRows((current) => editing ? current.map((item, position) => position === index ? { ...item, date: value } : item) : shift(current, index, value, next));
               }} /> : "-"}</td>
               <td>{row.calendarId ? (() => {
@@ -166,7 +170,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
                 </select>;
               })() : null}</td>
               <td className="numeric">{row.calendarId ? row.quantity ? <output aria-label={`${row.label} theoretical quantity`}>{Number(row.quantity).toLocaleString("en-MY", { maximumFractionDigits: 3 })} {row.uom}</output>
-                : <small className="order-warning">No {stepOf(row.key) ? measureName(stepOf(row.key)!) : "quantity"} on the job order</small> : null}</td>
+                : <small className="order-warning">No {row.planned ? measureName(row.planned) : "quantity"} on the job order</small> : null}</td>
             </tr>)}</tbody>
           </table></div>
         </div>

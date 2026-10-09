@@ -21,7 +21,11 @@ export const measurementDefaults = {
 export const workspaceSchema = z.object({
   schemaVersion: z.literal(1),
   directory: z.object({
-    units: z.array(record), processes: z.array(record),
+    units: z.array(record),
+    processes: z.array(record.extend({ settings: z.object({
+      forms: z.array(z.enum(["Capsule", "Tablet", "Sachet"])), optional: z.boolean(),
+      planned: z.enum(["batchSize", "batchQuantity", "packQuantity", "boxes", "none"]), report: z.enum(["measure", "count", "packs", "boxes"])
+    }).optional() })),
     calendars: z.array(record.extend({ unitId: id, processId: id })),
     teams: z.array(record.extend({ processId: id })),
     people: z.array(record.extend({ role: z.enum(["admin", "planner", "production"]), unitIds: z.array(id), teamIds: z.array(id), calendarIds: z.array(id), processIds: z.array(id).optional() })).min(1)

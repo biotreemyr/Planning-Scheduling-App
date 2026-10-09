@@ -35,7 +35,7 @@ describe("process routes by product format", () => {
     const capsule = line("PO-2610-133", "Batch 3", "Capsulation");
     const coating = state.directory.calendars.find((item) => item.name === "Coating" && item.unitId === "sample-unit-mfg")!;
     const warnings = check([...state.data.lines, { ...capsule, id: "extra", calendarId: coating.id, activityType: "Coating" }]);
-    expect(warnings.find((item) => item.kind === "route")?.message).toBe("PO-2610-133 Batch 3: Coating is not part of the capsule route (Dispensing → (Granulation) → Capsulation → Filling → Packing).");
+    expect(warnings.find((item) => item.kind === "route")?.message).toBe("PO-2610-133 Batch 3: Coating is not part of the capsule route (Dispensing → Capsulation → Filling → Packing).");
   });
   it("warns when a required step is skipped before a later one", () => {
     const skipped = line("PO-2610-131", "Batch 7", "Coating");
@@ -91,5 +91,35 @@ describe("granulation, an optional step", async () => {
   it("takes the batch size as its theoretical quantity", () => {
     const job = { id: "j", number: "JO1", orderId: "o", sequence: 1, quantity: 300000, uom: "tablets", batchSizeKg: 75, createdAt: "2026-10-08T00:00:00Z", createdBy: "Aida" };
     expect(processQuantity(job, "granulation")).toEqual({ quantity: 75, uom: "kg" });
+  });
+});
+
+describe("processes set up in Admin", async () => {
+  const { newWorkspace, parseWorkspace } = await import("../src/lib/domain/workspace");
+  const { addSampleData } = await import("../src/lib/domain/sampleData");
+  const { unitRoute, unitRouteLabel, settingsOf } = await import("../src/lib/services/processSetup");
+  const { checkProcessFlow } = await import("../src/lib/services/processRules");
+  const state = addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state!;
+  const unitId = "sample-unit-mfg";
+  it("gives the built-in processes their usual settings", () => {
+    expect(settingsOf({ name: "Compression" })).toEqual({ forms: ["Tablet"], optional: false, planned: "batchQuantity", report: "count" });
+    expect(unitRouteLabel(state.directory, unitId, "Capsule")).toBe("Dispensing → Capsulation → Filling → Packing");
+  });
+  it("adds a new process to a dosage form's route in the unit's order, and drops one taken off a form", () => {
+    const next = structuredClone(state);
+    next.directory.processes.push({ id: "process-blending", name: "Blending", settings: { forms: ["Capsule"], optional: false, planned: "batchSize", report: "measure" } });
+    const dispensing = next.directory.calendars.findIndex((item) => item.unitId === unitId && item.name === "Dispensing");
+    next.directory.calendars.splice(dispensing + 1, 0, { id: "cal-blending", unitId, processId: "process-blending", name: "Blending" });
+    expect(() => parseWorkspace(next)).not.toThrow();
+    expect(unitRoute(next.directory, unitId, "Capsule").map((entry) => entry.name)).toEqual(["Dispensing", "Blending", "Capsulation", "Filling", "Packing"]);
+    expect(unitRoute(next.directory, unitId, "Tablet").map((entry) => entry.name)).not.toContain("Blending");
+    // Blending is required for capsules, so capsule batches planned without it are warned about.
+    const warnings = checkProcessFlow(next.data.lines, next.data.entries, next.data.orders, next.products, next.directory);
+    expect(warnings.some((warning) => warning.kind === "missing" && warning.message.includes("Blending is not planned before Capsulation"))).toBe(true);
+    // Taking coating off tablets: planned coating activities are then outside the route.
+    const coating = next.directory.processes.find((item) => item.name === "Coating")!;
+    coating.settings = { ...settingsOf(coating), forms: [] };
+    const outside = checkProcessFlow(next.data.lines, next.data.entries, next.data.orders, next.products, next.directory);
+    expect(outside.some((warning) => warning.kind === "route" && warning.message.startsWith(state.data.orders.find((order) => order.format === "Tablet")!.poNumber) || warning.message.includes("Coating is not part of the tablet route"))).toBe(true);
   });
 });

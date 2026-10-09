@@ -12,6 +12,7 @@ import { StatusBadge } from "./StatusBadge";
 import { ORDER_COLORS, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
 import { lineEnd } from "@/lib/services/scheduling";
+import type { ProcessSettings } from "@/lib/services/processSetup";
 import { JobPlanDialog, type JobPlan, type PlanRequest } from "./JobPlanDialog";
 
 type View = "month" | "week" | "day";
@@ -22,8 +23,9 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
 
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
-export default function PlanningCalendar({ canPrint = true, orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", planLines, products, initialDate, onPlanJob, onMove, onResize, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
+export default function PlanningCalendar({ processSettings = {}, canPrint = true, orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", planLines, products, initialDate, onPlanJob, onMove, onResize, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
   processNames: Record<string, string>;
+  processSettings?: Record<string, ProcessSettings>;
   // Core's "Print planner board": print, PDF and Excel.
   canPrint?: boolean;
   orders?: PurchaseOrder[];
@@ -224,7 +226,7 @@ export default function PlanningCalendar({ canPrint = true, orders = [], jobOrde
       {hoverLine.orderReference ? <p>{hoverLine.orderReference}{(() => { const batch = jobOrders.find((item) => item.id === hoverLine.jobOrderId)?.batchNumber; return batch ? ` · Batch no. ${batch}` : ""; })()}</p> : null}
       {hoverLine.notes ? <p>{hoverLine.notes}</p> : null}
     </div> : null}
-    <JobPlanDialog request={planRequest} jobOrders={jobOrders} orders={orders} products={products} calendars={calendars} processNames={processNames} lines={allLines ?? allPrintLines} machines={machines} entries={entries}
+    <JobPlanDialog request={planRequest} jobOrders={jobOrders} orders={orders} products={products} calendars={calendars} processNames={processNames} processSettings={processSettings} lines={allLines ?? allPrintLines} machines={machines} entries={entries}
       onPlan={onPlanJob} onDone={(message, firstDate) => { calendar.current?.clearGridSelections(); setNotice(message); if (firstDate) setDate(firstDate); }} />
     <div className="order-legend" aria-label="Legend">
       <span><span className="order-badge">1</span>Order number · tab colour</span>

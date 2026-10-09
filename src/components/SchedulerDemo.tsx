@@ -19,6 +19,7 @@ import { OrdersPanel } from "@/components/OrdersPanel";
 import { StatusPanel, type StatusSection } from "@/components/StatusPanel";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { inUnit, type JobPlan } from "@/components/JobPlanDialog";
+import { calendarSettings, unitRoute, type ProcessSettings } from "@/lib/services/processSetup";
 import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
 import { validateCompletion, validateCorrection, type CompletionInput, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
@@ -42,7 +43,7 @@ import { getScheduleReport } from "@/lib/services/reports";
 import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
 import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
-import { checkProcessFlow, inferFormat, stepOf, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
+import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
 type Tab = "planner" | "orders" | "status" | "master" | "reports" | "audit";
 type PlanningView = "calendar" | "list";
@@ -146,6 +147,7 @@ function FlowBanner({ warnings, onOpen }: { warnings: FlowWarning[]; onOpen: (id
 
 function PlannerBoard({
   processNames,
+  processSettings,
   calendars,
   filterControls,
   calendarTitle,
@@ -170,6 +172,7 @@ function PlannerBoard({
   onPlanningView
 }: {
   processNames: Record<string, string>;
+  processSettings: Record<string, ProcessSettings>;
   calendars: UnitCalendar[];
   filterControls: ReactNode;
   calendarTitle: string;
@@ -226,7 +229,7 @@ function PlannerBoard({
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
         <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar canPrint={canPrint} processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onResize={onResizeLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
+        <PlanningCalendar canPrint={canPrint} processNames={processNames} processSettings={processSettings} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onResize={onResizeLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
           const result = onJobPlan(plan, mode);
           if ("message" in result) { setQuery(""); setPriorityFilter(""); setStatusFilter(""); }
           return result;
@@ -931,10 +934,10 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     if (mode === "new" && !inUnit(job, data.orders, visibleCalendars[0]?.unitId)) return { error: `${order.poNumber} is made in ${directory.units.find((item) => item.id === order.unitId)?.name ?? "another unit"}. Plan it on that unit's board.` };
     // Quantities are the job order's theoretical figure for each process, whatever the form sent.
     // A process already split over several days keeps its days' shares (the tally warning checks them).
-    const stepRows = (step: string) => plan.rows.filter((row) => (row.on || row.lineId) && stepOf(row.activityType) === step).length;
+    // Each process plans with the job order figure set for it in Admin.
+    const processRows = (calendarId: string) => plan.rows.filter((row) => (row.on || row.lineId) && row.calendarId === calendarId).length;
     plan = { ...plan, rows: plan.rows.map((row) => {
-      const step = stepOf(row.activityType);
-      const expected = step && stepRows(step) === 1 ? processQuantity(job, step) : undefined;
+      const expected = processRows(row.calendarId) === 1 ? processQuantity(job, calendarSettings(directory, row.calendarId).planned) : undefined;
       return expected ? { ...row, quantity: expected.quantity, uom: expected.uom, batchSizeKg: expected.uom === "kg" ? expected.quantity : batchKilograms(expected.quantity, expected.uom) } : row;
     }) };
     const adding = plan.rows.filter((row) => row.on && !row.lineId);
@@ -993,10 +996,15 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     const booked = plan.rows.filter((row) => row.on && row.machineId).length;
     return { message: mode === "new" ? `${job.number} planned: ${added.map((line) => line.activityType).join(", ")}${batch ? ` · batch ${batch}` : ""}${booked ? ` · ${booked} machine${booked === 1 ? "" : "s"} booked` : ""}.` : `${job.number} planning saved (${parts || (batchChanged ? "batch number" : "no changes")}).` };
   }
+  // A PO item's route from Admin: its unit's processes used for its dosage form, in order.
+  const orderRoute = (order: PurchaseOrder) => {
+    const route = unitRoute(directory, order.unitId ?? directory.units[0]?.id, order.format ?? inferFormat(products.find((item) => item.id === order.productId)));
+    return route.length ? route : undefined;
+  };
   // Job orders: keyed in on the PO item, one per batch, each with its own number.
   function addJobOrder(input: ManualJob) {
     if (!canCreateOrders) return ["Your access does not include creating job orders."];
-    const created = createManualJobOrder(input, data.orders, data.jobOrders, products, { today: new Date(), userName: member.name, newId: () => newId("job") });
+    const created = createManualJobOrder(input, data.orders, data.jobOrders, products, { today: new Date(), userName: member.name, newId: () => newId("job"), routeFor: orderRoute });
     if ("error" in created) return [created.error];
     setData((current) => ({ ...current, jobOrders: [...current.jobOrders, created] }));
     return [];
@@ -1006,19 +1014,17 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     if (!canEditOrders) return ["Your access does not include editing job orders."];
     const current = data.jobOrders.find((job) => job.id === next.id);
     if (!current) return ["This job order no longer exists."];
-    const result = updateJobOrder(next, data.jobOrders, data.orders, products);
+    const result = updateJobOrder(next, data.jobOrders, data.orders, products, orderRoute);
     if ("error" in result) return [result.error];
     const batchChanged = (result.batchNumber ?? "") !== (current.batchNumber ?? "");
     const saved: JobOrder = batchChanged && result.batchNumber ? { ...result, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
       : batchChanged ? (({ batchNumberBy: _by, batchNumberAt: _at, ...rest }) => rest)(result) : result;
     // Open activities follow the job order's quantities, when their process runs on one day; a process
     // split over several days is left for planning to share out (the tally warning shows it).
-    const stepOfLine = (line: PlanLine) => stepOf(directory.processes.find((item) => item.id === directory.calendars.find((entry) => entry.id === line.calendarId)?.processId)?.name ?? line.activityType ?? "");
     const jobLines = linesForJob(saved.id, data.lines);
     const synced = new Map(jobLines.flatMap((line) => {
-      const step = stepOfLine(line);
-      const expected = step ? processQuantity(saved, step) : undefined;
-      if (!step || !expected || line.completedAt || jobLines.filter((other) => stepOfLine(other) === step).length !== 1) return [];
+      const expected = processQuantity(saved, calendarSettings(directory, line.calendarId).planned);
+      if (!expected || line.completedAt || jobLines.filter((other) => other.calendarId === line.calendarId).length !== 1) return [];
       return [[line.id, { quantity: expected.quantity, uom: expected.uom, batchSizeKg: expected.uom === "kg" ? expected.quantity : batchKilograms(expected.quantity, expected.uom) }] as const];
     }));
     setData((state) => ({ ...state, jobOrders: state.jobOrders.map((job) => job.id === saved.id ? saved : job),
@@ -1146,7 +1152,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine} onResizeLine={resizeLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
@@ -1159,7 +1165,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
         <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements", "Sample data"].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>
-        {adminSection === "Configuration" ? <CalendarAdmin directory={directory} onSave={saveDirectory} machines={machines} workCentres={workCentres} onMachine={saveMachine} onDeleteMachine={deleteMachine} onOpenCalendar={(unitId) => { setUnitSelection(unitId); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
+        {adminSection === "Configuration" ? <CalendarAdmin showPeople={!identity} directory={directory} onSave={saveDirectory} machines={machines} workCentres={workCentres} onMachine={saveMachine} onDeleteMachine={deleteMachine} onOpenCalendar={(unitId) => { setUnitSelection(unitId); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
         {adminSection === "Sample data" ? <SampleDataAdmin snapshot={snapshot} onApply={applySnapshot} onOpenCalendar={() => { setUnitSelection(directory.units.find((item) => item.id.startsWith("sample-"))?.id ?? ""); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
         {adminSection === "Measurements" ? <MeasurementAdmin usedUoms={[...products.map((item) => item.uom), ...data.lines.map((item) => item.uom ?? ""), ...data.transfers.map((item) => item.uom), ...machines.map((item) => item.capacityUom ?? "")]} usedActivities={data.lines.map((item) => item.activityType ?? "")} /> : null}
         {adminSection === "Products" ? <CatalogAdmin products={products} workCentres={workCentres} onProduct={(item) => {

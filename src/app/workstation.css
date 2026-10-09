@@ -580,3 +580,11 @@
 .order-flow-grid td small, .order-flow-grid th small { display: block; color: var(--muted); font-weight: 400; }
 .order-flow-grid td.order-flow-done { background: #d3f0dc; } .order-flow-grid td.order-flow-done .badge.success { background: #2b8a3e; color: #fff; }
 .order-flow-grid td.order-flow-planned { background: #fff6cc; }
+/* Admin: a unit's route order, and a process's settings. */
+.route-order { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+.route-order ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.route-order li { display: flex; align-items: center; gap: 6px; }
+.route-order li span { flex: 1; font-size: 14px; }
+.process-form { display: grid; gap: 10px; max-width: 560px; }
+.process-optional { display: flex; align-items: center; gap: 8px; }
+.process-optional input { width: 16px; height: 16px; }
