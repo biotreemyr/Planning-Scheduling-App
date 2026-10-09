@@ -4,13 +4,13 @@ import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
-import { type ManualJob, batchStatus, defaultPackingNumber, finalOutput, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
+import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
-import { PRODUCT_FORMATS, ROUTES, inferFormat, routeLabel, stepLabel, stepOf, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
+import { PRODUCT_FORMATS, ROUTES, inferFormat, routeLabel, stepLabel, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
 
 const displayDate = (value: string) => value.split("-").reverse().join("-");
 const statuses: OrderStatus[] = ["Not scheduled", "Scheduled", "In production", "Completed"];
@@ -369,11 +369,11 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
     <summary className="order-section-summary"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
       <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span></summary>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
-      <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col" className="numeric">Final output<small>Produced</small></th><th scope="col">Status<small>Testing · release</small></th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
+      <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
       <tbody>{jobs.map((job) => {
         const planned = linesForJob(job.id, lines).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate));
         const done = planned.length > 0 && planned.every((line) => line.completedAt);
-        if (editing === job.id) return <tr key={job.id} className="job-order-editing"><td colSpan={10}>
+        if (editing === job.id) return <tr key={job.id} className="job-order-editing"><td colSpan={8}>
           <form className="job-order-edit" onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
@@ -397,24 +397,6 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
           <td className="numeric">{measure(processQuantity(job, "tableting"))}</td>
           <td className="numeric">{measure(processQuantity(job, "filling"))}</td>
           <td className="numeric">{measure(processQuantity(job, "packing"))}</td>
-          <td className="numeric">{(() => {
-            const made = finalOutput(job.id, lines, transfers);
-            if (!made.length) return <span className="route-muted">-</span>;
-            const target = processQuantity(job, "packing");
-            return made.map((item) => <span key={item.uom} className="job-output">{item.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {item.uom}
-              {target && item.uom === target.uom ? <small>{Math.round(item.quantity / target.quantity * 100)}% of {target.quantity.toLocaleString()}</small> : null}</span>);
-          })()}</td>
-          <td>{(() => {
-            const state = batchStatus(job, lines, transfers);
-            const day = (value?: string) => value ? shortDate(value.slice(0, 10)) : "";
-            if (state === "Released") return <><span className="badge success">Released</span><small>{(job.releaseQuantity ?? 0).toLocaleString("en-MY", { maximumFractionDigits: 3 })} {job.releaseUom} · {day(job.releasedAt)}</small><small>Passed {day(job.testedAt)}</small></>;
-            if (state === "Awaiting release") return <><span className="badge info">Awaiting release</span><small>Passed testing {day(job.testedAt)}</small></>;
-            if (state === "Awaiting testing") return <span className="badge warning">Awaiting testing</span>;
-            if (state === "Under investigation") return <><span className="badge warning">Under investigation</span><small>since {day(job.testedAt)}</small></>;
-            if (state === "Failed testing") return <><span className="badge danger">Failed testing</span><small>{day(job.testedAt)} · awaiting QA rejection</small></>;
-            if (state === "Rejected") return <><span className="badge danger">Rejected</span><small>Failed {day(job.testedAt)} · rejected {day(job.rejectedAt)}</small></>;
-            return <span className="route-muted">In production</span>;
-          })()}</td>
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
           <td>{planned.length ? <><span className={`badge ${done ? "success" : "info"}`}>{done ? "Done" : "Planned"}</span> <small>{shortDate(planned[0].plannedDate)} – {shortDate(planned.at(-1)!.plannedDate)} · {planned.length} activit{planned.length === 1 ? "y" : "ies"}</small></>
             : <><span className="badge neutral">Not planned</span><small>Plan it on the Planner Board</small></>}</td>
@@ -442,12 +424,6 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
 }
 
 const shortDate = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-
-function BatchSize({ kg, quantity, uom }: { kg?: number; quantity: number; uom: string }) {
-  const mass = ["kg", "g", "mg"].includes(uom);
-  if (kg === undefined) return <small>{quantity.toLocaleString()} {uom}</small>;
-  return <><small className="batch-kg">{kg.toLocaleString("en-MY", { maximumFractionDigits: 2 })} kg</small>{mass || !quantity ? null : <small>≈ {quantity.toLocaleString()} {uom}</small>}</>;
-}
 
 // One batch's days in one process: dates plus where it stands.
 function BatchStatus({ cell, uom }: { cell?: BatchCell; uom: string }) {
@@ -527,7 +503,6 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const units = new Set(rows.map((row) => row.unitName));
   const matrix = orderBatchMatrix(order, lines, directory, localDateKey(new Date()), visibleCalendarIds);
   const lastDate = rows.reduce((latest, row) => row.lastDate > latest ? row.lastDate : latest, "");
   return <div className="order-detail">
