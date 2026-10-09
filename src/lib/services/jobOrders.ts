@@ -116,13 +116,14 @@ export type ProcessQuantity = { quantity: number; uom: string };
  * (tablets or capsules), filling its pack quantity (blisters, bottles, sachets), packing its boxes.
  */
 export function processQuantity(job: JobOrder, step: RouteStepName): ProcessQuantity | undefined {
-  if (step === "dispensing") return job.batchSizeKg ? { quantity: job.batchSizeKg, uom: "kg" } : job.batchVolumeL ? { quantity: job.batchVolumeL, uom: "L" } : undefined;
+  // Granulation works the dispensed batch, so its figure is the batch size too.
+  if (step === "dispensing" || step === "granulation") return job.batchSizeKg ? { quantity: job.batchSizeKg, uom: "kg" } : job.batchVolumeL ? { quantity: job.batchVolumeL, uom: "L" } : undefined;
   if (step === "filling") return job.packQuantity && job.packUom ? { quantity: job.packQuantity, uom: job.packUom } : undefined;
   if (step === "packing") return job.boxQuantity ? { quantity: job.boxQuantity, uom: "boxes" } : undefined;
   return { quantity: job.quantity, uom: job.uom };
 }
 const MEASURE_NAME: Record<RouteStepName, string> = {
-  dispensing: "batch size (kg or L)", tableting: "batch quantity", coating: "batch quantity", capsulation: "batch quantity",
+  dispensing: "batch size (kg or L)", granulation: "batch size (kg or L)", tableting: "batch quantity", coating: "batch quantity", capsulation: "batch quantity",
   filling: "pack quantity (blisters, bottles or sachets)", packing: "total pack quantity (boxes)"
 };
 export const measureName = (step: RouteStepName) => MEASURE_NAME[step];

@@ -3,7 +3,7 @@ import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import { daysBetween, lineEnd, shiftTimestamp } from "./scheduling";
 import { batchKilograms } from "./measurements";
 import type { PurchaseOrder } from "./orders";
-import { ROUTES, routeLabel, stepLabel, stepOf, type ProductFormat, type RouteStepName } from "./processRules";
+import { OPTIONAL_STEPS, ROUTES, routeLabel, stepLabel, stepOf, type ProductFormat, type RouteStepName } from "./processRules";
 
 /**
  * Move an activity to a new date. Its open machine bookings move by the same number of
@@ -74,12 +74,15 @@ export function createBatchLines(batch: NewBatch, context: BatchContext): { line
   if (lines.some((line) => line.productionOrderId === order.id && line.orderReference?.trim().toLowerCase() === label.toLowerCase())) return { error: `${label} already exists on this order.` };
   if (!Number.isFinite(batch.quantity) || batch.quantity <= 0) return { error: "Quantity must be greater than zero." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(batch.startDate)) return { error: "Choose a start date." };
-  const route = ROUTES[format];
+  // Optional steps (granulation) are planned when the unit has them, and never required.
+  const fullRoute = ROUTES[format];
+  const required = fullRoute.filter((step) => !OPTIONAL_STEPS.has(step));
   const stepCalendar = (unitId: string, step: string) => directory.calendars.find((calendar) => calendar.unitId === unitId && stepOf(directory.processes.find((process) => process.id === calendar.processId)?.name ?? calendar.name) === step);
   const usedUnit = directory.calendars.find((calendar) => lines.some((line) => line.productionOrderId === order.id && line.calendarId === calendar.id))?.unitId;
-  const unitId = usedUnit ?? directory.units.find((unit) => route.every((step) => stepCalendar(unit.id, step)))?.id;
+  const unitId = usedUnit ?? directory.units.find((unit) => required.every((step) => stepCalendar(unit.id, step)))?.id;
   if (!unitId) return { error: `No unit is set up with every ${format.toLowerCase()} process (${routeLabel(format)}).` };
-  const missing = route.filter((step) => !stepCalendar(unitId, step));
+  const missing = required.filter((step) => !stepCalendar(unitId, step));
+  const route = fullRoute.filter((step) => !OPTIONAL_STEPS.has(step) || stepCalendar(unitId, step));
   if (missing.length) return { error: `${directory.units.find((unit) => unit.id === unitId)?.name ?? "This unit"} has no ${missing.map((step) => step[0].toUpperCase() + step.slice(1)).join(", ")} process set up.` };
   const sample = lines.find((line) => line.productionOrderId === order.id);
   const day = new Date(`${batch.startDate}T12:00:00`);
@@ -108,7 +111,9 @@ export function routeDrafts(format: ProductFormat, calendars: { id: string; name
   if (format === "Other" || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return [];
   const day = new Date(`${startDate}T12:00:00`);
   if (day.getDay() === 0 || day.getDay() === 6) nextWorkday(day);
-  return ROUTES[format].map((step, index) => {
+  // An optional step (granulation) the unit does not have is left out and takes no day.
+  const steps = ROUTES[format].filter((step) => !OPTIONAL_STEPS.has(step) || calendars.some((item) => stepOf(processName(item.id)) === step));
+  return steps.map((step, index) => {
     if (index) nextWorkday(day);
     const calendar = calendars.find((item) => stepOf(processName(item.id)) === step);
     return { step, label: stepLabel(step), ...(calendar ? { calendarId: calendar.id, processName: processName(calendar.id) } : {}), date: key(day) };

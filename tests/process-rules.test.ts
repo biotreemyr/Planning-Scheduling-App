@@ -12,8 +12,8 @@ const line = (po: string, batch: string, process: string) => {
 
 describe("process routes by product format", () => {
   it("defines the three routes and treats shop-floor synonyms as the same step", () => {
-    expect(routeLabel("Capsule")).toBe("Dispensing → Capsulation → Filling → Packing");
-    expect(routeLabel("Tablet")).toBe("Dispensing → Compression → Coating → Filling → Packing");
+    expect(routeLabel("Capsule")).toBe("Dispensing → (Granulation) → Capsulation → Filling → Packing");
+    expect(routeLabel("Tablet")).toBe("Dispensing → (Granulation) → Compression → Coating → Filling → Packing");
     expect(routeLabel("Sachet")).toBe("Dispensing → Filling → Packing");
     expect(stepOf("Compression")).toBe("tableting");
     expect(stepOf(" bottling ")).toBe("filling");
@@ -35,7 +35,7 @@ describe("process routes by product format", () => {
     const capsule = line("PO-2610-133", "Batch 3", "Capsulation");
     const coating = state.directory.calendars.find((item) => item.name === "Coating" && item.unitId === "sample-unit-mfg")!;
     const warnings = check([...state.data.lines, { ...capsule, id: "extra", calendarId: coating.id, activityType: "Coating" }]);
-    expect(warnings.find((item) => item.kind === "route")?.message).toBe("PO-2610-133 Batch 3: Coating is not part of the capsule route (Dispensing → Capsulation → Filling → Packing).");
+    expect(warnings.find((item) => item.kind === "route")?.message).toBe("PO-2610-133 Batch 3: Coating is not part of the capsule route (Dispensing → (Granulation) → Capsulation → Filling → Packing).");
   });
   it("warns when a required step is skipped before a later one", () => {
     const skipped = line("PO-2610-131", "Batch 7", "Coating");
@@ -70,5 +70,26 @@ describe("units for reporting actual quantities", () => {
     expect(actualUoms("Filling")).toEqual(["bottles", "blisters", "sachets", "pouches"]);
     expect(actualUoms("Packing")).toEqual(["boxes"]);
     expect(actualUoms("Blending", "kg")).toEqual(["kg"]);
+  });
+});
+
+describe("granulation, an optional step", async () => {
+  const { routeDrafts } = await import("../src/lib/services/planChanges");
+  const { stepOf, OPTIONAL_STEPS } = await import("../src/lib/services/processRules");
+  const { processQuantity } = await import("../src/lib/services/jobOrders");
+  const calendars = ["Dispensing", "Granulation", "Compression", "Coating", "Filling", "Packing"].map((name) => ({ id: name.toLowerCase(), name }));
+  it("is planned between dispensing and compression when the unit has it, and left out otherwise", () => {
+    expect(stepOf("Wet granulation")).toBe("granulation");
+    expect(OPTIONAL_STEPS.has("granulation")).toBe(true);
+    const withIt = routeDrafts("Tablet", calendars, (id) => calendars.find((item) => item.id === id)!.name, "2026-10-12");
+    expect(withIt.map((draft) => draft.label)).toEqual(["Dispensing", "Granulation", "Compression", "Coating", "Filling", "Packing"]);
+    const without = calendars.filter((item) => item.name !== "Granulation");
+    const plain = routeDrafts("Tablet", without, (id) => without.find((item) => item.id === id)!.name, "2026-10-12");
+    expect(plain.map((draft) => draft.label)).toEqual(["Dispensing", "Compression", "Coating", "Filling", "Packing"]);
+    expect(plain[1].date).toBe("2026-10-13");
+  });
+  it("takes the batch size as its theoretical quantity", () => {
+    const job = { id: "j", number: "JO1", orderId: "o", sequence: 1, quantity: 300000, uom: "tablets", batchSizeKg: 75, createdAt: "2026-10-08T00:00:00Z", createdBy: "Aida" };
+    expect(processQuantity(job, "granulation")).toEqual({ quantity: 75, uom: "kg" });
   });
 });

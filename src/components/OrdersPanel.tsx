@@ -369,10 +369,9 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
     <summary className="order-section-summary"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
       <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span></summary>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
-      <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col">Batch number</th><th scope="col">Planning</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
+      <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col">PJO no.<small>Packing</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col">Batch number</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
       <tbody>{jobs.map((job) => {
         const planned = linesForJob(job.id, lines).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate));
-        const done = planned.length > 0 && planned.every((line) => line.completedAt);
         if (editing === job.id) return <tr key={job.id} className="job-order-editing"><td colSpan={8}>
           <form className="job-order-edit" onSubmit={(event) => {
             event.preventDefault();
@@ -392,14 +391,13 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
           </form>
         </td></tr>;
         return <tr key={job.id}>
-          <th scope="row"><strong>{job.number}</strong><small>Packing {packingNumber(job)}</small><small>Batch {job.sequence} of PO item</small></th>
+          <th scope="row"><strong>{job.number}</strong><small>Batch {job.sequence} of PO item</small></th>
           <td className="numeric">{measure(processQuantity(job, "dispensing"))}</td>
           <td className="numeric">{measure(processQuantity(job, "tableting"))}</td>
+          <td>{packingNumber(job)}</td>
           <td className="numeric">{measure(processQuantity(job, "filling"))}</td>
           <td className="numeric">{measure(processQuantity(job, "packing"))}</td>
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
-          <td>{planned.length ? <><span className={`badge ${done ? "success" : "info"}`}>{done ? "Done" : "Planned"}</span> <small>{shortDate(planned[0].plannedDate)} – {shortDate(planned.at(-1)!.plannedDate)} · {planned.length} activit{planned.length === 1 ? "y" : "ies"}</small></>
-            : <><span className="badge neutral">Not planned</span><small>Plan it on the Planner Board</small></>}</td>
           <td><span className="job-actions">
             {actions.canEdit ? <button type="button" className="icon-button" title={`Edit ${job.number}`} aria-label={`Edit ${job.number}`} onClick={() => { setEditing(job.id); setErrors([]); setNotice(""); }}><Pencil size={15} /></button> : null}
             {!planned.length && actions.canEdit ? <button type="button" className="icon-button danger" title={`Remove ${job.number}`} aria-label={`Remove ${job.number}`} onClick={() => report(actions.onDelete(job.id), `${job.number} removed.`)}><Trash2 size={15} /></button> : null}
@@ -424,18 +422,6 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
 }
 
 const shortDate = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-
-// One batch's days in one process: dates plus where it stands.
-function BatchStatus({ cell, uom }: { cell?: BatchCell; uom: string }) {
-  if (!cell) return <span className="route-muted">Not planned</span>;
-  const dates = cell.firstDate === cell.lastDate ? shortDate(cell.firstDate) : `${shortDate(cell.firstDate)} – ${shortDate(cell.lastDate)}`;
-  const status = cell.daysDone === cell.days ? ["Done", "success"] : cell.late ? ["Late", "danger"] : cell.daysDone ? ["In progress", "warning"] : ["Planned", "neutral"];
-  return <div className="batch-cell">
-    <span className="batch-dates">{dates}</span>
-    <span className={`badge ${status[1]}`}>{status[0]}{cell.days > 1 && cell.daysDone && cell.daysDone < cell.days ? ` ${cell.daysDone}/${cell.days}` : ""}</span>
-    {cell.daysDone ? <small>{cell.completed.toLocaleString()} {uom} made</small> : null}
-  </div>;
-}
 
 // The order's summary as its flow, one column per job order and the stages down the side:
 // Planning (job order, planned quantity, batch number), Production (one row per process: days,

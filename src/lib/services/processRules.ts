@@ -5,18 +5,21 @@ import { lineEnd } from "./scheduling";
 
 export const PRODUCT_FORMATS = ["Capsule", "Tablet", "Sachet", "Other"] as const;
 export type ProductFormat = (typeof PRODUCT_FORMATS)[number];
-type Step = "dispensing" | "capsulation" | "tableting" | "coating" | "filling" | "packing";
+type Step = "dispensing" | "granulation" | "capsulation" | "tableting" | "coating" | "filling" | "packing";
 
-// The required order of processes for each product format. "Other" has no fixed route.
+// The order of processes for each product format. "Other" has no fixed route. Granulation is
+// optional: products made by direct compression or blending skip it without a warning.
 export const ROUTES: Record<Exclude<ProductFormat, "Other">, Step[]> = {
-  Capsule: ["dispensing", "capsulation", "filling", "packing"],
-  Tablet: ["dispensing", "tableting", "coating", "filling", "packing"],
+  Capsule: ["dispensing", "granulation", "capsulation", "filling", "packing"],
+  Tablet: ["dispensing", "granulation", "tableting", "coating", "filling", "packing"],
   Sachet: ["dispensing", "filling", "packing"]
 };
-const STEP_LABEL: Record<Step, string> = { dispensing: "Dispensing", capsulation: "Capsulation", tableting: "Compression", coating: "Coating", filling: "Filling", packing: "Packing" };
+export const OPTIONAL_STEPS: ReadonlySet<Step> = new Set<Step>(["granulation"]);
+const STEP_LABEL: Record<Step, string> = { dispensing: "Dispensing", granulation: "Granulation", capsulation: "Capsulation", tableting: "Compression", coating: "Coating", filling: "Filling", packing: "Packing" };
 // Process names used on the shop floor that mean the same step.
 const ALIASES: Record<string, Step> = {
   dispensing: "dispensing", weighing: "dispensing",
+  granulation: "granulation", "wet granulation": "granulation", "dry granulation": "granulation", granulating: "granulation",
   capsulation: "capsulation", encapsulation: "capsulation", "capsule filling": "capsulation",
   tableting: "tableting", tabletting: "tableting", compression: "tableting", "tablet press": "tableting",
   coating: "coating", "film coating": "coating",
@@ -32,7 +35,7 @@ export const stepLabel = (step: Step) => STEP_LABEL[step];
 // Compression, coating and capsulation weigh (or measure) their output; it is converted to tablets or
 // capsules with the weight of one compressed/coated tablet or filled capsule that production keys in.
 const ACTUAL_UOMS: Record<Step, string[]> = {
-  dispensing: ["kg", "g", "L", "mL"], tableting: ["kg", "g", "L", "mL"], coating: ["kg", "g", "L", "mL"], capsulation: ["kg", "g", "L", "mL"],
+  dispensing: ["kg", "g", "L", "mL"], granulation: ["kg", "g", "L", "mL"], tableting: ["kg", "g", "L", "mL"], coating: ["kg", "g", "L", "mL"], capsulation: ["kg", "g", "L", "mL"],
   filling: ["bottles", "blisters", "sachets", "pouches"], packing: ["boxes"]
 };
 export function actualUoms(processName: string, plannedUom?: string) {
@@ -40,7 +43,7 @@ export function actualUoms(processName: string, plannedUom?: string) {
   return step ? ACTUAL_UOMS[step] : plannedUom ? [plannedUom] : [];
 }
 export type RouteStepName = Step;
-export const routeLabel = (format: ProductFormat) => format === "Other" ? "No fixed route" : ROUTES[format].map((step) => STEP_LABEL[step]).join(" → ");
+export const routeLabel = (format: ProductFormat) => format === "Other" ? "No fixed route" : ROUTES[format].map((step) => OPTIONAL_STEPS.has(step) ? `(${STEP_LABEL[step]})` : STEP_LABEL[step]).join(" → ");
 
 // A sensible default from the product's unit or name; the order's own format always wins.
 export function inferFormat(product?: Pick<Product, "name" | "uom">): ProductFormat {
@@ -102,7 +105,7 @@ export function checkProcessFlow(lines: PlanLine[], entries: ScheduleEntry[], or
     // Required steps skipped before the furthest planned step.
     const furthest = route.indexOf(present.at(-1)!);
     route.slice(0, furthest).forEach((step, index) => {
-      if (byStep.has(step)) return;
+      if (byStep.has(step) || OPTIONAL_STEPS.has(step)) return;
       const next = route.slice(index + 1).find((item) => byStep.has(item))!;
       warnings.push({ kind: "missing", lineIds: byStep.get(next)!.map((line) => line.id), orderId: order?.id, batch, message: `${prefix}${STEP_LABEL[step]} is not planned before ${STEP_LABEL[next]}.` });
     });
