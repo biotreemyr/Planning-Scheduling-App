@@ -36,8 +36,8 @@ describe("tablets and capsules reported by weight", async () => {
     expect(isWeight("g") && !isWeight("tablets")).toBe(true);
   });
   it("lets compression, coating and capsulation report by weight or volume", () => {
-    expect(actualUoms("Compression")).toEqual(["tablets", "kg", "g", "L", "mL"]);
-    expect(actualUoms("Coating")).toEqual(["tablets", "kg", "g", "L", "mL"]);
-    expect(actualUoms("Capsulation")).toEqual(["capsules", "kg", "g", "L", "mL"]);
+    expect(actualUoms("Compression")).toEqual(["kg", "g", "L", "mL"]);
+    expect(actualUoms("Coating")).toEqual(["kg", "g", "L", "mL"]);
+    expect(actualUoms("Capsulation")).toEqual(["kg", "g", "L", "mL"]);
   });
 });

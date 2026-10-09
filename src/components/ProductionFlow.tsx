@@ -39,14 +39,15 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   // The units this process reports in; the planned unit first when it is one of them.
   const reportUoms = actualUoms(processName(line.calendarId), uom);
   const doneUom = line.yieldUom ?? uom;
-  const defaultUom = line.completedAt ? line.weighedUom ?? doneUom : reportUoms.includes(uom) ? uom : reportUoms[0] ?? uom;
+  const counting = ["capsulation", "tableting", "coating"].includes(stepOf(processName(line.calendarId)) ?? "");
+  const defaultUom = counting ? line.weighedUom ?? "kg" : line.completedAt ? doneUom : reportUoms.includes(uom) ? uom : reportUoms[0] ?? uom;
   // Compression, coating and capsulation count tablets or capsules; output weighed in kg or g is
   // converted with the weight of one compressed/coated tablet or filled capsule.
   const step = stepOf(processName(line.calendarId));
   const countUom = step === "capsulation" ? "capsules" : step === "tableting" || step === "coating" ? "tablets" : undefined;
   const unitName = step === "capsulation" ? "Filled capsule" : step === "coating" ? "Coated tablet" : "Compressed tablet";
   const [chosenUom, setChosenUom] = useState(defaultUom);
-  const [quantityText, setQuantityText] = useState(line.completedAt ? String(line.weighedQuantity ?? line.yieldQuantity ?? "") : "");
+  const [quantityText, setQuantityText] = useState(line.completedAt ? String((counting ? line.weighedQuantity : line.yieldQuantity) ?? "") : "");
   const [unitMg, setUnitMg] = useState(String(line.actualUnitWeightMg ?? line.actualUnitVolumeMl ?? line.unitWeightMg ?? ""));
   // A weight (kg, g) asks for mg per unit; a volume (L, mL) for mL per unit.
   const sizeUom = unitSizeUom(chosenUom);
@@ -84,7 +85,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       const [kind, destinationId = ""] = String(data.get("destination") ?? "final").split(":");
       const machine = String(data.get("machine") ?? "");
       const reported = String(data.get("yieldUom") ?? "") || uom;
-      if (typed && weighing && !(Number(unitMg) > 0)) { setErrors([`Enter the ${unitLabel.toLowerCase()} in ${sizeUom} to convert ${reported} to ${countUom}.`]); return; }
+      if ((typed || correcting) && weighing && !(Number(unitMg) > 0)) { setErrors([`Enter the ${unitLabel.toLowerCase()} in ${sizeUom} to convert ${reported} to ${countUom}.`]); return; }
       const weighed = typed && weighing ? { quantity: Number(typed), uom: reported, unitWeightMg: Number(unitMg) } : undefined;
       const quantityText = weighed ? String(countFromWeight(weighed.quantity, weighed.uom, weighed.unitWeightMg)) : typed;
       const output = { quantity: Number(quantityText), uom: weighed ? countUom! : reported, ...(weighed ? { weighed } : {}), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineId: machine };
@@ -103,11 +104,11 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     }}>
       <label>Date started<input name="startedAt" type="date" defaultValue={line.startedAt ?? ""} /></label>
       <label>Date completed<input name="completedAt" type="date" defaultValue={completedDay} max={today()} /></label>
-      <div className="quantity-fields"><label>Actual quantity<input name="quantity" type="number" min="0" step="any" value={quantityText} onChange={(event) => setQuantityText(event.target.value)} readOnly={handedOver} placeholder={`Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
-        <label>UOM<select name="yieldUom" value={chosenUom} onChange={(event) => setChosenUom(event.target.value)} disabled={handedOver}>{[...new Set([...reportUoms, ...(line.completedAt ? [doneUom, line.weighedUom ?? doneUom] : [])])].map((name) => <option key={name}>{name}</option>)}</select></label>
+      <div className="quantity-fields"><label>{weighing ? `Output ${sizeUom === "mL" ? "volume" : "weight"}` : "Actual quantity"}<input name="quantity" type="number" min="0" step="any" value={quantityText} onChange={(event) => setQuantityText(event.target.value)} readOnly={handedOver} placeholder={weighing ? "e.g. 23.975" : `Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
+        <label>UOM<select name="yieldUom" value={chosenUom} onChange={(event) => setChosenUom(event.target.value)} disabled={handedOver}>{[...new Set([...reportUoms, ...(line.completedAt && !counting ? [doneUom] : []), ...(line.weighedUom ? [line.weighedUom] : [])])].map((name) => <option key={name}>{name}</option>)}</select></label>
         {handedOver ? <input type="hidden" name="yieldUom" value={chosenUom} /> : null}</div>
       {weighing ? <div className="quantity-fields weighed-fields"><label>{unitLabel} ({sizeUom} each)<input name="unitWeightMg" type="number" min="0" step="any" required value={unitMg} onChange={(event) => setUnitMg(event.target.value)} readOnly={handedOver} placeholder={sizeUom === "mL" ? "e.g. 5" : "e.g. 350"} /></label>
-        <p className="weighed-count" role="status">{counted !== undefined ? <>= <strong>{counted.toLocaleString()} {countUom}</strong></> : `Enter the weight to work out the ${countUom}.`}</p></div> : null}
+        <p className="weighed-count" role="status">Actual quantity: {counted !== undefined ? <strong>{counted.toLocaleString()} {countUom}</strong> : <span className="route-muted">worked out from the {sizeUom === "mL" ? "volume" : "weight"} · planned {line.quantity.toLocaleString()} {uom}</span>}</p></div> : null}
       <label>Machine<select name="machine" defaultValue={machineId}>
         <option value="">{machines.length ? "Not assigned" : "No machine set up"}</option>
         {machines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
@@ -131,7 +132,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
       {saved && !errors.length ? <p role="status">{saved}</p> : null}
       <p className="route-muted">{correcting ? handedOver ? `${processName(outgoing!.calendarId)} has already received this output, so its quantity and destination stay as they are. Dates and notes can still be corrected.` : "Correct anything keyed in by mistake. The handover to the next process follows the correction."
-        : "Save progress records the start date and notes. Complete production also needs the completed date and actual quantity. A mistake can be corrected afterwards."}</p>
+        : `Save progress records the start date and notes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`}</p>
     </form>}
   </section>;
 }

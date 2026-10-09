@@ -28,9 +28,10 @@ export const stepLabel = (step: Step) => STEP_LABEL[step];
 // The units production reports each process's actual quantity in: dispensing weighs or measures,
 // compression and coating count tablets, capsulation counts capsules, filling counts the primary
 // pack and packing counts boxes. Other processes report in their planned unit.
-// Compression, coating and capsulation may also weigh their output; it is then converted to a count.
+// Compression, coating and capsulation weigh (or measure) their output; it is converted to tablets or
+// capsules with the weight of one compressed/coated tablet or filled capsule that production keys in.
 const ACTUAL_UOMS: Record<Step, string[]> = {
-  dispensing: ["kg", "g", "L", "mL"], tableting: ["tablets", "kg", "g", "L", "mL"], coating: ["tablets", "kg", "g", "L", "mL"], capsulation: ["capsules", "kg", "g", "L", "mL"],
+  dispensing: ["kg", "g", "L", "mL"], tableting: ["kg", "g", "L", "mL"], coating: ["kg", "g", "L", "mL"], capsulation: ["kg", "g", "L", "mL"],
   filling: ["bottles", "blisters", "sachets", "pouches"], packing: ["boxes"]
 };
 export function actualUoms(processName: string, plannedUom?: string) {
