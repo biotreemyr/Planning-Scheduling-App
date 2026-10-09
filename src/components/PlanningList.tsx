@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { CheckCircle2, GripVertical, Plus } from "lucide-react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
@@ -9,7 +9,7 @@ import { canMovePlan, monthDates } from "@/lib/services/planningMonth";
 import { orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
 import { OrderBadge, PriorityMark } from "./OrderBadge";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
-import { daysBetween, lineDays, lineEnd } from "@/lib/services/scheduling";
+import { lineDays, lineEnd } from "@/lib/services/scheduling";
 
 type Target = { date: string; calendarId: string };
 // kind "resize": dragging the card's bottom edge to the activity's last planned day.
@@ -166,6 +166,27 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
     return () => { window.removeEventListener("keydown", escape); cancelDrag(); };
   }, []);
 
+  // A several-day activity's box runs from its card down to the bottom of its last day's slot.
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    if (!box) return;
+    const fit = () => {
+      for (const extension of box.querySelectorAll<HTMLElement>("[data-extension-for]")) {
+        const id = extension.dataset.extensionFor!;
+        const card = box.querySelector<HTMLElement>(`[data-span-id="${CSS.escape(id)}"]`);
+        const slots = [...box.querySelectorAll<HTMLElement>(`[data-span-part="${CSS.escape(id)}"]`)];
+        const last = box.querySelector<HTMLElement>(`[data-span-end="${CSS.escape(id)}"]`) ?? slots.at(-1);
+        if (!card || !last) { extension.style.height = "0px"; continue; }
+        extension.style.height = `${Math.max(0, last.getBoundingClientRect().bottom - card.getBoundingClientRect().bottom)}px`;
+      }
+    };
+    fit();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(box);
+    return () => observer.disconnect();
+  });
+
   // Without processes the month still shows, with one empty column.
   const columns = calendars.length ? calendars : [{ id: "", unitId: "", processId: "", name: "No processes to show" }];
   const dragging = moving && ghost ? lines.find((line) => line.id === moving.id) : undefined;
@@ -192,21 +213,11 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
               const inRange = moving?.kind === "resize" && dragging && moving.target && dragging.calendarId === calendar.id && day >= dragging.plannedDate && day <= moving.target.date;
               return <td key={calendar.id} data-cell-date={day} data-cell-calendar={calendar.id} className={[isTarget ? "plan-list-drop-target" : "", droppable ? "plan-grid-droppable" : "", inRange ? "plan-list-resize-range" : ""].join(" ").trim() || undefined}>
                 <div className="plan-grid-cell">
-                  {/* The later days of activities that run over several days. */}
-                  {lines.filter((line) => line.calendarId === calendar.id && line.plannedDate < day && lineEnd(line) >= day).map((line) => {
-                    const order = orders.find((item) => item.id === line.productionOrderId);
-                    const number = order ? numbers.get(order.id) : undefined;
-                    const name = products.find((item) => item.id === line.productId)?.name ?? "Unknown product";
-                    const facts = activityFacts(line, jobOrders);
-                    return <div key={`${line.id}-${day}`} className={`plan-grid-item plan-grid-continued${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}`} style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
-                      onPointerDown={(event) => { if (lineEnd(line) === day && (event.target as HTMLElement).closest(".plan-list-resize")) pointerDown(event, line, name); }}>
-                      <button className="plan-list-product" type="button" title={`${name} · ${facts.jobNumber} · day ${daysBetween(line.plannedDate, day) + 1} of ${lineDays(line)}`} onClick={() => { if (!suppressClick.current) onSelect(line.id); }}>
-                        <small>↳ {name}{facts.jobNumber ? ` · ${facts.jobNumber}` : ""} · day {daysBetween(line.plannedDate, day) + 1} of {lineDays(line)}</small>
-                      </button>
-                      {lineEnd(line) === day && canMovePlan(line, canPlan) && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag to change the last day of ${name}`} /> : null}
-                    </div>;
-                  })}
-                  {lines.filter((line) => line.plannedDate === day && line.calendarId === calendar.id).map((line) => {
+                  {/* The later days of an activity that runs over several days keep its place in the column;
+                      the activity's own box is drawn down over them, so it reads as one box. */}
+                  {lines.filter((line) => line.calendarId === calendar.id && line.plannedDate < day && lineEnd(line) >= day).map((line) =>
+                    <div key={`${line.id}-${day}`} className="plan-span-slot" aria-hidden="true" data-span-part={line.id} data-span-end={lineEnd(line) === day ? line.id : undefined} />)}
+                  {lines.filter((line) => line.plannedDate === day && line.calendarId === calendar.id).sort((a, b) => Number(lineDays(b) > 1) - Number(lineDays(a) > 1)).map((line) => {
                     const product = products.find((item) => item.id === line.productId);
                     const name = product?.name ?? "Unknown product";
                     const movable = canMovePlan(line, canPlan);
@@ -219,7 +230,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                     const batch = [facts.batchNumber, facts.jobNumber].filter(Boolean).join(" · ");
                     // A several-day activity shows its days: "3 days, to 10 Oct".
                     const detail = line.endDate && line.endDate > line.plannedDate ? `${facts.quantity} · ${lineDays(line)} days, to ${new Date(`${line.endDate}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}` : facts.quantity;
-                    return <div key={line.id} data-movable={movable || undefined} className={`plan-grid-item${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
+                    return <div key={line.id} data-movable={movable || undefined} data-span-id={lineDays(line) > 1 ? line.id : undefined} className={`plan-grid-item${lineDays(line) > 1 ? " plan-grid-spanning" : ""}${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
                       style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
                       onPointerDown={(event) => pointerDown(event, line, name)} onContextMenu={(event) => { if (drag.current?.touch) event.preventDefault(); }}>
                       {movable ? <button type="button" className="icon-button plan-list-grip" title={`Move ${name}`} aria-label={`Move ${name}`} aria-describedby="list-move-help"
@@ -234,7 +245,10 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                         {batch ? <span className="plan-list-batch">{batch}</span> : null}
                         <small>{detail}</small>
                       </button>
-                      {movable && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag down to the last day of ${name}`} /> : null}
+                      {lineDays(line) > 1 ? <div className="plan-span-extension" data-extension-for={line.id} onClick={() => { if (!suppressClick.current) onSelect(line.id); }} title={`${name} · ${batch} · ${detail}`}>
+                        <small>{lineDays(line)} days · until {new Date(`${lineEnd(line)}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</small>
+                        {movable && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag to change the last day of ${name}`} /> : null}
+                      </div> : movable && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag down to the last day of ${name}`} /> : null}
                     </div>;
                   })}
                   {canCreate && calendar.id && !dragging ? <button className="icon-button plan-list-add" type="button" title={`Add ${calendar.name} activity on ${day}`} aria-label={`Add ${calendar.name} activity on ${day}`} onClick={() => onCreate(day, calendar.id)}><Plus size={14} /></button> : null}

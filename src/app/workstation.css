@@ -547,6 +547,12 @@
 .plan-grid-item { position: relative; }
 .plan-list-resize { position: absolute; left: 6px; right: 6px; bottom: -3px; height: 8px; cursor: row-resize; border-radius: 4px; touch-action: none; }
 .plan-grid-item:hover .plan-list-resize, .plan-grid-item:focus-within .plan-list-resize { background: repeating-linear-gradient(90deg, #2c3e3566 0 6px, transparent 6px 10px); background-size: 100% 2px; background-repeat: no-repeat; background-position: center; }
-.plan-grid-continued { opacity: 0.85; }
-.plan-grid-continued .plan-list-product small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+/* A several-day activity: its card continues as one box down to its last day. The later days keep
+   an empty slot so other activities sit below it. */
+.plan-span-slot { height: 30px; flex: none; }
+.workstation .plan-grid-item.plan-grid-spanning { flex-wrap: wrap; z-index: 1; }
+.plan-span-extension { position: absolute; left: -5px; right: 0; top: 100%; border-left: 5px solid var(--order-color); background: color-mix(in srgb, var(--order-color) 10%, white); cursor: pointer; display: flex; align-items: flex-end; padding: 0 8px 4px; box-sizing: border-box; }
+.plan-span-extension small { color: var(--muted); font-size: 11px; }
+.plan-grid-item.completed .plan-span-extension { background: #ecefed; }
+.plan-span-extension .plan-list-resize { bottom: -3px; }
 .plan-list-resize-range { background: #dcefe5 !important; }
