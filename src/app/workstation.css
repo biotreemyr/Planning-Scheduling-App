@@ -578,3 +578,4 @@
 /* Summary grid: each stage (Planning, Production, QC testing, QA release) heads its rows. */
 .order-flow-grid .order-flow-stage th { background: #eef3f7; color: #2c3e35; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; padding: 6px 8px; text-align: left; }
 .order-flow-grid td small, .order-flow-grid th small { display: block; color: var(--muted); font-weight: 400; }
+.order-flow-grid td.order-flow-done { background: #d3f0dc; } .order-flow-grid td.order-flow-done .badge.success { background: #2b8a3e; color: #fff; }

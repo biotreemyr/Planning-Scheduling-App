@@ -470,24 +470,28 @@ function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: Purc
   const day = (value?: string) => value ? shortDate(value.slice(0, 10)) : "";
   if (!jobs.length) return <p className="order-empty">No job orders yet. Key them in under Job orders, then plan them on the Planner Board.</p>;
   const stage = (label: string) => <tr className="order-flow-stage"><th scope="rowgroup" colSpan={jobs.length + 2}>{label}</th></tr>;
-  const row = (label: string, cell: (job: JobOrder) => ReactNode, total?: ReactNode) => <tr><th scope="row" className="order-batch-process">{label}</th>
-    {jobs.map((job) => <td key={job.id} className="order-batch-col">{cell(job)}</td>)}<td className="order-batch-summary">{total}</td></tr>;
+  const row = (label: string, cell: (job: JobOrder) => ReactNode, total?: ReactNode, done?: (job: JobOrder) => boolean) => <tr><th scope="row" className="order-batch-process">{label}</th>
+    {jobs.map((job) => <td key={job.id} className={`order-batch-col${done?.(job) ? " order-flow-done" : ""}`}>{cell(job)}</td>)}<td className="order-batch-summary">{total}</td></tr>;
   const states = new Map(jobs.map((job) => [job.id, batchStatus(job, lines, transfers)]));
+  // Planned quantity in boxes (the job order's total packs), else its batch quantity.
+  const plannedBoxes = (job: JobOrder) => processQuantity(job, "packing") ?? { quantity: job.quantity, uom: job.uom };
+  const plannedUoms = [...new Set(jobs.map((job) => plannedBoxes(job).uom))];
+  const plannedTotal = <small>{plannedUoms.map((uom) => `${amount(jobs.filter((job) => plannedBoxes(job).uom === uom).reduce((sum, job) => sum + plannedBoxes(job).quantity, 0))} ${uom}`).join(" · ")}{plannedUoms.length === 1 && plannedUoms[0] === order.uom ? ` of ${amount(order.quantity)} ordered` : ""}</small>;
   const released = jobs.filter((job) => job.releasedAt && job.releaseUom);
   const releasedUoms = [...new Set(released.map((job) => job.releaseUom!))];
   return <div className="order-batch-scroll"><table className="order-batch-table order-flow-grid">
-    <thead><tr><th scope="col" className="order-batch-process">Flow</th>{jobs.map((job) => <th scope="col" key={job.id} className="order-batch-col"><strong>{job.number}</strong><small>Batch {job.sequence}</small></th>)}<th scope="col" className="order-batch-summary">Summary</th></tr></thead>
+    <thead><tr><th scope="col" className="order-batch-process">Job order</th>{jobs.map((job) => <th scope="col" key={job.id} className="order-batch-col"><strong>{job.number}</strong></th>)}<th scope="col" className="order-batch-summary">Total</th></tr></thead>
     <tbody>
       {stage("Planning")}
-      {row("Job order", (job) => <strong>{job.number}</strong>, <small>{jobs.length} job order{jobs.length === 1 ? "" : "s"}</small>)}
-      {row("Planned quantity", (job) => `${amount(job.quantity)} ${job.uom}`, <small>{amount(jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + job.quantity, 0))} of {amount(order.quantity)} {order.uom}</small>)}
+      {row("Planned quantity", (job) => { const planned = plannedBoxes(job); return `${amount(planned.quantity)} ${planned.uom}`; }, plannedTotal)}
       {row("Batch number", (job) => job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Not keyed in</span>)}
       {stage("Production")}
       {matrix.rows.length ? matrix.rows.map((process) => {
         const percent = process.planned ? Math.min(100, Math.round(process.completed / process.planned * 100)) : 0;
         return <Fragment key={process.calendar.id}>{row(process.processName, (job) => <BatchStatus cell={process.cells[job.number]} uom={process.uom} />,
           <><div className="batch-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={`${process.processName} ${percent}% complete`}><span style={{ width: `${percent}%` }} /></div>
-            <small>{process.completed.toLocaleString()} / {process.planned.toLocaleString()} {process.uom} · {percent}%</small></>)}</Fragment>;
+            <small>{process.completed.toLocaleString()} / {process.planned.toLocaleString()} {process.uom} · {percent}%</small></>,
+          (job) => { const cell = process.cells[job.number]; return !!cell && cell.days > 0 && cell.daysDone === cell.days; })}</Fragment>;
       }) : row("Not planned yet", () => <span className="route-muted">-</span>)}
       {stage("QC testing")}
       {row("Result", (job) => {
@@ -533,7 +537,7 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
     {order.deliveryDate && lastDate > order.deliveryDate ? <p className="order-warning" role="alert">Production is scheduled until {displayDate(lastDate)}, after the expected customer delivery on {displayDate(order.deliveryDate)}.</p> : null}
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <details className="order-section">
-      <summary className="order-section-summary"><h3>Summary</h3><span className="route-muted">Planning · Production · QC testing · QA release</span></summary>
+      <summary className="order-section-summary"><h3>Progress</h3><span className="route-muted">Planning · Production · QC testing · QA release</span></summary>
       <OrderFlow order={order} jobOrders={jobOrders} lines={lines} transfers={transfers} matrix={matrix} />
     </details>
     {jobActions ? <JobOrders order={order} product={product} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
