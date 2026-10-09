@@ -3,6 +3,7 @@ import type { PlanLine, Product, ScheduleEntry } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
 import { lineEnd } from "./scheduling";
 import { unitRoute, unitRouteLabel } from "./processSetup";
+import { formatDate } from "./dates";
 
 export const PRODUCT_FORMATS = ["Capsule", "Tablet", "Sachet", "Other"] as const;
 export type ProductFormat = (typeof PRODUCT_FORMATS)[number];
@@ -57,7 +58,7 @@ export function inferFormat(product?: Pick<Product, "name" | "uom">): ProductFor
 
 export type FlowWarning = { kind: "route" | "missing" | "sequence" | "booking" | "tally"; lineIds: string[]; orderId?: string; batch?: string; message: string };
 
-const pretty = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+const pretty = (date: string) => formatDate(date.slice(0, 10));
 function bookingDate(value: string) {
   if (!/Z$|[+-]\d{2}:\d{2}$/.test(value)) return value.slice(0, 10);
   const date = new Date(value);

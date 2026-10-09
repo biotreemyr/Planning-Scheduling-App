@@ -44,6 +44,7 @@ import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/serv
 import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
 import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
+import { formatDate, formatDateTime } from "@/lib/services/dates";
 
 type Tab = "planner" | "orders" | "status" | "master" | "reports" | "audit";
 type PlanningView = "calendar" | "list";
@@ -60,18 +61,11 @@ const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
 const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 
 function toDisplayDate(value: string) {
-  return value.split("-").reverse().join("-");
+  return formatDate(value.slice(0, 10));
 }
 
 function toTimeRange(entry: ScheduleEntry) {
-  const format = new Intl.DateTimeFormat("en-MY", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-
-  return `${format.format(new Date(entry.startAt))} - ${format.format(new Date(entry.endAt))}`;
+  return `${formatDateTime(entry.startAt)} - ${formatDateTime(entry.endAt)}`;
 }
 
 function labelFor<T extends { id: string; name: string }>(items: T[], id?: string) {
@@ -850,7 +844,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     if ("error" in result) return result.error;
     if (result.lines === data.lines) return "";
     setData((current) => ({ ...current, lines: result.lines, entries: result.entries }));
-    const when = new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+    const when = formatDate(date);
     const moved = new Set(result.movedEntryIds);
     const clash = findMachineConflicts(result.entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => moved.has(entryId)));
     const flowWarning = checkProcessFlow(result.lines, result.entries, data.orders, products, directory).find((warning) => warning.lineIds.includes(id) && !flow.some((old) => old.message === warning.message));
@@ -866,7 +860,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     if (result.lines === data.lines) return "";
     setData((current) => ({ ...current, lines: result.lines, entries: result.entries }));
     const line = result.lines.find((item) => item.id === id)!;
-    const day = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+    const day = (value: string) => formatDate(value.slice(0, 10));
     const span = line.endDate ? `${day(line.plannedDate)} – ${day(line.endDate)}` : day(line.plannedDate);
     const changed = new Set(result.changedEntryIds);
     const clash = findMachineConflicts(result.entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => changed.has(entryId)));

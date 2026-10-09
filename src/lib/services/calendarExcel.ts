@@ -2,6 +2,7 @@ import type { Workbook, Worksheet } from "exceljs";
 import { listPrintCells, printDates, printedActivity, printedListActivity, scheduleDetail, type CalendarPrintInput, type ListPrintInput } from "./calendarPrint";
 import { monthDates } from "./planningMonth";
 import type { PlanLine } from "@/lib/domain/types";
+import { formatDate, weekday } from "./dates";
 
 /**
  * The planner's print, as an Excel workbook. Sheet 1 follows the PDF's layout (the month list by
@@ -56,7 +57,7 @@ function scheduleSheet(book: Workbook, input: Pick<CalendarPrintInput, "products
       job: detail.jobNumber || detail.reference, batch: detail.batchNumber, kg: job?.batchSizeKg ?? null, pack: detail.packSize,
       quantity: detail.quantityValue, uom: detail.uom, po: detail.poNumber, customer: detail.customer, priority: detail.priority, status: detail.status
     });
-    row.getCell("date").numFmt = "dd-mm-yyyy";
+    row.getCell("date").numFmt = "dd/mm/yyyy";
     row.getCell("quantity").numFmt = "#,##0.###";
     row.getCell("kg").numFmt = "#,##0.###";
     row.eachCell((cell) => { cell.border = boxed; });
@@ -78,7 +79,7 @@ export function buildListWorkbook(excel: ExcelModule, input: ListPrintInput) {
   const dates = monthDates(input.date);
   dates.forEach((day, offset) => {
     const row = sheet.getRow(5 + offset);
-    row.getCell(1).value = dayLabel(day, { weekday: "short", day: "2-digit", month: "short" });
+    row.getCell(1).value = `${weekday(day)} ${formatDate(day)}`;
     row.getCell(1).font = { bold: true };
     listPrintCells(day, input.lines, columns).forEach((lines, index) => {
       row.getCell(index + 2).value = lines.map((line) => { const activity = printedListActivity(line, input.products, input.orders, input.jobOrders); return activityText([activity.productName, activity.batch, activity.detail]); }).join("\n\n");
@@ -110,7 +111,7 @@ export function buildCalendarWorkbook(excel: ExcelModule, input: CalendarPrintIn
     dates.slice(offset, offset + perRow).forEach((day, index) => {
       const activities = input.lines.filter((line) => line.plannedDate === day).map((line) => { const activity = printedActivity(line, input.products, input.orders, input.jobOrders); return activityText([activity.productName, activity.batch, activity.quantity]); });
       const cell = row.getCell(index + 1);
-      cell.value = [dayLabel(day, { weekday: "short", day: "numeric", month: "short" }), ...activities].join("\n\n");
+      cell.value = [`${weekday(day)} ${formatDate(day)}`, ...activities].join("\n\n");
       cell.border = boxed; cell.alignment = { vertical: "top", wrapText: true };
       // Days outside the month are greyed, as on the calendar.
       if (input.view === "month" && day.slice(0, 7) !== input.date.slice(0, 7)) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: WEEKEND } };

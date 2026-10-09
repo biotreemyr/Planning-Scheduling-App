@@ -6,6 +6,7 @@ import { orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib
 import type { FlowWarning, ProductFormat } from "@/lib/services/processRules";
 import { OrderBadge } from "./OrderBadge";
 import type { JobOrder } from "@/lib/services/jobOrders";
+import { formatDate } from "@/lib/services/dates";
 
 export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, children, jobOrders = [], format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
   children?: ReactNode;
@@ -43,7 +44,7 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, edi
   onAssign?: (lineIds: string[], machineId: string) => string[]; onOpenLine?: (id: string) => void;
 }) {
   const [messages, setMessages] = useState<Record<string, string[]>>({});
-  const day = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  const day = (value: string) => formatDate(value.slice(0, 10));
   return <section className="production-route"><h3>Production route{line.orderReference ? ` · ${line.orderReference}` : ""}</h3>
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <table>

@@ -2,10 +2,11 @@
 import { useEffect, useState } from "react";
 import { FileSpreadsheet, RotateCw, X } from "lucide-react";
 import type { HistoryEntry, HistoryKind } from "@/lib/services/history";
+import { formatDateTime } from "@/lib/services/dates";
 
 type Row = { key: string; at: string; by: string; kind: HistoryKind; po: string; job: string; batch: string; product: string; text: string };
 const KINDS: HistoryKind[] = ["PO", "Customer", "Job order", "Planning", "Production", "Transfer", "Machine booking", "Setup"];
-const when = (iso: string) => iso ? new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "") : "-";
+const when = (iso: string) => formatDateTime(iso);
 
 /**
  * Every transaction since the scheduler started, newest first: when, who, what kind, the PO, job
@@ -49,7 +50,7 @@ export function HistoryPanel({ refreshKey }: { refreshKey: string }) {
       { header: "Product", key: "product", width: 32 }, { header: "Change", key: "text", width: 80 }
     ];
     sheet.getRow(1).font = { bold: true };
-    for (const row of shown) sheet.addRow({ ...row, at: row.at ? new Date(row.at) : "" }).getCell("at").numFmt = "dd-mm-yyyy hh:mm";
+    for (const row of shown) sheet.addRow({ ...row, at: row.at ? new Date(row.at) : "" }).getCell("at").numFmt = "dd/mm/yyyy hh:mm";
     sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 8 } };
     sheet.pageSetup = { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "1:1" };
     const url = URL.createObjectURL(new Blob([await book.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));

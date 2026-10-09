@@ -12,8 +12,9 @@ import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
 import { PRODUCT_FORMATS, inferFormat, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
 import { unitRoute, unitRouteLabel } from "@/lib/services/processSetup";
+import { formatDate, formatDateTime } from "@/lib/services/dates";
 
-const displayDate = (value: string) => value.split("-").reverse().join("-");
+const displayDate = (value: string) => formatDate(value.slice(0, 10));
 const statuses: OrderStatus[] = ["Not scheduled", "Scheduled", "In production", "Completed"];
 const statusBadge: Record<OrderStatus, string> = { "Not scheduled": "neutral", Scheduled: "info", "In production": "warning", Completed: "success" };
 
@@ -278,7 +279,7 @@ const progressText = (progress: OrderProgress) => !progress.processCount ? "Not 
 // Print sheet for the Orders tab: the order list as shown, or one order with its batch grid.
 function OrdersPrint({ rows, orders, detail, lines, directory, visibleCalendarIds, filtered }: { rows: Row[]; orders: PurchaseOrder[]; detail: boolean; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; filtered: boolean }) {
   if (typeof document === "undefined") return null;
-  const printed = new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const printed = formatDateTime(new Date());
   return createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
     {detail && rows[0] ? <OrderPrintDetail row={rows[0]} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} printed={printed} /> : <>
       <header><h1>Customer orders</h1><p>{rows.length} order{rows.length === 1 ? "" : "s"}{filtered ? " (filtered)" : ""} · printed {printed}</p></header>
@@ -423,7 +424,7 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
   </section>;
 }
 
-const shortDate = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+const shortDate = (value: string) => formatDate(value.slice(0, 10));
 
 // The order's summary as its flow, one column per job order and the stages down the side:
 // Planning (job order, planned quantity, batch number), Production (one row per process: days,

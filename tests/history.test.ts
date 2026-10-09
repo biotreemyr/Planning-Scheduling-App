@@ -17,15 +17,15 @@ describe("transaction history", () => {
     const line = { ...base.data.lines.find((item) => item.productId === order.productId)!, id: "line-x", jobOrderId: "job-x", productionOrderId: order.id, orderReference: "JO0050", activityType: "Dispensing", plannedDate: "2026-10-19", quantity: 75, uom: "kg", completedAt: undefined, yieldQuantity: undefined };
     withBatch.data.lines.push(line);
     const planned = describeChanges(withJob, withBatch);
-    expect(planned.map((change) => change.text)).toEqual(["Batch number for JO0050 set to FA-050", "Planned Dispensing · Folic Acid 400mcg Tablets on 19-10-2026: 75 kg"]);
+    expect(planned.map((change) => change.text)).toEqual(["Batch number for JO0050 set to FA-050", "Planned Dispensing · Folic Acid 400mcg Tablets on 19/10/2026: 75 kg"]);
     expect(planned[1]).toMatchObject({ kind: "Planning", po: "PO-2610-142", job: "JO0050", batch: "FA-050" });
 
     const done = structuredClone(withBatch);
     Object.assign(done.data.lines.at(-1)!, { plannedDate: "2026-10-20", startedAt: "2026-10-20", completedAt: "2026-10-20T09:00:00.000Z", yieldQuantity: 74.2 });
     expect(describeChanges(withBatch, done).map((change) => change.text)).toEqual([
-      "Dispensing · Folic Acid 400mcg Tablets started on 20-10-2026",
-      "Dispensing · Folic Acid 400mcg Tablets completed on 20-10-2026: 74.2 kg (planned 75 kg)",
-      "Dispensing · Folic Acid 400mcg Tablets: moved 19-10-2026 → 20-10-2026"
+      "Dispensing · Folic Acid 400mcg Tablets started on 20/10/2026",
+      "Dispensing · Folic Acid 400mcg Tablets completed on 20/10/2026: 74.2 kg (planned 75 kg)",
+      "Dispensing · Folic Acid 400mcg Tablets: moved 19/10/2026 → 20/10/2026"
     ]);
   });
   it("lists versions newest first with who and when, skipping saves that changed nothing", () => {

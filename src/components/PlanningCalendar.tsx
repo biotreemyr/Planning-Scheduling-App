@@ -14,6 +14,7 @@ import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
 import { lineEnd } from "@/lib/services/scheduling";
 import type { ProcessSettings } from "@/lib/services/processSetup";
 import { JobPlanDialog, type JobPlan, type PlanRequest } from "./JobPlanDialog";
+import { formatDate } from "@/lib/services/dates";
 
 type View = "month" | "week" | "day";
 const NO_ORDER = "#ffffff";
@@ -150,8 +151,7 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
     if (!ready || !instance) return;
     instance.setDate(date);
     instance.changeView(displayView);
-    const format = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
-    const displayDate = (value: Date) => format.format(value).replaceAll("/", "-");
+    const displayDate = (value: Date) => formatDate(value);
     setRange(displayView === "month"
       ? new Intl.DateTimeFormat("en-MY", { month: "long", year: "numeric" }).format(new Date(`${date}T12:00`))
       : displayView === "day" ? displayDate(instance.getDateRangeStart().toDate())
@@ -220,7 +220,7 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
     }} /></div>
     {hover && hoverLine ? <div role="tooltip" className="activity-preview" style={{ left: hover.left, top: hover.top }}>
       <h3>{products.find((item) => item.id === hoverLine.productId)?.name}</h3>
-      <p>{hoverLine.plannedDate.split("-").reverse().join("-")} · {hoverLine.quantity.toLocaleString()} {hoverLine.uom ?? products.find((item) => item.id === hoverLine.productId)?.uom}</p>
+      <p>{formatDate(hoverLine.plannedDate)} · {hoverLine.quantity.toLocaleString()} {hoverLine.uom ?? products.find((item) => item.id === hoverLine.productId)?.uom}</p>
       <p>{hoverLine.activityType}{hoverLine.batchSizeKg !== undefined ? ` · ${hoverLine.batchSizeKg} kg equivalent` : ""}</p>
       <div className="record-meta"><StatusBadge value={hoverLine.priority} /><StatusBadge value={hoverLine.completedAt ? "Completed" : hoverLine.status} /></div>
       {hoverLine.orderReference ? <p>{hoverLine.orderReference}{(() => { const batch = jobOrders.find((item) => item.id === hoverLine.jobOrderId)?.batchNumber; return batch ? ` · Batch no. ${batch}` : ""; })()}</p> : null}
@@ -239,7 +239,7 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
     {selected ? <section className="calendar-detail" aria-label="Plan line details">
       <button type="button" className="icon-button detail-close" aria-label="Close plan details" title="Close plan details" onClick={() => setSelectedId(null)}><X size={18} /></button>
       <h3>{product?.name ?? "Unknown product"}</h3>
-      <p>{selected.plannedDate.split("-").reverse().join("-")} · {selected.quantity.toLocaleString()} {selected.uom ?? product?.uom} {selected.orderReference ? `· ${selected.orderReference}` : ""}</p>
+      <p>{formatDate(selected.plannedDate)} · {selected.quantity.toLocaleString()} {selected.uom ?? product?.uom} {selected.orderReference ? `· ${selected.orderReference}` : ""}</p>
       <p>{selected.activityType}{selected.unitWeightMg !== undefined ? ` · ${selected.unitWeightMg} mg per unit` : ""}{selected.batchSizeKg !== undefined ? ` · ${selected.batchSizeKg} kg equivalent` : ""}</p>
       <div className="record-meta"><StatusBadge value={selected.priority} /><StatusBadge value={selected.status} /></div>
       {selected.notes ? <p>{selected.notes}</p> : null}

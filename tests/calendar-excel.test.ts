@@ -33,6 +33,6 @@ describe("schedule as Excel", () => {
     expect(sheet.getCell("A2").value).toBe("MONTH PLAN | 2026-10");
     expect(sheet.getRow(4).values).toEqual([, "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
     // 19 Oct 2026 is the Monday of the fourth week row.
-    expect(String(sheet.getCell("A8").value)).toMatch(/^Mon 19 Oct[\s\S]*Batch FA-050/);
+    expect(String(sheet.getCell("A8").value)).toMatch(/^Mon 19\/10\/2026[\s\S]*Batch FA-050/);
   });
 });

@@ -4,6 +4,7 @@
  * carrying the PO, job order and batch number it concerns so a batch can be traced end to end.
  * Snapshots are read loosely: versions saved before a field existed still describe correctly.
  */
+import { formatDate } from "./dates";
 type Row = Record<string, unknown> & { id?: string };
 type Snapshot = { products?: Row[]; directory?: { calendars?: Row[]; processes?: Row[]; units?: Row[] }; data?: Record<string, Row[] | undefined> } & Record<string, unknown>;
 
@@ -14,7 +15,7 @@ export type HistoryEntry = { revision: number; at: string; by: string; changes: 
 const list = (snapshot: Snapshot, key: string) => (snapshot.data?.[key] ?? []) as Row[];
 const str = (value: unknown) => typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
 const num = (value: unknown) => typeof value === "number" ? value.toLocaleString("en-GB", { maximumFractionDigits: 3 }) : str(value);
-const day = (value: unknown) => { const text = str(value); return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10).split("-").reverse().join("-") : text; };
+const day = (value: unknown) => { const text = str(value); return /^\d{4}-\d{2}-\d{2}/.test(text) ? formatDate(text.slice(0, 10)) : text; };
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 function byId(rows: Row[]) { return new Map(rows.filter((row) => row.id).map((row) => [row.id!, row])); }
 function diff(before: Row[], after: Row[]) {

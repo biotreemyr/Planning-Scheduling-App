@@ -6,10 +6,11 @@ import type { CompletionInput, CorrectionInput, WipTransfer } from "@/lib/servic
 import { stepOf } from "@/lib/services/processRules";
 import { REPORT_UOMS, calendarSettings } from "@/lib/services/processSetup";
 import { countFromWeight, unitSizeUom } from "@/lib/services/measurements";
+import { formatDate } from "@/lib/services/dates";
 
 // Today as YYYY-MM-DD in local time.
 const today = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
-const display = (value: string) => value.slice(0, 10).split("-").reverse().join("-");
+const display = (value: string) => formatDate(value.slice(0, 10));
 // A stored timestamp's local day, YYYY-MM-DD.
 const localDay = (value: string) => { const date = new Date(value); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; };
 

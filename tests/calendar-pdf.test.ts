@@ -37,7 +37,7 @@ describe("calendar PDF", () => {
     lines[1] = { ...lines[1], productionOrderId: "order-1" };
     const content = buildListPdf({ title: "Manufacturing", date: "2026-09-14", lines, products: seedData.products, columns, orders }).output();
     expect(content).toContain("#7 PWL 005144");
-    for (const text of ["Unit: Manufacturing", "PRODUCTION LIST | 2026-09", "Dispensing", "Packing", "Batch 3 · 1,200 kg", "Mon 14 Sept", "Wed 30 Sept"]) expect(content).toContain(text);
+    for (const text of ["Unit: Manufacturing", "PRODUCTION LIST | 2026-09", "Dispensing", "Packing", "Batch 3 · 1,200 kg", "Mon 14/09/2026", "Wed 30/09/2026"]) expect(content).toContain(text);
     expect(content).not.toContain("Enzyme Blend");
   });
   it("paginates a dense list without dropping activities", () => {

@@ -5,11 +5,12 @@ import { CheckCircle2, PackageCheck, Printer, Search, XCircle } from "lucide-rea
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { finalOutput, finishedOn, packingNumber, releaseQueue, testingQueue, testResult, type JobOrder, type TestResult } from "@/lib/services/jobOrders";
 import type { PurchaseOrder } from "@/lib/services/orders";
+import { formatDate, formatDateTime } from "@/lib/services/dates";
 
 export type StatusSection = "testing" | "release";
 export type StatusAccess = { viewTesting: boolean; passTesting: boolean; printTesting: boolean; viewRelease: boolean; release: boolean; printRelease: boolean };
 
-const day = (value?: string) => value ? new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+const day = (value?: string) => formatDate(value);
 const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
 
 /**
@@ -99,7 +100,7 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, acc
       </table>
     </div>
     {printing && typeof document !== "undefined" ? createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
-      <header><h1>{section === "testing" ? "Testing" : "Release"} list</h1><p>{rows.length} batch{rows.length === 1 ? "" : "es"} pending · printed {new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p></header>
+      <header><h1>{section === "testing" ? "Testing" : "Release"} list</h1><p>{rows.length} batch{rows.length === 1 ? "" : "es"} pending · printed {formatDateTime(new Date())}</p></header>
       <table className="print-orders-table">
         <thead><tr><th>PJO no.</th><th>Product</th><th>Batch no.</th><th>Job order no.</th><th>PO</th><th>Final output</th>{section === "testing" ? <><th>Finished</th><th>Status</th></> : <><th>Passed testing</th><th>Release quantity</th></>}</tr></thead>
         <tbody>{rows.map((job) => { const { order, product, output } = details(job); return <tr key={job.id}>

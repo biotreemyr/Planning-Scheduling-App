@@ -10,6 +10,7 @@ import { orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/ord
 import { OrderBadge, PriorityMark } from "./OrderBadge";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
 import { lineDays, lineEnd } from "@/lib/services/scheduling";
+import { formatDate } from "@/lib/services/dates";
 
 type Target = { date: string; calendarId: string };
 // kind "resize": dragging the card's bottom edge to the activity's last planned day.
@@ -166,7 +167,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
     return () => { window.removeEventListener("keydown", escape); cancelDrag(); };
   }, []);
 
-  // A several-day activity's box runs from its card down to the bottom of its last day's slot.
+  // A several-day activity's box runs from its card down to the bottom of its last day's cell, so it fills the column.
   useLayoutEffect(() => {
     const box = scroller.current;
     if (!box) return;
@@ -177,7 +178,8 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
         const slots = [...box.querySelectorAll<HTMLElement>(`[data-span-part="${CSS.escape(id)}"]`)];
         const last = box.querySelector<HTMLElement>(`[data-span-end="${CSS.escape(id)}"]`) ?? slots.at(-1);
         if (!card || !last) { extension.style.height = "0px"; continue; }
-        extension.style.height = `${Math.max(0, last.getBoundingClientRect().bottom - card.getBoundingClientRect().bottom)}px`;
+        const bottom = (last.closest("td") ?? last).getBoundingClientRect().bottom - 3;
+        extension.style.height = `${Math.max(0, bottom - card.getBoundingClientRect().bottom)}px`;
       }
     };
     fit();
@@ -204,7 +206,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
         <tbody>{dates.map((day) => {
           const weekday = new Date(`${day}T12:00:00`).getDay();
           return <tr key={day} data-list-date={day} className={[day === today ? "plan-grid-today" : "", weekday === 0 || weekday === 6 ? "plan-grid-weekend" : ""].join(" ").trim() || undefined}>
-            <th scope="row"><time dateTime={day}>{label(day, { day: "2-digit", month: "short" })}<small>{label(day, { weekday: "short" })}</small></time></th>
+            <th scope="row"><time dateTime={day}>{formatDate(day)}<small>{label(day, { weekday: "short" })}</small></time></th>
             {columns.map((calendar) => {
               const target = { date: day, calendarId: calendar.id };
               const isTarget = moving?.target?.date === day && moving.target.calendarId === calendar.id;
@@ -259,7 +261,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
     </div>
     {ghost && dragging ? <div className={`plan-grid-ghost${moving?.target ? "" : " invalid"}`} style={{ left: ghost.x + 14, top: ghost.y + 10, ...(dragging.productionOrderId && numbers.get(dragging.productionOrderId) ? { "--order-color": orderColor(numbers.get(dragging.productionOrderId)!) } : {}) } as React.CSSProperties} aria-hidden="true">
       <strong>{ghost.label}</strong>
-      <small>{moving?.target ? `${moving.kind === "resize" ? "Until " : ""}${label(moving.target.date, { weekday: "short", day: "2-digit", month: "short" })}` : moving?.kind === "resize" ? "Stretch down the same process column" : "Drop in the same process column"}</small>
+      <small>{moving?.target ? `${moving.kind === "resize" ? "Until " : ""}${`${label(moving.target.date, { weekday: "short" })} ${formatDate(moving.target.date)}`}` : moving?.kind === "resize" ? "Stretch down the same process column" : "Drop in the same process column"}</small>
     </div> : null}
   </div>;
 }

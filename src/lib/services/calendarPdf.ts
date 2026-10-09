@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import { listPrintCells, printDates, printedActivity, printedListActivity, type CalendarPrintInput, type ListPrintInput } from "./calendarPrint";
 import { monthDates } from "./planningMonth";
+import { formatDate, weekday } from "./dates";
 
 export type CalendarPdfInput = CalendarPrintInput;
 export function buildCalendarPdf(input: CalendarPdfInput) {
@@ -36,7 +37,7 @@ export function buildCalendarPdf(input: CalendarPdfInput) {
         const x = 10 + index * width;
         doc.setDrawColor(160).setLineWidth(0.2).rect(x, y, width, height);
         doc.setFont("helvetica", "bold").setFontSize(8);
-        const label = new Date(`${day}T12:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+        const label = `${weekday(day)} ${formatDate(day)}`;
         doc.text(`${label}${continuation ? " (cont.)" : ""}`, x + 2.5, y + 5);
         doc.setFont("helvetica", "normal").setFontSize(8);
         const chunk = contents[index].splice(0, count);
@@ -102,7 +103,7 @@ export function buildListPdf(input: ListPrintInput) {
       if (weekend) doc.setFillColor(245, 246, 244).rect(10, y, dateWidth + width * columns.length, height, "F");
       doc.rect(10, y, dateWidth, height);
       doc.setFont("helvetica", "bold").setFontSize(8);
-      doc.text(`${new Date(`${day}T12:00`).toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short" })}${continuation ? " (cont.)" : ""}`, 12, y + 4.5);
+      doc.text(`${weekday(day)} ${formatDate(day)}${continuation ? " (cont.)" : ""}`, 12, y + 4.5);
       cells.forEach((lines, index) => {
         const x = 10 + dateWidth + index * width;
         doc.rect(x, y, width, height);
