@@ -575,3 +575,6 @@
 .order-section-summary::before { content: "▸"; color: var(--muted); }
 .order-section[open] > .order-section-summary::before { content: "▾"; }
 .order-section-summary h3 { margin: 0; font-size: 15px; }
+/* Summary grid: each stage (Planning, Production, QC testing, QA release) heads its rows. */
+.order-flow-grid .order-flow-stage th { background: #eef3f7; color: #2c3e35; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; padding: 6px 8px; text-align: left; }
+.order-flow-grid td small, .order-flow-grid th small { display: block; color: var(--muted); font-weight: 400; }

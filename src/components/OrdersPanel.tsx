@@ -6,7 +6,7 @@ import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, finalOutput, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
-import { nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
+import { type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
@@ -305,7 +305,7 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
   };
   return <>
     <header><h1>Order {row.number} · {row.order.poNumber}{row.order.item ? ` item ${row.order.item}` : ""}</h1><p>{row.order.customerName ?? ""} · {row.product?.name ?? "Unknown product"} · {row.order.quantity.toLocaleString()} {row.order.uom} · printed {printed}</p></header>
-    <p className="print-order-facts">PO received: {row.order.receivedDate ? displayDate(row.order.receivedDate) : "Not set"} · Dosage form: {row.format} ({routeLabel(row.format)}) · Status: {row.progress.status} · {progressText(row.progress)} · Expected delivery: {row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " (overdue)" : ""}</p>
+    <p className="print-order-facts">PO received: {row.order.receivedDate ? displayDate(row.order.receivedDate) : "Not set"} · Status: {row.progress.status} · {progressText(row.progress)} · Expected delivery: {row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " (overdue)" : ""}</p>
     {row.warnings.length ? <ul className="print-order-warnings">{row.warnings.map((warning) => <li key={warning.message}>Warning: {warning.message}</li>)}</ul> : null}
     {matrix.rows.length ? <table className="print-orders-table">
       <thead><tr><th>Process</th>{matrix.batches.map((batch) => <th key={batch.key}>{batch.label}<br />{batch.kg !== undefined ? `${batch.kg.toLocaleString("en-MY", { maximumFractionDigits: 2 })} kg · ` : ""}{batch.quantity.toLocaleString()} {batch.uom}</th>)}<th>Summary</th></tr></thead>
@@ -461,54 +461,55 @@ function BatchStatus({ cell, uom }: { cell?: BatchCell; uom: string }) {
   </div>;
 }
 
-// The order's summary as its flow, one row per job order: planning (job order, batch number, planned
-// quantity), production (each process of the route), QC testing and QA release.
-function OrderFlow({ order, jobOrders, lines, transfers, directory, format }: { order: PurchaseOrder; jobOrders: JobOrder[]; lines: PlanLine[]; transfers: { sourceLineId: string }[]; directory: CalendarDirectory; format: ProductFormat }) {
+// The order's summary as its flow, one column per job order and the stages down the side:
+// Planning (job order, planned quantity, batch number), Production (one row per process: days,
+// status and actual quantity), QC testing (result) and QA release (released, released quantity).
+function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: PurchaseOrder; jobOrders: JobOrder[]; lines: PlanLine[]; transfers: { sourceLineId: string }[]; matrix: OrderBatchMatrix }) {
   const jobs = jobsFor(order.id, jobOrders);
-  const today = localDateKey(new Date());
-  const processName = (calendarId?: string) => { const calendar = directory.calendars.find((item) => item.id === calendarId); return directory.processes.find((item) => item.id === calendar?.processId)?.name ?? calendar?.name ?? ""; };
-  // The route's processes in order, using the unit the job order was planned in.
-  const steps = (job: JobOrder) => {
-    const own = linesForJob(job.id, lines);
-    const unitId = directory.calendars.find((item) => own.some((line) => line.calendarId === item.id))?.unitId ?? order.unitId;
-    const route = format === "Other" ? [] : ROUTES[format];
-    const calendars = directory.calendars.filter((item) => { const step = stepOf(processName(item.id)); return item.unitId === unitId && (!route.length || (!!step && route.includes(step))); });
-    return calendars.map((calendar) => ({ name: processName(calendar.id), lines: own.filter((line) => line.calendarId === calendar.id) })).filter((step) => step.lines.length || route.length);
-  };
   const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
-  if (!jobs.length) return <p className="order-empty">No job orders yet. Key them in below, then plan them on the Planner Board.</p>;
-  return <div className="order-batch-scroll"><table className="order-flow-table">
-    <thead><tr><th scope="col">Planning</th><th scope="col">Production</th><th scope="col">QC testing</th><th scope="col">QA release</th></tr></thead>
-    <tbody>{jobs.map((job) => {
-      const state = batchStatus(job, lines, transfers);
-      const output = finalOutput(job.id, lines, transfers)[0];
-      return <tr key={job.id}>
-        <th scope="row"><strong>{job.number}</strong>
-          <small>Batch no. {job.batchNumber ? <strong>{job.batchNumber}</strong> : "not keyed in"}</small>
-          <small>Planned {amount(job.quantity)} {job.uom}</small></th>
-        <td><ol className="order-flow-steps">{steps(job).map((step) => {
-          const done = step.lines.length > 0 && step.lines.every((line) => line.completedAt);
-          const started = step.lines.some((line) => line.completedAt || line.startedAt);
-          const late = !done && step.lines.some((line) => !line.completedAt && (line.endDate ?? line.plannedDate) < today);
-          const actual = step.lines.reduce((sum, line) => sum + (line.yieldQuantity ?? 0), 0);
-          const uom = step.lines.find((line) => line.completedAt)?.yieldUom ?? step.lines[0]?.uom ?? "";
-          const first = step.lines.map((line) => line.plannedDate).sort()[0];
-          const status = !step.lines.length ? ["Not planned", "neutral"] : done ? ["Done", "success"] : late ? ["Late", "danger"] : started ? ["In progress", "warning"] : ["Planned", "info"];
-          return <li key={step.name}><span className="order-flow-process">{step.name}</span><span className={`badge ${status[1]}`}>{status[0]}</span>
-            <small>{step.lines.some((line) => line.completedAt) ? `${amount(actual)} ${uom}` : started ? `Started ${shortDate(step.lines.map((line) => line.startedAt).filter((value): value is string => !!value).sort()[0] ?? first)}` : first ? shortDate(first) : ""}</small></li>;
-        })}</ol></td>
-        <td>{state === "Awaiting release" || state === "Released" ? <><span className="badge success">Passed</span><small>{job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></>
-          : state === "Failed testing" || state === "Rejected" ? <><span className="badge danger">Failed</span><small>{job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}</small></>
-          : state === "Under investigation" ? <><span className="badge warning">Under investigation</span><small>since {job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}</small></>
-          : state === "Awaiting testing" ? <><span className="badge warning">Awaiting testing</span>{output ? <small>{amount(output.quantity)} {output.uom} finished</small> : null}</>
-          : <span className="route-muted">-</span>}</td>
-        <td>{state === "Released" ? <><span className="badge success">Released</span><small>{amount(job.releaseQuantity ?? 0)} {job.releaseUom}</small><small>{job.releasedAt ? shortDate(job.releasedAt.slice(0, 10)) : ""}{job.releasedBy ? ` · ${job.releasedBy}` : ""}</small></>
-          : state === "Awaiting release" ? <span className="badge info">Awaiting release</span>
-          : state === "Rejected" ? <><span className="badge danger">Rejected</span><small>{job.rejectedAt ? shortDate(job.rejectedAt.slice(0, 10)) : ""}{job.rejectedBy ? ` · ${job.rejectedBy}` : ""}</small></>
-          : state === "Failed testing" ? <span className="badge warning">Awaiting QA rejection</span>
-          : <span className="route-muted">-</span>}</td>
-      </tr>;
-    })}</tbody>
+  const day = (value?: string) => value ? shortDate(value.slice(0, 10)) : "";
+  if (!jobs.length) return <p className="order-empty">No job orders yet. Key them in under Job orders, then plan them on the Planner Board.</p>;
+  const stage = (label: string) => <tr className="order-flow-stage"><th scope="rowgroup" colSpan={jobs.length + 2}>{label}</th></tr>;
+  const row = (label: string, cell: (job: JobOrder) => ReactNode, total?: ReactNode) => <tr><th scope="row" className="order-batch-process">{label}</th>
+    {jobs.map((job) => <td key={job.id} className="order-batch-col">{cell(job)}</td>)}<td className="order-batch-summary">{total}</td></tr>;
+  const states = new Map(jobs.map((job) => [job.id, batchStatus(job, lines, transfers)]));
+  const released = jobs.filter((job) => job.releasedAt && job.releaseUom);
+  const releasedUoms = [...new Set(released.map((job) => job.releaseUom!))];
+  return <div className="order-batch-scroll"><table className="order-batch-table order-flow-grid">
+    <thead><tr><th scope="col" className="order-batch-process">Flow</th>{jobs.map((job) => <th scope="col" key={job.id} className="order-batch-col"><strong>{job.number}</strong><small>Batch {job.sequence}</small></th>)}<th scope="col" className="order-batch-summary">Summary</th></tr></thead>
+    <tbody>
+      {stage("Planning")}
+      {row("Job order", (job) => <strong>{job.number}</strong>, <small>{jobs.length} job order{jobs.length === 1 ? "" : "s"}</small>)}
+      {row("Planned quantity", (job) => `${amount(job.quantity)} ${job.uom}`, <small>{amount(jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + job.quantity, 0))} of {amount(order.quantity)} {order.uom}</small>)}
+      {row("Batch number", (job) => job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Not keyed in</span>)}
+      {stage("Production")}
+      {matrix.rows.length ? matrix.rows.map((process) => {
+        const percent = process.planned ? Math.min(100, Math.round(process.completed / process.planned * 100)) : 0;
+        return <Fragment key={process.calendar.id}>{row(process.processName, (job) => <BatchStatus cell={process.cells[job.number]} uom={process.uom} />,
+          <><div className="batch-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={`${process.processName} ${percent}% complete`}><span style={{ width: `${percent}%` }} /></div>
+            <small>{process.completed.toLocaleString()} / {process.planned.toLocaleString()} {process.uom} · {percent}%</small></>)}</Fragment>;
+      }) : row("Not planned yet", () => <span className="route-muted">-</span>)}
+      {stage("QC testing")}
+      {row("Result", (job) => {
+        const state = states.get(job.id);
+        if (state === "Awaiting release" || state === "Released") return <><span className="badge success">Passed</span><small>{day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></>;
+        if (state === "Failed testing" || state === "Rejected") return <><span className="badge danger">Failed</span><small>{day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></>;
+        if (state === "Under investigation") return <><span className="badge warning">Under investigation</span><small>since {day(job.testedAt)}</small></>;
+        if (state === "Awaiting testing") return <span className="badge warning">Awaiting testing</span>;
+        return <span className="route-muted">-</span>;
+      }, <small>{jobs.filter((job) => job.testedAt && (job.testResult ?? "Passed") === "Passed").length}/{jobs.length} passed</small>)}
+      {stage("QA release")}
+      {row("Released", (job) => {
+        const state = states.get(job.id);
+        if (state === "Released") return <><span className="badge success">Released</span><small>{day(job.releasedAt)}{job.releasedBy ? ` · ${job.releasedBy}` : ""}</small></>;
+        if (state === "Rejected") return <><span className="badge danger">Rejected</span><small>{day(job.rejectedAt)}{job.rejectedBy ? ` · ${job.rejectedBy}` : ""}</small></>;
+        if (state === "Awaiting release") return <span className="badge info">Awaiting release</span>;
+        if (state === "Failed testing") return <span className="badge warning">Awaiting QA rejection</span>;
+        return <span className="route-muted">-</span>;
+      }, <small>{released.length}/{jobs.length} released</small>)}
+      {row("Released quantity", (job) => job.releasedAt ? `${amount(job.releaseQuantity ?? 0)} ${job.releaseUom ?? ""}` : <span className="route-muted">-</span>,
+        releasedUoms.length ? <small>{releasedUoms.map((uom) => `${amount(released.filter((job) => job.releaseUom === uom).reduce((sum, job) => sum + (job.releaseQuantity ?? 0), 0))} ${uom}`).join(" · ")}</small> : null)}
+    </tbody>
   </table></div>;
 }
 
@@ -527,35 +528,14 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
   const lastDate = rows.reduce((latest, row) => row.lastDate > latest ? row.lastDate : latest, "");
   return <div className="order-detail">
     <div className="order-detail-head">
-      <p className="route-format">Dosage form: <strong>{format}</strong> · {routeLabel(format)}</p>
       {printable ? <button type="button" className="calendar-button" onClick={onPrint}><Printer size={15} />Print this order</button> : null}
     </div>
     {order.deliveryDate && lastDate > order.deliveryDate ? <p className="order-warning" role="alert">Production is scheduled until {displayDate(lastDate)}, after the expected customer delivery on {displayDate(order.deliveryDate)}.</p> : null}
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <details className="order-section">
       <summary className="order-section-summary"><h3>Summary</h3><span className="route-muted">Planning · Production · QC testing · QA release</span></summary>
-      <OrderFlow order={order} jobOrders={jobOrders} lines={lines} transfers={transfers} directory={directory} format={format} />
+      <OrderFlow order={order} jobOrders={jobOrders} lines={lines} transfers={transfers} matrix={matrix} />
     </details>
-    {rows.length ? <details className="order-process-detail"><summary>Process detail by batch</summary><div className="order-batch-scroll"><table className="order-batch-table">
-      <thead>
-        <tr><th scope="col" rowSpan={2} className="order-batch-process">Process</th><th scope="colgroup" colSpan={matrix.batches.length + 1}>Planned quantity</th></tr>
-        <tr>
-          {matrix.batches.map((batch) => <th scope="col" key={batch.key} className="order-batch-col"><strong>{batch.label}</strong><BatchSize kg={batch.kg} quantity={batch.quantity} uom={batch.uom} /></th>)}
-          <th scope="col" className="order-batch-summary"><strong>Summary</strong><BatchSize kg={matrix.total.kg} quantity={matrix.total.quantity} uom={order.uom} />{matrix.total.quantity > order.quantity ? <small className="order-warning">More than the {order.quantity.toLocaleString()} ordered</small> : null}</th>
-        </tr>
-      </thead>
-      <tbody>{matrix.rows.map((row) => {
-        const percent = row.planned ? Math.min(100, Math.round(row.completed / row.planned * 100)) : 0;
-        return <tr key={row.calendar.id}>
-          <th scope="row" className="order-batch-process">{row.processName}{units.size > 1 ? <small>{rows.find((item) => item.calendar.id === row.calendar.id)?.unitName}</small> : null}</th>
-          {matrix.batches.map((batch) => <td key={batch.key} className="order-batch-col"><BatchStatus cell={row.cells[batch.key]} uom={row.uom} /></td>)}
-          <td className="order-batch-summary">
-            <div className="batch-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={`${row.processName} ${percent}% complete`}><span style={{ width: `${percent}%` }} /></div>
-            <small>{row.completed.toLocaleString()} / {row.planned.toLocaleString()} {row.uom} · {percent}%</small>
-          </td>
-        </tr>;
-      })}</tbody>
-    </table></div></details> : null}
     {jobActions ? <JobOrders order={order} product={product} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();
