@@ -543,3 +543,10 @@
 @media (max-width: 760px) { .quantity-fields.weighed-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .weighed-count { grid-column: 1 / -1; }
 .link-button { background: none; border: 0; padding: 0; color: var(--accent, #1b6b4a); text-decoration: underline; cursor: pointer; font: inherit; }
+/* List view: drag a card's bottom edge down its column to stretch it over several days. */
+.plan-grid-item { position: relative; }
+.plan-list-resize { position: absolute; left: 6px; right: 6px; bottom: -3px; height: 8px; cursor: row-resize; border-radius: 4px; touch-action: none; }
+.plan-grid-item:hover .plan-list-resize, .plan-grid-item:focus-within .plan-list-resize { background: repeating-linear-gradient(90deg, #2c3e3566 0 6px, transparent 6px 10px); background-size: 100% 2px; background-repeat: no-repeat; background-position: center; }
+.plan-grid-continued { opacity: 0.85; }
+.plan-grid-continued .plan-list-product small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.plan-list-resize-range { background: #dcefe5 !important; }

@@ -9,10 +9,11 @@ import { canMovePlan, monthDates } from "@/lib/services/planningMonth";
 import { orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
 import { OrderBadge, PriorityMark } from "./OrderBadge";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
-import { lineDays } from "@/lib/services/scheduling";
+import { daysBetween, lineDays, lineEnd } from "@/lib/services/scheduling";
 
 type Target = { date: string; calendarId: string };
-type Drag = { id: string; calendarId: string; label: string; pointerId: number; startX: number; startY: number; x: number; y: number; started: boolean; touch: boolean };
+// kind "resize": dragging the card's bottom edge to the activity's last planned day.
+type Drag = { id: string; calendarId: string; label: string; pointerId: number; startX: number; startY: number; x: number; y: number; started: boolean; touch: boolean; kind: "move" | "resize" };
 const DRAG_THRESHOLD = 5;
 // A finger held this long on a card picks it up; a quicker swipe still scrolls the grid.
 const LONG_PRESS_MS = 350;
@@ -20,15 +21,17 @@ const LONG_PRESS_SLOP = 8;
 const EDGE = 56;
 
 // Month grid: dates down the side, one column per process, like the planning spreadsheet.
-export function PlanningList({ date, lines, products, orders = [], jobOrders = [], warnings, calendars, canPlan, canCreate = canPlan, onMove, onSelect, onCreate }: {
+export function PlanningList({ date, lines, products, orders = [], jobOrders = [], warnings, calendars, canPlan, canCreate = canPlan, onMove, onResize, onSelect, onCreate }: {
   date: string; lines: PlanLine[]; products: Product[]; orders?: PurchaseOrder[]; jobOrders?: JobOrder[]; warnings?: Map<string, string[]>; calendars: UnitCalendar[]; canPlan: boolean; canCreate?: boolean;
   onMove: (id: string, date: string) => string; onSelect: (id: string) => void; onCreate: (date: string, calendarId: string) => void;
+  // Dragging a card's bottom edge down its column sets the activity's last day.
+  onResize?: (id: string, endDate: string) => string;
 }) {
   const dates = monthDates(date);
   const numbers = orderNumbers(orders);
   const today = localDateKey(new Date());
   // Keyboard moves and pointer drags share the highlighted target; target is null over a cell that cannot accept the drop.
-  const [moving, setMoving] = useState<{ id: string; target: Target | null } | null>(null);
+  const [moving, setMoving] = useState<{ id: string; target: Target | null; kind?: "move" | "resize" } | null>(null);
   const [ghost, setGhost] = useState<{ x: number; y: number; label: string } | null>(null);
   const [notice, setNotice] = useState("");
   const drag = useRef<Drag | null>(null);
@@ -55,7 +58,16 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
   function track() {
     const current = drag.current;
     if (!current) setMoving(null);
-    else setMoving({ id: current.id, target: locate(current).target });
+    else setMoving({ id: current.id, target: locate(current).target, kind: current.kind });
+  }
+  // A resize ends on a day on or after the activity's first day, in its own column.
+  function finishResize(id: string, target: Target | null) {
+    const line = lines.find((item) => item.id === id);
+    if (target && onResize && line && canMovePlan(line, canPlan) && line.calendarId === target.calendarId) {
+      if (target.date < line.plannedDate) setNotice("An activity cannot end before the day it starts. Drag the edge down to a later day.");
+      else if (target.date !== lineEnd(line)) setNotice(onResize(id, target.date));
+    }
+    setMoving(null);
   }
   // Scroll the grid while the pointer rests near the visible edges of the grid.
   function autoScroll() {
@@ -104,9 +116,9 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
     suppressClick.current = true;
     setTimeout(() => { suppressClick.current = false; }, 0);
     const { target, otherColumn } = locate(current);
-    if (otherColumn) setNotice("Activities stay in their process. Drop it on a date in the same column.");
+    if (otherColumn) setNotice(current.kind === "resize" ? "Stretch an activity down its own process column." : "Activities stay in their process. Drop it on a date in the same column.");
     cancelDrag();
-    finish(current.id, target);
+    if (current.kind === "resize") finishResize(current.id, target); else finish(current.id, target);
   }
   // While a finger drags a card the page must not scroll under it.
   function windowTouchMove(event: TouchEvent) { if (drag.current?.started) event.preventDefault(); }
@@ -139,9 +151,10 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
       return;
     }
     // Mouse and pen pick the card up on movement; a finger picks it up from the grip at once, or by holding the card.
-    const grip = !!(event.target as HTMLElement).closest(".plan-list-grip");
+    const resize = !!(event.target as HTMLElement).closest(".plan-list-resize");
+    const grip = resize || !!(event.target as HTMLElement).closest(".plan-list-grip");
     const touch = event.pointerType === "touch" && !grip;
-    const current: Drag = { id: line.id, calendarId: line.calendarId!, label: name, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, started: false, touch };
+    const current: Drag = { id: line.id, calendarId: line.calendarId!, label: name, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, started: false, touch, kind: resize ? "resize" : "move" };
     drag.current = current;
     listen(true);
     if (event.pointerType === "touch" && grip) begin(current);
@@ -175,8 +188,24 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
               const target = { date: day, calendarId: calendar.id };
               const isTarget = moving?.target?.date === day && moving.target.calendarId === calendar.id;
               const droppable = dragging?.calendarId === calendar.id;
-              return <td key={calendar.id} data-cell-date={day} data-cell-calendar={calendar.id} className={[isTarget ? "plan-list-drop-target" : "", droppable ? "plan-grid-droppable" : ""].join(" ").trim() || undefined}>
+              // While stretching, every day from the first to the one under the pointer is highlighted.
+              const inRange = moving?.kind === "resize" && dragging && moving.target && dragging.calendarId === calendar.id && day >= dragging.plannedDate && day <= moving.target.date;
+              return <td key={calendar.id} data-cell-date={day} data-cell-calendar={calendar.id} className={[isTarget ? "plan-list-drop-target" : "", droppable ? "plan-grid-droppable" : "", inRange ? "plan-list-resize-range" : ""].join(" ").trim() || undefined}>
                 <div className="plan-grid-cell">
+                  {/* The later days of activities that run over several days. */}
+                  {lines.filter((line) => line.calendarId === calendar.id && line.plannedDate < day && lineEnd(line) >= day).map((line) => {
+                    const order = orders.find((item) => item.id === line.productionOrderId);
+                    const number = order ? numbers.get(order.id) : undefined;
+                    const name = products.find((item) => item.id === line.productId)?.name ?? "Unknown product";
+                    const facts = activityFacts(line, jobOrders);
+                    return <div key={`${line.id}-${day}`} className={`plan-grid-item plan-grid-continued${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}`} style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
+                      onPointerDown={(event) => { if (lineEnd(line) === day && (event.target as HTMLElement).closest(".plan-list-resize")) pointerDown(event, line, name); }}>
+                      <button className="plan-list-product" type="button" title={`${name} · ${facts.jobNumber} · day ${daysBetween(line.plannedDate, day) + 1} of ${lineDays(line)}`} onClick={() => { if (!suppressClick.current) onSelect(line.id); }}>
+                        <small>↳ {name}{facts.jobNumber ? ` · ${facts.jobNumber}` : ""} · day {daysBetween(line.plannedDate, day) + 1} of {lineDays(line)}</small>
+                      </button>
+                      {lineEnd(line) === day && canMovePlan(line, canPlan) && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag to change the last day of ${name}`} /> : null}
+                    </div>;
+                  })}
                   {lines.filter((line) => line.plannedDate === day && line.calendarId === calendar.id).map((line) => {
                     const product = products.find((item) => item.id === line.productId);
                     const name = product?.name ?? "Unknown product";
@@ -205,6 +234,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                         {batch ? <span className="plan-list-batch">{batch}</span> : null}
                         <small>{detail}</small>
                       </button>
+                      {movable && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag down to the last day of ${name}`} /> : null}
                     </div>;
                   })}
                   {canCreate && calendar.id && !dragging ? <button className="icon-button plan-list-add" type="button" title={`Add ${calendar.name} activity on ${day}`} aria-label={`Add ${calendar.name} activity on ${day}`} onClick={() => onCreate(day, calendar.id)}><Plus size={14} /></button> : null}
@@ -217,7 +247,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
     </div>
     {ghost && dragging ? <div className={`plan-grid-ghost${moving?.target ? "" : " invalid"}`} style={{ left: ghost.x + 14, top: ghost.y + 10, ...(dragging.productionOrderId && numbers.get(dragging.productionOrderId) ? { "--order-color": orderColor(numbers.get(dragging.productionOrderId)!) } : {}) } as React.CSSProperties} aria-hidden="true">
       <strong>{ghost.label}</strong>
-      <small>{moving?.target ? label(moving.target.date, { weekday: "short", day: "2-digit", month: "short" }) : "Drop in the same process column"}</small>
+      <small>{moving?.target ? `${moving.kind === "resize" ? "Until " : ""}${label(moving.target.date, { weekday: "short", day: "2-digit", month: "short" })}` : moving?.kind === "resize" ? "Stretch down the same process column" : "Drop in the same process column"}</small>
     </div> : null}
   </div>;
 }
