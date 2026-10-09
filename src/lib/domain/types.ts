@@ -95,7 +95,8 @@ export type PlanLine = {
   yieldUom?: string;
   // Tablets or capsules reported by weight: what was weighed, and the weight of one compressed or
   // coated tablet / filled capsule production keyed in; yieldQuantity is then the count it gives.
-  weighedQuantity?: number; weighedUom?: string; actualUnitWeightMg?: number;
+  // Measured by volume (L, mL) instead, the volume of one unit is in actualUnitVolumeMl.
+  weighedQuantity?: number; weighedUom?: string; actualUnitWeightMg?: number; actualUnitVolumeMl?: number;
   incomingWipId?: string;
   uom?: string;
   activityType?: string;

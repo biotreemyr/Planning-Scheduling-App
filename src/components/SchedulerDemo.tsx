@@ -24,7 +24,7 @@ import { validateCompletion, validateCorrection, type CompletionInput, type Corr
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
 import { validateActual, type ProductionActual } from "@/lib/services/actuals";
-import { batchKilograms } from "@/lib/services/measurements";
+import { batchKilograms, isVolume } from "@/lib/services/measurements";
 import { MeasurementProvider, MeasurementAdmin, useSettings } from "@/components/MeasurementSettings";
 import type {
   Employee,
@@ -779,7 +779,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     return [];
   }
   // Output reported by weight keeps what was weighed and the weight of one unit beside the count.
-  const weighedFields = (input: CompletionInput) => input.weighed ? { weighedQuantity: input.weighed.quantity, weighedUom: input.weighed.uom, actualUnitWeightMg: input.weighed.unitWeightMg } : {};
+  const weighedFields = (input: CompletionInput) => !input.weighed ? {} : { weighedQuantity: input.weighed.quantity, weighedUom: input.weighed.uom,
+    ...(isVolume(input.weighed.uom) ? { actualUnitVolumeMl: input.weighed.unitWeightMg } : { actualUnitWeightMg: input.weighed.unitWeightMg }) };
   // Production's machine choice in its update: the bookings this save starts from, with the machine
   // changed when it differs (undefined when no choice was sent).
   function machineChange(line: PlanLine, machineId?: string): { entries?: ScheduleEntry[] } | { error: string } {
@@ -807,7 +808,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     setData((current) => {
       const lines = current.lines.map((item) => {
         if (item.id !== line.id) return item;
-        const { yieldUom: _u, startedAt: _s, productionNotes: _n, weighedQuantity: _wq, weighedUom: _wu, actualUnitWeightMg: _wm, ...rest } = item;
+        const { yieldUom: _u, startedAt: _s, productionNotes: _n, weighedQuantity: _wq, weighedUom: _wu, actualUnitWeightMg: _wm, actualUnitVolumeMl: _wv, ...rest } = item;
         return { ...rest, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input),
           startedAt: input.startedAt || input.completedDate!, ...(input.notes ? { productionNotes: input.notes } : {}) };
       });

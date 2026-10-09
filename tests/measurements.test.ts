@@ -29,12 +29,15 @@ describe("tablets and capsules reported by weight", async () => {
     expect(countFromWeight(23.975, "kg", 350)).toBe(68500);
     expect(countFromWeight(450, "g", 450)).toBe(1000);
     expect(countFromWeight(1, "kg", 0)).toBeUndefined();
-    expect(countFromWeight(1, "L", 350)).toBeUndefined();
+    // Volumes use the volume of one unit in mL: 2.5 L at 5 mL each is 500.
+    expect(countFromWeight(2.5, "L", 5)).toBe(500);
+    expect(countFromWeight(250, "mL", 5)).toBe(50);
+    expect(countFromWeight(1, "boxes", 5)).toBeUndefined();
     expect(isWeight("g") && !isWeight("tablets")).toBe(true);
   });
-  it("lets compression, coating and capsulation report in kg or g", () => {
-    expect(actualUoms("Compression")).toEqual(["tablets", "kg", "g"]);
-    expect(actualUoms("Coating")).toEqual(["tablets", "kg", "g"]);
-    expect(actualUoms("Capsulation")).toEqual(["capsules", "kg", "g"]);
+  it("lets compression, coating and capsulation report by weight or volume", () => {
+    expect(actualUoms("Compression")).toEqual(["tablets", "kg", "g", "L", "mL"]);
+    expect(actualUoms("Coating")).toEqual(["tablets", "kg", "g", "L", "mL"]);
+    expect(actualUoms("Capsulation")).toEqual(["capsules", "kg", "g", "L", "mL"]);
   });
 });

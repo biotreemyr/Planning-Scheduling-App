@@ -65,8 +65,8 @@ describe("process routes by product format", () => {
 describe("units for reporting actual quantities", () => {
   it("gives each process its own reporting units", () => {
     expect(actualUoms("Dispensing")).toEqual(["kg", "g", "L", "mL"]);
-    expect(actualUoms("Compression")).toEqual(["tablets", "kg", "g"]);
-    expect(actualUoms("Capsulation")).toEqual(["capsules", "kg", "g"]);
+    expect(actualUoms("Compression")).toEqual(["tablets", "kg", "g", "L", "mL"]);
+    expect(actualUoms("Capsulation")).toEqual(["capsules", "kg", "g", "L", "mL"]);
     expect(actualUoms("Filling")).toEqual(["bottles", "blisters", "sachets", "pouches"]);
     expect(actualUoms("Packing")).toEqual(["boxes"]);
     expect(actualUoms("Blending", "kg")).toEqual(["kg"]);

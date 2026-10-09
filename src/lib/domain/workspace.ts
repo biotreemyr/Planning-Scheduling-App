@@ -35,7 +35,7 @@ export const workspaceSchema = z.object({
       priority: z.enum(["Low", "Normal", "High", "Urgent"]), status: z.enum(["Unscheduled", "Partially Scheduled", "Fully Scheduled"]),
       startedAt: date.optional(), productionNotes: text.optional(),
       completedAt: timestamp.optional(), yieldQuantity: number.nonnegative().optional(), yieldUom: name.optional(),
-      weighedQuantity: number.nonnegative().optional(), weighedUom: name.optional(), actualUnitWeightMg: number.positive().optional(), incomingWipId: id.optional(), uom: name.optional(),
+      weighedQuantity: number.nonnegative().optional(), weighedUom: name.optional(), actualUnitWeightMg: number.positive().optional(), actualUnitVolumeMl: number.positive().optional(), incomingWipId: id.optional(), uom: name.optional(),
       activityType: text.optional(), unitWeightMg: number.positive().optional(), batchSizeKg: number.nonnegative().optional(),
       teamId: text.optional(), productionOrderId: id.optional(), jobOrderId: id.optional(), orderReference: text.optional(), notes: text.optional() })),
     entries: z.array(z.object({ id, calendarId: id, planLineId: id, productId: id, workCentreId: id, machineId: id,
