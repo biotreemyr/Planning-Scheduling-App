@@ -34,8 +34,11 @@ export function configureUnit(directory: CalendarDirectory, unit: Unit, processI
 export function validateDirectoryChange(previous: CalendarDirectory, next: CalendarDirectory, machines: Machine[], usedCalendarIds: string[], currentUserId: string) {
   const errors: string[] = [];
   const has = (items: { id: string }[], id: string) => items.some((item) => item.id === id);
-  if (!has(next.people, currentUserId)) errors.push("You cannot delete the current user.");
-  if (!next.people.some((person) => person.role === "admin")) errors.push("Keep at least one administrator.");
+  // With Bio Tree Core sign-in there is no local user ID; people and access live in Core.
+  if (currentUserId) {
+    if (!has(next.people, currentUserId)) errors.push("You cannot delete the current user.");
+    if (!next.people.some((person) => person.role === "admin")) errors.push("Keep at least one administrator.");
+  }
   for (const kind of ["units", "processes", "teams", "people", "calendars"] as const) {
     if (next[kind].some((item) => !item.name.trim())) errors.push("Names cannot be empty.");
     if (new Set(next[kind].map((item) => item.id)).size !== next[kind].length) errors.push("Duplicate record ID.");

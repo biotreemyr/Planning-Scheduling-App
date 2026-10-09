@@ -4,6 +4,10 @@ import { initialDirectory as d } from "../src/lib/domain/calendarAccess";
 import type { Machine } from "../src/lib/domain/types";
 
 describe("admin configuration", () => {
+  it("adds a process when signed in through Bio Tree Core (no local user or administrator)", () => {
+    const next = { ...d, people: [], processes: [...d.processes, { id: "blending", name: "Blending" }] };
+    expect(validateDirectoryChange({ ...d, people: [] }, next, [], [], "")).toEqual([]);
+  });
   it("deletes an unused unit and cleans its process calendars and people assignments", () => {
     const next = removeDirectoryItem(d, "units", "pilot");
     expect(validateDirectoryChange(d, next, [], [], "admin")).toEqual([]);
