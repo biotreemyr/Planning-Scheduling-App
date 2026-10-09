@@ -9,6 +9,7 @@ import { canMovePlan, monthDates } from "@/lib/services/planningMonth";
 import { orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
 import { OrderBadge, PriorityMark } from "./OrderBadge";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
+import { lineDays } from "@/lib/services/scheduling";
 
 type Target = { date: string; calendarId: string };
 type Drag = { id: string; calendarId: string; label: string; pointerId: number; startX: number; startY: number; x: number; y: number; started: boolean; touch: boolean };
@@ -187,7 +188,8 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                     // process's quantity in its own unit (the actual once production completed it).
                     const facts = activityFacts(line, jobOrders, product?.uom);
                     const batch = [facts.batchNumber, facts.jobNumber].filter(Boolean).join(" · ");
-                    const detail = facts.quantity;
+                    // A several-day activity shows its days: "3 days, to 10 Oct".
+                    const detail = line.endDate && line.endDate > line.plannedDate ? `${facts.quantity} · ${lineDays(line)} days, to ${new Date(`${line.endDate}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}` : facts.quantity;
                     return <div key={line.id} data-movable={movable || undefined} className={`plan-grid-item${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
                       style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
                       onPointerDown={(event) => pointerDown(event, line, name)} onContextMenu={(event) => { if (drag.current?.touch) event.preventDefault(); }}>

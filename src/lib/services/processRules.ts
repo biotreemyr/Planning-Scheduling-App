@@ -1,6 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product, ScheduleEntry } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
+import { lineEnd } from "./scheduling";
 
 export const PRODUCT_FORMATS = ["Capsule", "Tablet", "Sachet", "Other"] as const;
 export type ProductFormat = (typeof PRODUCT_FORMATS)[number];
@@ -96,7 +97,8 @@ export function checkProcessFlow(lines: PlanLine[], entries: ScheduleEntry[], or
     for (const [name, wrong] of outside) warnings.push({ kind: "route", lineIds: wrong.map((line) => line.id), orderId: order?.id, batch, message: `${prefix}${name || "This process"} is not part of the ${format.toLowerCase()} route (${routeLabel(format)}).` });
     const present = route.filter((step) => byStep.has(step));
     if (!present.length) continue;
-    const span = (step: Step) => { const dates = byStep.get(step)!.map((line) => line.plannedDate).sort(); return { first: dates[0], last: dates.at(-1)! }; };
+    // A step's days run from its first planned day to the last day of its longest activity.
+    const span = (step: Step) => { const lines = byStep.get(step)!; return { first: lines.map((line) => line.plannedDate).sort()[0], last: lines.map(lineEnd).sort().at(-1)! }; };
     // Required steps skipped before the furthest planned step.
     const furthest = route.indexOf(present.at(-1)!);
     route.slice(0, furthest).forEach((step, index) => {

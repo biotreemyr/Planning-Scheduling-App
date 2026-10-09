@@ -61,7 +61,9 @@
 .activity-dialog::backdrop { background: #14241f66; }
 .workstation .activity-dialog .form-panel { border: 0; }
 .calendar-notice { font-size: 13px; padding: 10px; background: #e9f2ed; }
-.planning-calendar [class*="resize-handle"] { display: none !important; }
+/* Drag an activity's right edge to stretch it over several days; the grip shows on hover. */
+.planning-calendar .toastui-calendar-weekday-resize-handle { display: block !important; position: absolute; top: 0; right: 0; bottom: 0; width: 8px; cursor: col-resize; opacity: 0; background: linear-gradient(90deg, transparent 2px, #2c3e3566 2px, #2c3e3566 4px, transparent 4px); }
+.planning-calendar .toastui-calendar-weekday-event-block:hover .toastui-calendar-weekday-resize-handle { opacity: 1; }
 .quantity-fields, .settings-columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
 .unified-activity { width: min(820px, calc(100vw - 24px)); padding: 22px; }
 .unified-activity > section { padding: 18px 0; border-top: 1px solid var(--line); }

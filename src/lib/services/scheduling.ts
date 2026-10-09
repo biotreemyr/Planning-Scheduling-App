@@ -64,3 +64,8 @@ export function shiftTimestamp(value: string, days: number): string {
 export function daysBetween(from: string, to: string) {
   return Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86400000);
 }
+
+// The last planned day of an activity: its end date when it runs over several days.
+export const lineEnd = (line: { plannedDate: string; endDate?: string }) => line.endDate && line.endDate > line.plannedDate ? line.endDate : line.plannedDate;
+// How many calendar days an activity is planned over, counting both ends.
+export const lineDays = (line: { plannedDate: string; endDate?: string }) => daysBetween(line.plannedDate, lineEnd(line)) + 1;

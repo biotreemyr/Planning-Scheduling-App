@@ -39,8 +39,8 @@ import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types"
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
 import { getScheduleReport } from "@/lib/services/reports";
-import { syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
-import { moveActivity } from "@/lib/services/planChanges";
+import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
+import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
 import { passTesting, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, stepOf, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 
@@ -162,6 +162,7 @@ function PlannerBoard({
   onJobPlan,
   editJobRequest,
   onMoveLine,
+  onResizeLine,
   canPlan,
   canCreate,
   demo,
@@ -189,6 +190,7 @@ function PlannerBoard({
   onJobPlan: (plan: JobPlan, mode: "new" | "edit") => { error: string } | { message: string };
   editJobRequest: { jobId: string; nonce: number } | null;
   onMoveLine: (id: string, date: string) => string;
+  onResizeLine: (id: string, endDate: string) => string;
   canPlan: boolean;
   canCreate: boolean;
   demo: boolean;
@@ -228,7 +230,7 @@ function PlannerBoard({
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
         <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} onPlan={canPlanJobs ? (jobId, date) => setQueueRequest({ jobId, date, mode: "new", nonce: Date.now() }) : undefined} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar canPrint={canPrint} processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
+        <PlanningCalendar canPrint={canPrint} processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onResize={onResizeLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
           const result = onJobPlan(plan, mode);
           if ("message" in result) { setQuery(""); setPriorityFilter(""); setStatusFilter(""); }
           return result;
@@ -862,6 +864,22 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       : moved.size ? `Moved to ${when}. Its machine booking${moved.size === 1 ? "" : "s"} moved with it.` : `Moved to ${when}. No machine booked yet.`;
     return flowWarning ? `${base} Warning: ${flowWarning.message}` : base;
   }
+  // Dragging an activity's edge sets its last day; its bookings follow and a machine clash is reported.
+  function resizeLine(id: string, endDate: string) {
+    if (!canPlan || !allowedLines.some((item) => item.id === id)) return "You cannot change this activity.";
+    const result = resizeActivity(data.lines, data.entries, id, endDate, member.name);
+    if ("error" in result) return result.error;
+    if (result.lines === data.lines) return "";
+    setData((current) => ({ ...current, lines: result.lines, entries: result.entries }));
+    const line = result.lines.find((item) => item.id === id)!;
+    const day = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+    const span = line.endDate ? `${day(line.plannedDate)} – ${day(line.endDate)}` : day(line.plannedDate);
+    const changed = new Set(result.changedEntryIds);
+    const clash = findMachineConflicts(result.entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => changed.has(entryId)));
+    const flowWarning = checkProcessFlow(result.lines, result.entries, data.orders, products, directory).find((warning) => warning.lineIds.includes(id) && !flow.some((old) => old.message === warning.message));
+    const base = `${line.activityType ?? "Activity"} now planned ${span}.${clash ? ` ${machines.find((item) => item.id === clash.machineId)?.name ?? "A machine"} is now double-booked in that time; change the machine or check Reports.` : changed.size ? " Its machine booking runs to the same day." : ""}`;
+    return flowWarning ? `${base} Warning: ${flowWarning.message}` : base;
+  }
   function saveOrder(order: PurchaseOrder) {
     if (!canEditOrders) return ["Your access does not include editing orders."];
     const errors = validateOrder(order, data.orders, products);
@@ -907,7 +925,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     if (!machine) return { error: "Select an active machine set up for this process." };
     const next = own.length
       ? current.map((entry) => own.includes(entry) ? { ...entry, machineId, workCentreId: machine.workCentreId, changedBy: member.name } : entry)
-      : [...current, { id: newId("sched"), calendarId: line.calendarId, planLineId: line.id, productId: line.productId, productionOrderId: line.productionOrderId, workCentreId: machine.workCentreId, machineId, startAt: `${line.plannedDate}T08:00`, endAt: `${line.plannedDate}T17:00`, status: line.completedAt ? "Completed" as const : "Draft" as const, changedBy: member.name }];
+      : [...current, { id: newId("sched"), calendarId: line.calendarId, planLineId: line.id, productId: line.productId, productionOrderId: line.productionOrderId, workCentreId: machine.workCentreId, machineId, startAt: `${line.plannedDate}T08:00`, endAt: `${lineEnd(line)}T17:00`, status: line.completedAt ? "Completed" as const : "Draft" as const, changedBy: member.name }];
     const changed = new Set(next.filter((entry) => entry.planLineId === line.id).map((entry) => entry.id));
     const clash = findMachineConflicts(next, machines, products).find((conflict) => conflict.entryIds.some((id) => changed.has(id)));
     if (clash) return { error: `${machine.name} is already booked that day.` };
@@ -1129,7 +1147,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
       {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPlanJobs={canCreate} canPrint={caps.printPlan} flow={flow}
-        onMoveLine={moveLine}
+        onMoveLine={moveLine} onResizeLine={resizeLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
         orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}

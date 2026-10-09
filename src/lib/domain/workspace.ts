@@ -31,7 +31,7 @@ export const workspaceSchema = z.object({
   machines: z.array(record.extend({ code: name, workCentreId: id, unitId: id, processIds: z.array(id).min(1), setupMinutes: number.int().nonnegative(), capacity: number.positive().optional(), capacityUom: text.optional(), capacityNotes: text.optional(), active })),
   measurements: settings,
   data: z.object({
-    lines: z.array(z.object({ id, calendarId: id, planId: id, productId: id, quantity: number.positive(), plannedDate: date,
+    lines: z.array(z.object({ id, calendarId: id, planId: id, productId: id, quantity: number.positive(), plannedDate: date, endDate: date.optional(),
       priority: z.enum(["Low", "Normal", "High", "Urgent"]), status: z.enum(["Unscheduled", "Partially Scheduled", "Fully Scheduled"]),
       startedAt: date.optional(), productionNotes: text.optional(),
       completedAt: timestamp.optional(), yieldQuantity: number.nonnegative().optional(), yieldUom: name.optional(),
@@ -93,6 +93,7 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
   state.machines.forEach((machine) => require(has(state.workCentres, machine.workCentreId) && machine.processIds.every((id) => d.calendars.some((calendar) => calendar.unitId === machine.unitId && calendar.processId === id)) && (machine.capacity === undefined || !!machine.capacityUom?.trim()), "Invalid machine configuration"));
   data.lines.forEach((line) => {
     require(has(d.calendars, line.calendarId) && has(state.products, line.productId), "Invalid plan references");
+    require(!line.endDate || line.endDate > line.plannedDate, "Activity ends before it starts");
     require(!line.incomingWipId || has(data.transfers, line.incomingWipId), "Invalid incoming WIP");
     if (line.completedAt) require(line.yieldQuantity !== undefined && data.actuals.some((actual) => actual.planLineId === line.id && actual.actualQuantity === line.yieldQuantity), "Completed plan requires final yield");
   });

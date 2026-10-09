@@ -111,6 +111,8 @@ export type PlanLine = {
   productId: string;
   quantity: number;
   plannedDate: string;
+  // The last day of an activity that runs over several days (YYYY-MM-DD, after plannedDate).
+  endDate?: string;
   priority: Priority;
   status: PlanLineStatus;
   orderReference?: string;

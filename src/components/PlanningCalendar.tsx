@@ -11,6 +11,7 @@ import type { PlanLine, Product, Machine, ScheduleEntry } from "@/lib/domain/typ
 import { StatusBadge } from "./StatusBadge";
 import { ORDER_COLORS, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
+import { lineEnd } from "@/lib/services/scheduling";
 import { JobPlanDialog, type JobPlan, type PlanRequest } from "./JobPlanDialog";
 
 type View = "month" | "week" | "day";
@@ -21,7 +22,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
 
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
-export default function PlanningCalendar({ canPrint = true, orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", planLines, products, initialDate, onPlanJob, onMove, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
+export default function PlanningCalendar({ canPrint = true, orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", planLines, products, initialDate, onPlanJob, onMove, onResize, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
   processNames: Record<string, string>;
   // Core's "Print planner board": print, PDF and Excel.
   canPrint?: boolean;
@@ -40,14 +41,16 @@ export default function PlanningCalendar({ canPrint = true, orders = [], jobOrde
   editJobRequest?: { jobId: string; nonce: number; mode?: "new" | "edit"; date?: string } | null;
   onPlanJob: (plan: JobPlan, mode: "new" | "edit") => { error: string } | { message: string };
   onMove: (id: string, date: string) => string;
+  // Dragging an activity's right edge to a later day makes it run until then.
+  onResize?: (id: string, endDate: string) => string;
   canPlan?: boolean;
   // Adding needs Core's planning.create; moving needs planning.edit. Defaults to canPlan.
   canCreate?: boolean;
   demo?: boolean;
   onSelect?: (id: string) => void;
 }) {
-  const callbacks = useRef({ onMove, canPlan, canCreate, onSelect });
-  callbacks.current = { onMove, canPlan, canCreate, onSelect };
+  const callbacks = useRef({ onMove, onResize, canPlan, canCreate, onSelect });
+  callbacks.current = { onMove, onResize, canPlan, canCreate, onSelect };
   // Planning happens per job order, in one form for its whole route.
   const [planRequest, setPlanRequest] = useState<PlanRequest | null>(null);
   useEffect(() => {
@@ -103,11 +106,12 @@ export default function PlanningCalendar({ canPrint = true, orders = [], jobOrde
       });
       instance.on("selectDateTime", (info: { start: Date }) => { openCreate(dateKey(info.start)); instance?.clearGridSelections(); });
       instance.on("beforeUpdateEvent", (info) => {
-        if (!info.changes.start) return;
         if (!callbacks.current.canPlan || info.event.isReadOnly) return;
+        const day = (value: unknown) => dateKey(typeof value === "string" || typeof value === "number" ? new Date(value) : value as Date);
         setHover(null);
-        const start = info.changes.start;
-        setNotice(callbacks.current.onMove(info.event.id, dateKey(typeof start === "string" || typeof start === "number" ? new Date(start) : start)));
+        // Dragging the whole box moves it (keeping its length); dragging its edge changes its last day.
+        if (info.changes.start) setNotice(callbacks.current.onMove(info.event.id, day(info.changes.start)));
+        else if (info.changes.end && callbacks.current.onResize) setNotice(callbacks.current.onResize(info.event.id, day(info.changes.end)));
       });
       instance.on("clickEvent", ({ event }: { event: { id: string } }) => { setHover(null); if (callbacks.current.onSelect) callbacks.current.onSelect(event.id); else setSelectedId(event.id); });
       calendar.current = instance;
@@ -132,7 +136,7 @@ export default function PlanningCalendar({ canPrint = true, orders = [], jobOrde
         raw: { number, priority: line.priority, completed: !!line.completedAt, warn: warnings?.get(line.id)?.join("\n") },
         // Process, then product, batch number, job order number and this process's quantity (actual once done).
         title: (() => { const facts = activityFacts(line, jobOrders, item?.uom); return `${line.activityType ? `${line.activityType}: ` : ""}${[item?.name ?? "Unknown product", facts.batchNumber, facts.jobNumber, facts.quantity].filter(Boolean).join(" · ")}`; })(),
-        start: line.plannedDate, end: line.plannedDate, isReadOnly: !canPlan || !!line.completedAt,
+        start: line.plannedDate, end: lineEnd(line), isReadOnly: !canPlan || !!line.completedAt,
         color: "#1f2528", borderColor: color, backgroundColor: line.completedAt ? "#ecefed" : tint(color)
       };
     }));

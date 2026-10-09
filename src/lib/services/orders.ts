@@ -1,6 +1,7 @@
 import type { CalendarDirectory, UnitCalendar } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { ProductFormat } from "./processRules";
+import { lineDays, lineEnd } from "./scheduling";
 
 // One product line item of a customer purchase order. A PO with several products is several of
 // these sharing a PO number, numbered by `item`. Plan lines link to one through `productionOrderId`.
@@ -86,7 +87,7 @@ export function orderProcessRows(order: PurchaseOrder, lines: PlanLine[], direct
     return [{
       calendar, processName: directory.processes.find((item) => item.id === calendar.processId)?.name ?? calendar.name,
       unitName: directory.units.find((item) => item.id === calendar.unitId)?.name ?? "",
-      firstDate: steps[0].plannedDate, lastDate: steps.at(-1)!.plannedDate,
+      firstDate: steps[0].plannedDate, lastDate: steps.map(lineEnd).sort().at(-1)!,
       plannedQuantity: steps.reduce((total, line) => total + line.quantity, 0),
       completedQuantity: steps.reduce((total, line) => total + (line.yieldQuantity ?? 0), 0),
       lineCount: steps.length, completedCount: steps.filter((line) => line.completedAt).length, uom: steps[0].uom ?? order.uom
@@ -185,9 +186,11 @@ export function orderBatchMatrix(order: PurchaseOrder, lines: PlanLine[], direct
   const rows = orderProcessRows(order, linked, directory).map((row) => {
     const cells: Record<string, BatchCell> = {};
     for (const line of linked.filter((item) => item.calendarId === row.calendar.id).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate))) {
-      const cell = cells[keyOf(line)] ??= { firstDate: line.plannedDate, lastDate: line.plannedDate, days: 0, daysDone: 0, planned: 0, completed: 0, late: false };
-      cell.lastDate = line.plannedDate; cell.days += 1; cell.planned += line.quantity;
-      if (line.completedAt) { cell.daysDone += 1; cell.completed += line.yieldQuantity ?? 0; } else if (line.plannedDate < today) cell.late = true;
+      // A several-day activity counts all its days.
+      const cell = cells[keyOf(line)] ??= { firstDate: line.plannedDate, lastDate: lineEnd(line), days: 0, daysDone: 0, planned: 0, completed: 0, late: false };
+      if (lineEnd(line) > cell.lastDate) cell.lastDate = lineEnd(line);
+      cell.days += lineDays(line); cell.planned += line.quantity;
+      if (line.completedAt) { cell.daysDone += lineDays(line); cell.completed += line.yieldQuantity ?? 0; } else if (lineEnd(line) < today) cell.late = true;
     }
     return { calendar: row.calendar, processName: row.processName, uom: row.uom, cells, planned: row.plannedQuantity, completed: row.completedQuantity };
   });

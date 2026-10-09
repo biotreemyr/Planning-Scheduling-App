@@ -1,6 +1,6 @@
 import type { PlanLine, ScheduleEntry } from "@/lib/domain/types";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
-import { daysBetween, shiftTimestamp } from "./scheduling";
+import { daysBetween, lineEnd, shiftTimestamp } from "./scheduling";
 import { batchKilograms } from "./measurements";
 import type { PurchaseOrder } from "./orders";
 import { ROUTES, routeLabel, stepLabel, stepOf, type ProductFormat, type RouteStepName } from "./processRules";
@@ -19,10 +19,37 @@ export function moveActivity<L extends PlanLine, E extends ScheduleEntry>(lines:
   const days = daysBetween(line.plannedDate, date);
   if (!days) return { lines, entries, movedEntryIds: [] };
   const moving = new Set(entries.filter((entry) => entry.planLineId === lineId && entry.status !== "Completed" && entry.status !== "Cancelled").map((entry) => entry.id));
+  // A several-day activity keeps its length: its end date moves by the same number of days.
   return {
-    lines: lines.map((item) => item.id === lineId ? { ...item, plannedDate: date } : item),
+    lines: lines.map((item) => item.id === lineId ? { ...item, plannedDate: date, ...(item.endDate ? { endDate: shiftDate(item.endDate, days) } : {}) } : item),
     entries: entries.map((entry) => moving.has(entry.id) ? { ...entry, startAt: shiftTimestamp(entry.startAt, days), endAt: shiftTimestamp(entry.endAt, days), changedBy } : entry),
     movedEntryIds: [...moving]
+  };
+}
+const shiftDate = (value: string, days: number) => shiftTimestamp(`${value}T12:00`, days).slice(0, 10);
+
+/**
+ * Stretch or shorten an activity to run until a later (or its own) day, as dragging its box's edge
+ * does. Its open machine bookings run to the same last day, so the machine shows busy throughout.
+ */
+export function resizeActivity<L extends PlanLine, E extends ScheduleEntry>(lines: L[], entries: E[], lineId: string, endDate: string, changedBy: string):
+  { lines: L[]; entries: E[]; changedEntryIds: string[] } | { error: string } {
+  const line = lines.find((item) => item.id === lineId);
+  if (!line) return { error: "This activity no longer exists." };
+  if (line.completedAt) return { error: "Completed activities cannot be changed." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return { error: "Choose a valid date." };
+  if (endDate < line.plannedDate) return { error: "An activity cannot end before the day it starts." };
+  if (endDate === lineEnd(line)) return { lines, entries, changedEntryIds: [] };
+  const open = entries.filter((entry) => entry.planLineId === lineId && entry.status !== "Completed" && entry.status !== "Cancelled");
+  const changed = new Set(open.map((entry) => entry.id));
+  return {
+    lines: lines.map((item) => {
+      if (item.id !== lineId) return item;
+      const { endDate: _old, ...rest } = item;
+      return (endDate > item.plannedDate ? { ...rest, endDate } : rest) as L;
+    }),
+    entries: entries.map((entry) => changed.has(entry.id) ? { ...entry, endAt: `${endDate}${entry.endAt.slice(10)}`, changedBy } : entry),
+    changedEntryIds: [...changed]
   };
 }
 
