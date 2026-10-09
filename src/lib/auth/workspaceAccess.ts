@@ -36,25 +36,25 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   if (configuration.length) { need(can.manage, "change units, people, products, machines or measurements"); summary.push(`configuration: ${configuration.join(", ")}`); }
 
   const orders = diff(before.data.orders, after.data.orders);
-  if (orders.added.length) need(can.createOrders || can.manage, "add orders");
-  if (orders.removed.length || orders.changed.length) need(can.editOrders || can.manage, "edit or delete orders");
+  if (orders.added.length) need(can.createOrders, "add orders");
+  if (orders.removed.length || orders.changed.length) need(can.editOrders, "edit or delete orders");
   count("orders added", orders.added.length); count("orders changed", orders.changed.length); count("orders removed", orders.removed.length);
 
   const customers = diff(before.data.customers, after.data.customers);
-  if (customers.added.length) need(can.createOrders || can.manage, "add customers");
-  if (customers.removed.length || customers.changed.length) need(can.editOrders || can.manage, "edit customers");
+  if (customers.added.length) need(can.createOrders, "add customers");
+  if (customers.removed.length || customers.changed.length) need(can.editOrders, "edit customers");
   count("customers added", customers.added.length); count("customers changed", customers.changed.length);
 
   const jobs = diff(before.data.jobOrders, after.data.jobOrders);
-  if (jobs.added.length) need(can.createOrders || can.manage, "create or remove job orders");
-  if (jobs.removed.length) need(can.editOrders || can.manage, "create or remove job orders");
+  if (jobs.added.length) need(can.createOrders, "create or remove job orders");
+  if (jobs.removed.length) need(can.editOrders, "create or remove job orders");
   for (const { before: old, after: job } of jobs.changed) {
     // Production keys in the batch number; testing passes the batch; release releases it; the rest is orders.
     const keys = changedKeys(old, job);
     if (only(keys, ["batchNumber", "batchNumberBy", "batchNumberAt"])) need(can.produce || can.editPlan, "enter batch numbers");
     else if (only(keys, ["testedAt", "testedBy"])) need(can.passTesting, "pass testing");
     else if (only(keys, ["releaseQuantity", "releaseUom", "releasedAt", "releasedBy"])) need(can.release, "release batches");
-    else need(can.editOrders || can.manage, "edit job orders");
+    else need(can.editOrders, "edit job orders");
   }
   count("job orders added", jobs.added.length); count("job orders changed", jobs.changed.length); count("job orders removed", jobs.removed.length);
 
@@ -66,7 +66,7 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   if (lines.removed.length) need(can.editPlan, "remove plan activities");
   for (const { before: old, after: line } of lines.changed) {
     // Production writes only its progress: start date, notes, completion time and actual quantity.
-    if (only(changedKeys(old, line), ["completedAt", "yieldQuantity", "yieldUom", "startedAt", "productionNotes"])) need(can.produce, "record production results");
+    if (only(changedKeys(old, line), ["completedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "startedAt", "productionNotes"])) need(can.produce, "record production results");
     else need(can.editPlan, "move or edit plan activities");
   }
   count("activities added", lines.added.length); count("activities changed", lines.changed.length); count("activities removed", lines.removed.length);

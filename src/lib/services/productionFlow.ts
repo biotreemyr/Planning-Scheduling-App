@@ -4,7 +4,9 @@ import { canViewCalendar, type CalendarDirectory, type CalendarPerson } from "@/
 // Completing an activity: the actual quantity, the day it finished, and where the output goes:
 // straight to the next process, or held in the WIP room for it, or nowhere (final output).
 // machineId: the machine production ran it on, when chosen in the update ("" for none).
-export type CompletionInput = { quantity: number; destinationId: string; notes: string; completedDate?: string; wipRoom?: boolean; uom?: string; machineId?: string };
+// weighed: the output was weighed (kg or g) and converted to a count with the weight of one unit.
+export type CompletionInput = { quantity: number; destinationId: string; notes: string; completedDate?: string; wipRoom?: boolean; uom?: string; machineId?: string;
+  weighed?: { quantity: number; uom: string; unitWeightMg: number } };
 export type WipTransfer = {
   id: string; sourceLineId: string; sourceCalendarId: string; calendarId: string;
   productId: string; quantity: number; uom: string; orderReference?: string; notes: string;

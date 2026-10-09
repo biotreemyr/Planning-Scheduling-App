@@ -53,6 +53,7 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
       old.customerName !== row.customerName ? `customer ${str(old.customerName) || "-"} → ${str(row.customerName)}` : "",
       old.quantity !== row.quantity ? `quantity ${num(old.quantity)} → ${num(row.quantity)} ${str(row.uom)}` : "",
       old.format !== row.format ? `dosage form ${str(old.format) || "-"} → ${str(row.format)}` : "",
+      old.receivedDate !== row.receivedDate ? `PO received ${str(old.receivedDate) || "-"} → ${str(row.receivedDate) || "-"}` : "",
       old.deliveryDate !== row.deliveryDate ? `expected delivery ${str(old.deliveryDate) || "-"} → ${str(row.deliveryDate) || "-"}` : ""
     ].filter(Boolean);
     changes.push({ kind: "PO", po: po(row.id), product: productName(row.productId), text: `PO ${po(row.id)} edited${parts.length ? `: ${parts.join("; ")}` : ""}` });

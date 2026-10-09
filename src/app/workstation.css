@@ -530,3 +530,9 @@
 .status-table .status-release-qty { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
 .status-table .status-release-qty input { width: 110px; }
 .status-panel .panel-title { flex-wrap: wrap; }
+/* QA/QC's sections, listed under it in the sidebar while it is open. */
+.tab-sub { display: flex; flex-direction: column; gap: 4px; margin: -2px 0 2px 28px; }
+.workstation .tab-list .tab.sub { min-height: 32px; padding: 6px 10px; font-size: 13px; }
+@media (max-width: 760px) { .tab-sub { display: none; } }
+.status-mobile-switch { display: none; } @media (max-width: 760px) { .status-mobile-switch { display: inline-flex; } }
+.weighed-fields { align-items: end; } .weighed-count { margin: 0 0 10px; font-size: 14px; }

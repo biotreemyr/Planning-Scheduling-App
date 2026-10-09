@@ -13,7 +13,7 @@ const production = role("planning.view", "schedule.view");
 const planner = role("planning.create", "planning.edit", "planning.view", "reports.view", "schedule.view", "orders.view", "orders.create", "orders.edit");
 const manager = role("planning.edit", "planning.view", "reports.view", "schedule.edit", "schedule.view");
 const admin = role("orders.create", "orders.edit", "master_data.manage", "planning.create", "planning.edit", "planning.view", "reports.view", "schedule.edit", "schedule.view");
-const everything = role("master_data.manage", "planning.create", "planning.edit", "planning.view", "reports.view", "schedule.edit", "schedule.view", "schedule.approve", "schedule.cancel", "schedule.review", "schedule.submit");
+const everything = role("orders.create", "orders.edit", "master_data.manage", "planning.create", "planning.edit", "planning.view", "reports.view", "schedule.edit", "schedule.view", "schedule.approve", "schedule.cancel", "schedule.review", "schedule.submit");
 const openLine = () => base.data.lines.find((line) => !line.completedAt && !base.data.entries.some((entry) => entry.planLineId === line.id))!;
 
 describe("workspace change review", () => {

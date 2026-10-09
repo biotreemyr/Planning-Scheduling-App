@@ -6,8 +6,8 @@ import type { PlanLine, Product } from "@/lib/domain/types";
 import { finalOutput, finishedOn, packingNumber, releaseQueue, testingQueue, type JobOrder } from "@/lib/services/jobOrders";
 import type { PurchaseOrder } from "@/lib/services/orders";
 
+export type StatusSection = "testing" | "release";
 export type StatusAccess = { viewTesting: boolean; passTesting: boolean; printTesting: boolean; viewRelease: boolean; release: boolean; printRelease: boolean };
-type Section = "testing" | "release";
 
 const day = (value?: string) => value ? new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "-";
 const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
@@ -17,14 +17,16 @@ const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractio
  * output not yet passed; Pass moves it to Release. Release lists passed batches with the release
  * quantity (the final output, which can be changed); Release completes it. Only pending work shows.
  */
-export function StatusPanel({ jobOrders, orders, products, lines, transfers, access, onPass, onRelease }: {
+export function StatusPanel({ jobOrders, orders, products, lines, transfers, access, section: chosen, onSection, onPass, onRelease }: {
   jobOrders: JobOrder[]; orders: PurchaseOrder[]; products: Product[]; lines: PlanLine[]; transfers: { sourceLineId: string }[];
   access: StatusAccess;
+  // The section picked under QA/QC in the sidebar.
+  section: StatusSection; onSection?: (section: StatusSection) => void;
   onPass: (jobId: string) => string[];
   onRelease: (jobId: string, quantity: number, uom: string) => string[];
 }) {
-  const sections = ([["testing", "Testing", access.viewTesting], ["release", "Release", access.viewRelease]] as const).filter(([, , allowed]) => allowed);
-  const [section, setSection] = useState<Section>(sections[0]?.[0] ?? "testing");
+  // A section the person may not see falls back to the one they may.
+  const section: StatusSection = chosen === "release" ? access.viewRelease ? "release" : "testing" : access.viewTesting ? "testing" : "release";
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [printing, setPrinting] = useState(0);
@@ -39,14 +41,15 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, acc
     return { order, product: products.find((item) => item.id === order?.productId)?.name ?? "Unknown product", output };
   };
   const report = (errors: string[], text: string) => setMessage(errors.length ? { text: errors.join(" "), error: true } : { text, error: false });
-  if (!sections.length) return null;
+  if (!access.viewTesting && !access.viewRelease) return null;
 
   return <section className="workspace-panel status-panel">
     <div className="panel-title">
-      <div className="view-switch" aria-label="Status section">
-        {sections.map(([key, label]) => <button key={key} type="button" aria-pressed={section === key} onClick={() => { setSection(key); setMessage(null); }}>
-          {label} <span className="badge neutral">{key === "testing" ? testing.length : release.length}</span></button>)}
-      </div>
+      <h2>{section === "testing" ? "Testing" : "Release"} <span className="badge neutral">{rows.length} pending</span></h2>
+      {onSection && access.viewTesting && access.viewRelease ? <div className="view-switch status-mobile-switch" aria-label="QA/QC section">
+        <button type="button" aria-pressed={section === "testing"} onClick={() => onSection("testing")}>Testing</button>
+        <button type="button" aria-pressed={section === "release"} onClick={() => onSection("release")}>Release</button>
+      </div> : null}
       {canPrint ? <button type="button" className="calendar-button" onClick={() => setPrinting((value) => value + 1)}><Printer size={16} />Print {section} list</button> : null}
     </div>
     <p className="orders-help">{section === "testing" ? "Finished batches, from production's final output, waiting for testing. Pass sends a batch to Release." : "Batches that passed testing, waiting for release. The release quantity is the final output; change it if needed, then release."}</p>

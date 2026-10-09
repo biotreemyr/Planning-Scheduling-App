@@ -36,14 +36,17 @@ export const permissions = {
 // Opening the workspace at all needs at least one of these.
 export const boardPermissions = [permissions.viewPlanning, permissions.viewSchedule, permissions.viewOrders, permissions.viewTesting, permissions.viewRelease] as const;
 
-// Always granted only as ticked in Core, even under open access: Admin, and the Status area.
-const coreOnly = new Set<string>([permissions.manageMasterData, permissions.viewTesting, permissions.passTesting, permissions.printTesting, permissions.viewRelease, permissions.releaseBatches, permissions.printRelease]);
+// Still open to everyone under open access: production updates (the detailed schedule) and reports.
+// Everything else, Planner Board, Orders, QA/QC and Admin, is granted only as ticked in Core, so
+// "view" alone means look only.
+const openKeys = new Set<string>([permissions.viewSchedule, permissions.editEntry, permissions.submitEntry, permissions.reviewEntry, permissions.cancelEntry, permissions.confirmEntry, permissions.reports]);
+const coreOnly = new Set<string>(Object.values(permissions).filter((key) => !openKeys.has(key)));
 
 /**
  * What a signed-in user may do in the scheduler. While SCHEDULER_OPEN_ACCESS is "true", anyone who
- * can open the scheduler from Core may plan, use orders and record production without roles being
- * set up; Admin (master data) and the Status area (testing, release) still follow Core: tick them for
- * a person in Core. Otherwise every Core permission applies exactly as granted.
+ * can open the scheduler from Core may record production and see reports without roles being set
+ * up; the Planner Board, Orders, QA/QC and Admin follow Core's ticks. Otherwise every Core
+ * permission applies exactly as granted.
  */
 export function effectivePermissions(granted: readonly string[], env: Record<string, string | undefined> = process.env) {
   if (env.SCHEDULER_OPEN_ACCESS !== "true") return [...granted];

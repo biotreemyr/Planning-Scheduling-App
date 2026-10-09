@@ -298,7 +298,7 @@ export function addSampleData(state: Snapshot, today = new Date(), options = { f
     const deliveryDate = index % 2 === 0 && lastPlanned ? dateKey(workday(new Date(`${lastPlanned}T12:00:00`), 2)) : undefined;
     next.data.orders.push({
       id: orderId(order.po), poNumber: order.po, customerName: order.customer, customerId: customerId(order.customer), number: index + 1, format: inferFormat(product), unitId: d.calendars.find((calendar) => calendar.id === linked[0]?.calendarId)?.unitId ?? unitId("mfg"), productId: `${SAMPLE_PREFIX}product-${product.key}`, quantity: order.quantity ?? quantities[order.product] * order.batches.length,
-      uom: product.uom, expectedDates: {}, ...(deliveryDate ? { deliveryDate } : {}), createdAt: stamp(dateKey(workday(monday, order.batches.length ? -15 : index - 12)), "09:00"), createdBy: "Sample data"
+      uom: product.uom, expectedDates: {}, ...(deliveryDate ? { deliveryDate } : {}), receivedDate: dateKey(workday(monday, order.batches.length ? -15 : index - 12)), createdAt: stamp(dateKey(workday(monday, order.batches.length ? -15 : index - 12)), "09:00"), createdBy: "Sample data"
     });
   }
 

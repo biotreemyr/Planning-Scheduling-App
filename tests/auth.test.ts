@@ -115,15 +115,15 @@ describe("Core contract", () => {
 
 describe("open access while Core roles are not set up", async () => {
   const { effectivePermissions, permissions } = await import("../src/lib/auth/permissions");
-  it("gives every everyday permission when SCHEDULER_OPEN_ACCESS is true, but Admin and Status only from Core", () => {
+  it("opens production updates and reports to everyone under SCHEDULER_OPEN_ACCESS, but the rest only from Core", () => {
     const open = { SCHEDULER_OPEN_ACCESS: "true" };
-    const coreOnly = [permissions.manageMasterData, permissions.viewTesting, permissions.passTesting, permissions.printTesting, permissions.viewRelease, permissions.releaseBatches, permissions.printRelease] as string[];
-    const everyday = [...new Set(Object.values(permissions))].filter((key) => !coreOnly.includes(key)).sort();
-    expect(effectivePermissions(["scheduler.planning.view"], open).sort()).toEqual(everyday);
-    expect(effectivePermissions(["scheduler.planning.view", permissions.manageMasterData], open)).toContain(permissions.manageMasterData);
-    // Testing and release go only to the people ticked in Core.
-    expect(effectivePermissions(["scheduler.planning.view", permissions.passTesting], open)).toEqual(expect.arrayContaining([permissions.passTesting]));
-    expect(effectivePermissions(["scheduler.planning.view"], open)).not.toContain(permissions.viewTesting);
+    const openKeys = [permissions.viewSchedule, permissions.editEntry, permissions.submitEntry, permissions.reviewEntry, permissions.cancelEntry, permissions.confirmEntry, permissions.reports] as string[];
+    expect(effectivePermissions([], open).sort()).toEqual([...new Set(openKeys)].sort());
+    // A person ticked for "View orders" only gets just that: no create, edit or print.
+    const viewer = effectivePermissions([permissions.viewOrders, permissions.viewPlanning], open);
+    expect(viewer).toEqual(expect.arrayContaining([permissions.viewOrders, permissions.viewPlanning]));
+    for (const key of [permissions.createOrders, permissions.editOrders, permissions.printOrders, permissions.createPlanLine, permissions.editPlanLine, permissions.printPlanning, permissions.viewTesting, permissions.manageMasterData]) expect(viewer).not.toContain(key);
+    expect(effectivePermissions([permissions.manageMasterData, permissions.passTesting], open)).toEqual(expect.arrayContaining([permissions.manageMasterData, permissions.passTesting]));
     expect(effectivePermissions(["scheduler.planning.view"], {})).toEqual(["scheduler.planning.view"]);
     expect(effectivePermissions(["scheduler.planning.view"], { SCHEDULER_OPEN_ACCESS: "false" })).toEqual(["scheduler.planning.view"]);
   });

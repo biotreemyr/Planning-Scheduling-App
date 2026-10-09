@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, ArrowUpDown, CalendarDays, CheckCircle2, ClipboardList, Copy, Factory, FileText, LayoutGrid, Plus, Search, SlidersHorizontal, Users, XCircle, History } from "lucide-react";
-import { FormEvent, useMemo, useState, type ReactNode } from "react";
+import { FormEvent, Fragment, useMemo, useState, type ReactNode } from "react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { StatusBadge } from "@/components/StatusBadge";
 import PlanningCalendar from "@/components/PlanningCalendar";
@@ -16,7 +16,7 @@ import { SampleDataAdmin } from "@/components/SampleDataAdmin";
 import { useWorkspacePersistence } from "@/components/WorkspacePersistence";
 import { capabilitiesForDemoRole, capabilitiesFromPermissions } from "@/lib/auth/capabilities";
 import { OrdersPanel } from "@/components/OrdersPanel";
-import { StatusPanel } from "@/components/StatusPanel";
+import { StatusPanel, type StatusSection } from "@/components/StatusPanel";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { inUnit, type JobPlan } from "@/components/JobPlanDialog";
 import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
@@ -50,7 +50,7 @@ type PlanningView = "calendar" | "list";
 const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: "planner", label: "Planner Board", icon: CalendarDays },
   { id: "orders", label: "Orders", icon: FileText },
-  { id: "status", label: "Status", icon: CheckCircle2 },
+  { id: "status", label: "QA/QC", icon: CheckCircle2 },
   { id: "master", label: "Admin", icon: LayoutGrid },
   { id: "reports", label: "Reports", icon: ClipboardList },
   { id: "audit", label: "Audit trail", icon: History }
@@ -84,7 +84,10 @@ function AppHeader({
   showReports,
   showAdmin,
   showOrders,
-  showStatus
+  showStatus,
+  statusSections,
+  statusSection,
+  onStatusSection
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
@@ -94,6 +97,8 @@ function AppHeader({
   showAdmin: boolean;
   // Orders with Core's "View orders"; Status with "View testing" or "View release".
   showOrders: boolean; showStatus: boolean;
+  // QA/QC's sections (Testing, Release) the person may open, listed under it while it is open.
+  statusSections: { id: StatusSection; label: string }[]; statusSection: StatusSection; onStatusSection: (section: StatusSection) => void;
 }) {
   return (
     <aside className="app-header">
@@ -104,18 +109,21 @@ function AppHeader({
       <nav className="tab-list" aria-label="Scheduler sections">
         {tabs.filter((tab) => (showReports || tab.id !== "reports") && (showAdmin || tab.id !== "master") && (showOrders || tab.id !== "orders") && (showStatus || tab.id !== "status")).map((tab) => {
           const Icon = tab.icon;
-          return (
+          return <Fragment key={tab.id}>
             <button
               className={activeTab === tab.id ? "tab active" : "tab"}
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              aria-current={activeTab === tab.id ? "page" : undefined}
+              onClick={() => { onTabChange(tab.id); if (tab.id === "status" && statusSections.length && !statusSections.some((item) => item.id === statusSection)) onStatusSection(statusSections[0].id); }}
+              aria-current={activeTab === tab.id && tab.id !== "status" ? "page" : undefined}
+              aria-expanded={tab.id === "status" ? activeTab === "status" : undefined}
               type="button"
             >
               <Icon size={17} />
               <span>{tab.label}</span>
             </button>
-          );
+            {tab.id === "status" && activeTab === "status" ? <div className="tab-sub" role="group" aria-label="QA/QC sections">
+              {statusSections.map((item) => <button key={item.id} type="button" className={statusSection === item.id ? "tab sub active" : "tab sub"} aria-current={statusSection === item.id ? "page" : undefined} onClick={() => onStatusSection(item.id)}>{item.label}</button>)}
+            </div> : null}
+          </Fragment>;
         })}
       </nav>
       <button type="button" onClick={() => onTabChange(showReports ? "reports" : "planner")} className={conflictCount > 0 ? "alert-pill visible" : "alert-pill"}>
@@ -688,6 +696,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   const [planningView, setPlanningView] = useState<PlanningView>("calendar");
   const [adminSection, setAdminSection] = useState("Configuration");
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
+  // Which QA/QC section is open: Testing or Release.
+  const [statusSection, setStatusSection] = useState<StatusSection>("testing");
   // What the last save from the activity panel did, shown once the panel closes.
   const [planNotice, setPlanNotice] = useState("");
   // "Edit job order planning" from the activity panel reopens the plan form for that job order.
@@ -706,9 +716,10 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
   const allowedLines = syncPlanLineStatuses(allowedCalendars.flatMap((item) => scopeCalendarRecords(data.lines, member, item, directory)), data.entries);
   const selectedLine = allowedLines.find((line) => line.id === selectedActivity);
   const activityCalendar = allowedCalendars.find((item) => item.id === selectedLine?.calendarId);
-  // Orders follow Core's orders tasks: create adds POs and job orders, edit changes or deletes them.
-  const canCreateOrders = caps.createOrders || caps.manage;
-  const canEditOrders = caps.editOrders || caps.manage;
+  // Orders follow Core's orders tasks only: create adds POs and job orders, edit changes or deletes
+  // them, print prints. "View orders" alone is look only.
+  const canCreateOrders = caps.createOrders;
+  const canEditOrders = caps.editOrders;
   // One set of process-flow warnings feeds the calendar, list, activity panel and orders.
   const flow = [...checkProcessFlow(data.lines, data.entries, data.orders, products, directory), ...checkTally(data.lines, data.jobOrders, directory)];
   const flowByLine = warningsByLine(flow);
@@ -759,7 +770,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       const actual: ProductionActual = { ...existingActual, planLineId: line.id, calendarId: line.calendarId, teamId: "", actualQuantity: input.quantity, plannedQuantity: line.quantity, uom, productionDate: input.completedDate || localDateKey(new Date(completedAt)), hasDeviation: existingActual?.hasDeviation ?? false, deviation: existingActual?.deviation ?? "", correctiveAction: existingActual?.correctiveAction ?? "", updatedAt: completedAt, updatedBy: member.name };
       return {
         ...current,
-        lines: current.lines.map((item) => item.id === line.id ? { ...item, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), startedAt: item.startedAt ?? localDateKey(new Date(completedAt)) } : item),
+        lines: current.lines.map((item) => item.id === line.id ? { ...item, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input), startedAt: item.startedAt ?? localDateKey(new Date(completedAt)) } : item),
         entries: (machine.entries ?? current.entries).map((item) => item.planLineId === line.id && item.status !== "Cancelled" ? { ...item, status: "Completed" as const, changedBy: member.name } : item),
         actuals: [...current.actuals.filter((item) => item.planLineId !== line.id), actual],
         transfers: transfer ? [...current.transfers, transfer] : current.transfers
@@ -767,6 +778,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     });
     return [];
   }
+  // Output reported by weight keeps what was weighed and the weight of one unit beside the count.
+  const weighedFields = (input: CompletionInput) => input.weighed ? { weighedQuantity: input.weighed.quantity, weighedUom: input.weighed.uom, actualUnitWeightMg: input.weighed.unitWeightMg } : {};
   // Production's machine choice in its update: the bookings this save starts from, with the machine
   // changed when it differs (undefined when no choice was sent).
   function machineChange(line: PlanLine, machineId?: string): { entries?: ScheduleEntry[] } | { error: string } {
@@ -794,8 +807,8 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     setData((current) => {
       const lines = current.lines.map((item) => {
         if (item.id !== line.id) return item;
-        const { yieldUom: _u, startedAt: _s, productionNotes: _n, ...rest } = item;
-        return { ...rest, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}),
+        const { yieldUom: _u, startedAt: _s, productionNotes: _n, weighedQuantity: _wq, weighedUom: _wu, actualUnitWeightMg: _wm, ...rest } = item;
+        return { ...rest, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input),
           startedAt: input.startedAt || input.completedDate!, ...(input.notes ? { productionNotes: input.notes } : {}) };
       });
       const actuals = current.actuals.map((item) => item.planLineId === line.id ? { ...item, actualQuantity: input.quantity, uom, productionDate: input.completedDate!, updatedAt: now.toISOString(), updatedBy: member.name } : item);
@@ -1104,7 +1117,9 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     </fieldset>
   </div>;
   return <main className="workstation">
-    <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAdmin={!identity || canManage} showOrders={caps.viewOrders} showStatus={caps.viewTesting || caps.viewRelease} />
+    <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
+      statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }] : [])]}
+      statusSection={statusSection} onStatusSection={setStatusSection} />
     <div className="workstation-content">
       <header className="workstation-topbar"><span>Bio Tree / Production</span>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
       {persistenceStatus}
@@ -1144,7 +1159,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
       {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
-        onPass={passJob} onRelease={releaseJob} /> : null}
+        section={statusSection} onSection={setStatusSection} onPass={passJob} onRelease={releaseJob} /> : null}
       {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "audit" ? <HistoryPanel refreshKey={activeTab} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>

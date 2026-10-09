@@ -12,3 +12,11 @@ export function readMeasurement(data: FormData): Measurement {
   return { uom, activityType: String(data.get("activityType") ?? ""), unitWeightMg,
     batchSizeKg: batchKilograms(Number(data.get("quantity")), uom, unitWeightMg) };
 }
+
+const MG: Record<string, number> = { kg: 1_000_000, g: 1_000, mg: 1 };
+export const isWeight = (uom: string) => uom in MG;
+// How many tablets or capsules a weighed quantity is, from the weight of one: 23.975 kg at 350 mg each is 68,500.
+export function countFromWeight(quantity: number, uom: string, unitWeightMg: number): number | undefined {
+  if (!isWeight(uom) || !(unitWeightMg > 0) || !Number.isFinite(quantity) || quantity < 0) return undefined;
+  return Math.round(Number((quantity * MG[uom] / unitWeightMg).toPrecision(12)));
+}

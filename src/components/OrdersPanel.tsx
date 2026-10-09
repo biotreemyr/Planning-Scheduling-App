@@ -65,6 +65,7 @@ function NewOrderForm({ orders, products, customers, units, userName, onAdd, onC
   const [customerCode, setCustomerCode] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
+  const [receivedDate, setReceivedDate] = useState(() => localDateKey(new Date()));
   // A known customer ID fills in its name; a new one is added to the customer list with this PO.
   const known = customers.find((item) => item.code.trim().toLowerCase() === customerCode.trim().toLowerCase() && customerCode.trim());
   const [errors, setErrors] = useState<string[]>([]);
@@ -83,14 +84,14 @@ function NewOrderForm({ orders, products, customers, units, userName, onAdd, onC
       id: `order-${crypto.randomUUID()}`, number: number++, item: firstItem + index, format: formatOf(item), ...(units.length === 1 ? { unitId: units[0].id } : {}),
       customerId: customer.id, customerName: customer.name, poNumber: poNumber.trim(), productId: item.productId,
       quantity: Number(data.get(`quantity-${item.key}`)), uom: item.uom || (products.find((product) => product.id === item.productId)?.uom ?? ""),
-      expectedDates: {}, ...(deliveryDate ? { deliveryDate } : {}), createdAt, createdBy: userName
+      expectedDates: {}, receivedDate, ...(deliveryDate ? { deliveryDate } : {}), createdAt, createdBy: userName
     }));
     const result = onAdd(built, customer);
     setErrors(result);
     if (!result.length) {
       const range = built.length === 1 ? `order ${built[0].number}` : `orders ${built[0].number}-${built.at(-1)!.number}`;
       onDone(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}. Open it in the list to key in its job orders.`);
-      setItems([draftItem()]); setPoNumber(""); setDeliveryDate(""); setCustomerCode(""); setCustomerName(""); setVersion((value) => value + 1);
+      setItems([draftItem()]); setPoNumber(""); setDeliveryDate(""); setReceivedDate(localDateKey(new Date())); setCustomerCode(""); setCustomerName(""); setVersion((value) => value + 1);
     }
   }}>
     <div className="panel-title"><h2 id="new-order-title">New order</h2><button className="icon-button" type="button" aria-label="Close new order" title="Close" onClick={onClose}><X size={18} /></button></div>
@@ -104,6 +105,7 @@ function NewOrderForm({ orders, products, customers, units, userName, onAdd, onC
       const record = customers.find((item) => item.id === owner?.customerId);
       if (record && !customerCode.trim()) setCustomerCode(record.code);
     }} /></label>
+    <label>PO received date<input name="receivedDate" type="date" required max={localDateKey(new Date())} value={receivedDate} onChange={(event) => setReceivedDate(event.target.value)} /></label>
     <label>Expected customer delivery<input name="deliveryDate" type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
     {customerCode.trim() && !known ? <p className="orders-help" role="status">New customer ID {customerCode.trim()}: it is added to the customer list with this PO.</p> : null}
     {existing.length ? <p className="orders-help" role="status">{existing[0].poNumber} already has {existing.length} item{existing.length === 1 ? "" : "s"}{existing[0].customerName ? ` for ${existing[0].customerName}` : ""}. These are added as item {firstItem}{items.length > 1 ? ` to ${firstItem + items.length - 1}` : ""}.</p> : null}
@@ -166,6 +168,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
     { key: "number", label: "#", required: true, sort: (row) => row.number, cell: (row) => <span className="order-number-cell" style={{ "--order-color": orderColor(row.number) } as React.CSSProperties}><OrderBadge number={row.number} poNumber={row.order.poNumber} /></span> },
     { key: "customer", label: "Customer", sort: (row) => row.order.customerName ?? "", cell: (row) => { const record = customerRecords.find((item) => item.id === row.order.customerId); return row.order.customerName ? <>{row.order.customerName}{record ? <small>ID {record.code}</small> : null}</> : <span className="route-muted">Not set</span>; }, filter: { kind: "text", text: (row) => `${row.order.customerName ?? ""} ${customerRecords.find((item) => item.id === row.order.customerId)?.code ?? ""}` } },
     { key: "po", label: "PO number", required: true, sort: (row) => `${row.order.poNumber}#${String(poItem(row.order)).padStart(4, "0")}`, cell: (row) => <><strong>{row.order.poNumber}</strong>{poItems(row.order.poNumber, orders).length > 1 ? <small>Item {poItem(row.order)} of {poItems(row.order.poNumber, orders).length}</small> : null}</>, filter: { kind: "text", text: (row) => row.order.poNumber } },
+    { key: "received", label: "PO received", sort: (row) => row.order.receivedDate ?? "", cell: (row) => row.order.receivedDate ? displayDate(row.order.receivedDate) : <span className="route-muted">Not set</span> },
     { key: "product", label: "Product", sort: (row) => row.product?.name ?? "", cell: (row) => row.product?.name ?? "Unknown product", filter: { kind: "text", text: (row) => `${row.product?.name ?? ""} ${row.product?.sku ?? ""}` } },
     { key: "format", label: "Dosage form", sort: (row) => row.format, cell: (row) => <span title={routeLabel(row.format)}>{row.format}</span>, filter: { kind: "select", options: [...PRODUCT_FORMATS], value: (row) => row.format } },
     { key: "quantity", label: "Order qty", numeric: true, sort: (row) => row.order.quantity, cell: (row) => `${row.order.quantity.toLocaleString()} ${row.order.uom}` },
@@ -202,7 +205,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
     <div className="orders-toolbar">
       <fieldset className="orders-month"><legend>Month</legend>
         <select aria-label="Month based on" value={basis} onChange={(event) => setBasis(event.target.value as MonthBasis)}>
-          <option value="scheduled">Scheduled in</option><option value="expected">Expected delivery in</option><option value="created">Order created in</option>
+          <option value="scheduled">Scheduled in</option><option value="expected">Expected delivery in</option><option value="received">PO received in</option><option value="created">Order created in</option>
         </select>
         <input type="month" aria-label="Month" value={month} onChange={(event) => setMonth(event.target.value)} />
       </fieldset>
@@ -276,9 +279,9 @@ function OrdersPrint({ rows, orders, detail, lines, directory, visibleCalendarId
     {detail && rows[0] ? <OrderPrintDetail row={rows[0]} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} printed={printed} /> : <>
       <header><h1>Customer orders</h1><p>{rows.length} order{rows.length === 1 ? "" : "s"}{filtered ? " (filtered)" : ""} · printed {printed}</p></header>
       <table className="print-orders-table">
-        <thead><tr><th>#</th><th>Customer</th><th>PO number</th><th>Product</th><th>Dosage form</th><th>Order qty</th><th>Progress</th><th>Finished</th><th>Testing / release</th><th>Expected delivery</th><th>Status</th></tr></thead>
+        <thead><tr><th>#</th><th>Customer</th><th>PO number</th><th>PO received</th><th>Product</th><th>Dosage form</th><th>Order qty</th><th>Progress</th><th>Finished</th><th>Testing / release</th><th>Expected delivery</th><th>Status</th></tr></thead>
         <tbody>{rows.map((row) => <tr key={row.order.id}>
-          <td>{row.number}</td><td>{row.order.customerName ?? ""}</td><td>{poLabel(row.order, orders)}</td><td>{row.product?.name ?? "Unknown product"}</td><td>{row.format}</td>
+          <td>{row.number}</td><td>{row.order.customerName ?? ""}</td><td>{poLabel(row.order, orders)}</td><td>{row.order.receivedDate ? displayDate(row.order.receivedDate) : ""}</td><td>{row.product?.name ?? "Unknown product"}</td><td>{row.format}</td>
           <td>{row.order.quantity.toLocaleString()} {row.order.uom}</td><td>{progressText(row.progress)}</td>
           <td>{row.progress.finishedQuantity ? `${row.progress.finishedQuantity.toLocaleString()} (${row.progress.percent}%)` : "-"}</td>
           <td>{statusPrint(row.status)}</td>
@@ -300,7 +303,7 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
   };
   return <>
     <header><h1>Order {row.number} · {row.order.poNumber}{row.order.item ? ` item ${row.order.item}` : ""}</h1><p>{row.order.customerName ?? ""} · {row.product?.name ?? "Unknown product"} · {row.order.quantity.toLocaleString()} {row.order.uom} · printed {printed}</p></header>
-    <p className="print-order-facts">Dosage form: {row.format} ({routeLabel(row.format)}) · Status: {row.progress.status} · {progressText(row.progress)} · Expected delivery: {row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " (overdue)" : ""}</p>
+    <p className="print-order-facts">PO received: {row.order.receivedDate ? displayDate(row.order.receivedDate) : "Not set"} · Dosage form: {row.format} ({routeLabel(row.format)}) · Status: {row.progress.status} · {progressText(row.progress)} · Expected delivery: {row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " (overdue)" : ""}</p>
     {row.warnings.length ? <ul className="print-order-warnings">{row.warnings.map((warning) => <li key={warning.message}>Warning: {warning.message}</li>)}</ul> : null}
     {matrix.rows.length ? <table className="print-orders-table">
       <thead><tr><th>Process</th>{matrix.batches.map((batch) => <th key={batch.key}>{batch.label}<br />{batch.kg !== undefined ? `${batch.kg.toLocaleString("en-MY", { maximumFractionDigits: 2 })} kg · ` : ""}{batch.quantity.toLocaleString()} {batch.uom}</th>)}<th>Summary</th></tr></thead>
@@ -495,14 +498,15 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
-      const delivery = String(data.get("deliveryDate") ?? "");
-      const { deliveryDate: _d, ...rest } = order;
-      const result = onSave({ ...rest, ...(delivery ? { deliveryDate: delivery } : {}), customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), quantity: Number(data.get("quantity")), format: String(data.get("format")) as ProductFormat });
+      const delivery = String(data.get("deliveryDate") ?? ""), received = String(data.get("receivedDate") ?? "");
+      const { deliveryDate: _d, receivedDate: _r, ...rest } = order;
+      const result = onSave({ ...rest, ...(delivery ? { deliveryDate: delivery } : {}), ...(received ? { receivedDate: received } : {}), customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), quantity: Number(data.get("quantity")), format: String(data.get("format")) as ProductFormat });
       setErrors(result); setSaved(!result.length);
     }}>
       <label>Customer name<input name="customer" required defaultValue={order.customerName} list={`customers-${order.id}`} /></label>
       <datalist id={`customers-${order.id}`}>{customers.map((name) => <option key={name} value={name} />)}</datalist>
       <label>PO number<input name="po" required defaultValue={order.poNumber} /></label>
+      <label>PO received date<input name="receivedDate" type="date" max={localDateKey(new Date())} defaultValue={order.receivedDate ?? ""} /></label>
       <label>Expected customer delivery<input name="deliveryDate" type="date" defaultValue={order.deliveryDate ?? ""} /></label>
       <label>Dosage form<select name="format" defaultValue={format}>{PRODUCT_FORMATS.map((item) => <option key={item}>{item}</option>)}</select></label>
       <label>Quantity ({order.uom})<input name="quantity" type="number" min="1" step="any" required defaultValue={order.quantity} /></label>

@@ -20,6 +20,8 @@ export type PurchaseOrder = {
   unitId?: string;
   // When the customer expects the goods (YYYY-MM-DD); the one date people follow an order by.
   deliveryDate?: string;
+  // When the customer's PO was received (YYYY-MM-DD).
+  receivedDate?: string;
   // Per-process expected completion dates from before delivery dates; no longer entered or shown.
   expectedDates: Record<string, string>;
   notes?: string; createdAt: string; createdBy: string;
@@ -153,11 +155,12 @@ function finishedInOrderUnit(order: PurchaseOrder, last: OrderProcessRow | undef
   return Math.round(total);
 }
 
-export type MonthBasis = "scheduled" | "expected" | "created";
+export type MonthBasis = "scheduled" | "expected" | "received" | "created";
 // Whether an order belongs to a "YYYY-MM" month: work scheduled in it, expected to finish in it, or created in it.
 export function orderInMonth(order: PurchaseOrder, rows: OrderProcessRow[], progress: Pick<OrderProgress, "expectedDate">, month: string, basis: MonthBasis) {
   if (!month) return true;
   if (basis === "expected") return progress.expectedDate?.slice(0, 7) === month;
+  if (basis === "received") return order.receivedDate?.slice(0, 7) === month;
   if (basis === "created") {
     const created = new Date(order.createdAt);
     return `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}` === month;

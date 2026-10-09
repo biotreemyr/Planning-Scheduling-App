@@ -4,6 +4,7 @@ import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Machine, PlanLine, Product } from "@/lib/domain/types";
 import type { CompletionInput, CorrectionInput, WipTransfer } from "@/lib/services/productionFlow";
 import { actualUoms, stepOf } from "@/lib/services/processRules";
+import { countFromWeight, isWeight } from "@/lib/services/measurements";
 
 // Today as YYYY-MM-DD in local time.
 const today = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
@@ -38,7 +39,17 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   // The units this process reports in; the planned unit first when it is one of them.
   const reportUoms = actualUoms(processName(line.calendarId), uom);
   const doneUom = line.yieldUom ?? uom;
-  const defaultUom = line.completedAt ? doneUom : reportUoms.includes(uom) ? uom : reportUoms[0] ?? uom;
+  const defaultUom = line.completedAt ? line.weighedUom ?? doneUom : reportUoms.includes(uom) ? uom : reportUoms[0] ?? uom;
+  // Compression, coating and capsulation count tablets or capsules; output weighed in kg or g is
+  // converted with the weight of one compressed/coated tablet or filled capsule.
+  const step = stepOf(processName(line.calendarId));
+  const countUom = step === "capsulation" ? "capsules" : step === "tableting" || step === "coating" ? "tablets" : undefined;
+  const unitLabel = step === "capsulation" ? "Filled capsule weight" : step === "coating" ? "Coated tablet weight" : "Compressed tablet weight";
+  const [chosenUom, setChosenUom] = useState(defaultUom);
+  const [quantityText, setQuantityText] = useState(line.completedAt ? String(line.weighedQuantity ?? line.yieldQuantity ?? "") : "");
+  const [unitMg, setUnitMg] = useState(String(line.actualUnitWeightMg ?? line.unitWeightMg ?? ""));
+  const weighing = !!countUom && isWeight(chosenUom);
+  const counted = weighing && quantityText.trim() !== "" ? countFromWeight(Number(quantityText), chosenUom, Number(unitMg)) : undefined;
   // Where the output can go: the WIP room, any other process of the unit after dispensing (in the
   // unit's process order), or final output. The next process of the batch's route is the default.
   const destinations = d.calendars.filter((calendar) => calendar.unitId === source?.unitId && calendar.id !== source?.id && stepOf(processName(calendar.id)) !== "dispensing");
@@ -53,7 +64,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     <dl className="production-facts">
       <div><dt>Started</dt><dd>{line.startedAt ? display(line.startedAt) : "-"}</dd></div>
       <div><dt>Completed</dt><dd>{display(completedDay)}</dd></div>
-      <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {doneUom}{doneUom === uom && line.quantity > 0 ? <small> ({((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1)}% of plan)</small> : <small> (planned {line.quantity.toLocaleString()} {uom})</small>}</dd></div>
+      <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {doneUom}{line.weighedQuantity !== undefined ? <small> · weighed {line.weighedQuantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {line.weighedUom} at {line.actualUnitWeightMg?.toLocaleString()} mg each</small> : null}{doneUom === uom && line.quantity > 0 ? <small> ({((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1)}% of plan)</small> : <small> (planned {line.quantity.toLocaleString()} {uom})</small>}</dd></div>
       <div><dt>Machine</dt><dd>{machines.find((machine) => machine.id === machineId)?.name ?? "Not assigned"}</dd></div>
       <div><dt>Output</dt><dd>{outgoing ? `${outgoing.wipRoom ? "WIP room, for " : "Transferred to "}${processName(outgoing.calendarId)} · ${outgoing.receivedAt ? `received by ${outgoing.receivedBy}` : "awaiting receipt"}` : "Final output - no transfer"}</dd></div>
     </dl>
@@ -66,10 +77,14 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const startedAt = String(data.get("startedAt") ?? ""), completedDate = String(data.get("completedAt") ?? ""), notes = String(data.get("notes") ?? "").trim();
-      const quantityText = String(data.get("quantity") ?? "").trim();
+      const typed = String(data.get("quantity") ?? "").trim();
       const [kind, destinationId = ""] = String(data.get("destination") ?? "final").split(":");
       const machine = String(data.get("machine") ?? "");
-      const output = { quantity: Number(quantityText), uom: String(data.get("yieldUom") ?? "") || uom, completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineId: machine };
+      const reported = String(data.get("yieldUom") ?? "") || uom;
+      if (typed && weighing && !(Number(unitMg) > 0)) { setErrors([`Enter the ${unitLabel.toLowerCase()} in mg to convert ${reported} to ${countUom}.`]); return; }
+      const weighed = typed && weighing ? { quantity: Number(typed), uom: reported, unitWeightMg: Number(unitMg) } : undefined;
+      const quantityText = weighed ? String(countFromWeight(weighed.quantity, weighed.uom, weighed.unitWeightMg)) : typed;
+      const output = { quantity: Number(quantityText), uom: weighed ? countUom! : reported, ...(weighed ? { weighed } : {}), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineId: machine };
       const done = (result: string[], message: string) => { setErrors(result); if (!result.length) { if (onSaved) onSaved(message); else setSaved(message); } return result; };
       if (correcting) {
         if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity."]); return; }
@@ -85,9 +100,11 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     }}>
       <label>Date started<input name="startedAt" type="date" defaultValue={line.startedAt ?? ""} /></label>
       <label>Date completed<input name="completedAt" type="date" defaultValue={completedDay} max={today()} /></label>
-      <div className="quantity-fields"><label>Actual quantity<input name="quantity" type="number" min="0" step="any" defaultValue={line.completedAt ? line.yieldQuantity : undefined} readOnly={handedOver} placeholder={`Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
-        <label>UOM<select name="yieldUom" defaultValue={defaultUom} disabled={handedOver}>{[...new Set([...reportUoms, ...(line.completedAt ? [doneUom] : [])])].map((name) => <option key={name}>{name}</option>)}</select></label>
-        {handedOver ? <input type="hidden" name="yieldUom" value={doneUom} /> : null}</div>
+      <div className="quantity-fields"><label>Actual quantity<input name="quantity" type="number" min="0" step="any" value={quantityText} onChange={(event) => setQuantityText(event.target.value)} readOnly={handedOver} placeholder={`Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
+        <label>UOM<select name="yieldUom" value={chosenUom} onChange={(event) => setChosenUom(event.target.value)} disabled={handedOver}>{[...new Set([...reportUoms, ...(line.completedAt ? [doneUom, line.weighedUom ?? doneUom] : [])])].map((name) => <option key={name}>{name}</option>)}</select></label>
+        {handedOver ? <input type="hidden" name="yieldUom" value={chosenUom} /> : null}</div>
+      {weighing ? <div className="quantity-fields weighed-fields"><label>{unitLabel} (mg each)<input name="unitWeightMg" type="number" min="0" step="any" required value={unitMg} onChange={(event) => setUnitMg(event.target.value)} readOnly={handedOver} placeholder="e.g. 350" /></label>
+        <p className="weighed-count" role="status">{counted !== undefined ? <>= <strong>{counted.toLocaleString()} {countUom}</strong></> : `Enter the weight to work out the ${countUom}.`}</p></div> : null}
       <label>Machine<select name="machine" defaultValue={machineId}>
         <option value="">{machines.length ? "Not assigned" : "No machine set up"}</option>
         {machines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
