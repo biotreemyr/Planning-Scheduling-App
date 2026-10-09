@@ -156,7 +156,6 @@ function PlannerBoard({
   orders,
   jobOrders,
   allLines,
-  canPlanJobs,
   canPrint,
   flow,
   onJobPlan,
@@ -183,7 +182,6 @@ function PlannerBoard({
   // Every activity, including processes out of view, so a planned job order never shows as waiting.
   allLines: PlanLine[];
   // Whether this person may plan job orders (the waiting list's Plan buttons).
-  canPlanJobs: boolean;
   canPrint: boolean;
   flow: FlowWarning[];
   // The plan form: a job order's whole route (new), or corrections to a planned one (edit).
@@ -200,9 +198,7 @@ function PlannerBoard({
 }) {
   const setPlanningView = onPlanningView;
   const [initialDate] = useState(() => localDateKey(new Date()));
-  // A waiting job order's Plan button opens the plan form with it chosen; the newest request wins.
-  const [queueRequest, setQueueRequest] = useState<{ jobId: string; nonce: number; mode: "new"; date: string } | null>(null);
-  const planRequest = [editJobRequest, queueRequest].filter((item) => !!item).sort((a, b) => b!.nonce - a!.nonce)[0] ?? null;
+  const planRequest = editJobRequest;
   const [query, setQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -228,7 +224,7 @@ function PlannerBoard({
           <span className="result-count" aria-live="polite">{visibleLines.length} of {planLines.length} lines</span>
         </div>
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
-        <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} onPlan={canPlanJobs ? (jobId, date) => setQueueRequest({ jobId, date, mode: "new", nonce: Date.now() }) : undefined} />
+        <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
         <PlanningCalendar canPrint={canPrint} processNames={processNames} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onResize={onResizeLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
           const result = onJobPlan(plan, mode);
@@ -240,24 +236,19 @@ function PlannerBoard({
   );
 }
 
-// Job orders released from POs made in this unit that planning has not scheduled yet. Plan opens
-// the Production Planning form for it: batch number, then each process's date and machine.
-function JobOrderQueue({ jobOrders, orders, products, lines, calendars, onPlan }: { jobOrders: JobOrder[]; orders: PurchaseOrder[]; products: Product[]; lines: PlanLine[]; calendars: UnitCalendar[]; onPlan?: (id: string, startDate: string) => void }) {
-  const [starts, setStarts] = useState<Record<string, string>>({});
-  const today = localDateKey(new Date());
+// Job orders released from POs made in this unit that planning has not scheduled yet: a closed
+// list that opens on click, only to show what is pending. Planning is done with Production Planning.
+function JobOrderQueue({ jobOrders, orders, products, lines, calendars }: { jobOrders: JobOrder[]; orders: PurchaseOrder[]; products: Product[]; lines: PlanLine[]; calendars: UnitCalendar[] }) {
   // Every activity of the job counts, even in processes filtered out of view.
   const waiting = jobOrders.filter((job) => !lines.some((line) => line.jobOrderId === job.id) && calendars.length > 0 && inUnit(job, orders, calendars[0]?.unitId));
   if (!waiting.length) return null;
-  return <details className="job-queue" open={waiting.length <= 6}>
+  return <details className="job-queue">
     <summary>Job orders waiting to be planned <span className="badge info">{waiting.length}</span></summary>
     <ul>{waiting.map((job) => {
       const order = orders.find((item) => item.id === job.orderId);
       const product = products.find((item) => item.id === order?.productId);
-      const start = starts[job.id] ?? today;
       return <li key={job.id}>
         <span><strong>{job.number}</strong> · {product?.name ?? "Unknown product"} · {job.quantity.toLocaleString()} {job.uom}{job.batchSizeKg ? ` (${job.batchSizeKg.toLocaleString()} kg)` : job.batchVolumeL ? ` (${job.batchVolumeL.toLocaleString()} L)` : ""}<small>{order ? `${order.poNumber}${order.customerName ? ` · ${order.customerName}` : ""}` : ""}{job.batchNumber ? ` · Batch no. ${job.batchNumber}` : ""}</small></span>
-        {onPlan ? <span className="job-plan"><input type="date" aria-label={`Start date for ${job.number}`} value={start} onChange={(event) => setStarts({ ...starts, [job.id]: event.target.value })} />
-          <button type="button" className="calendar-button" onClick={() => onPlan(job.id, start)}>Plan</button></span> : null}
       </li>;
     })}</ul>
   </details>;
@@ -1146,7 +1137,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPlanJobs={canCreate} canPrint={caps.printPlan} flow={flow}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine} onResizeLine={resizeLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
