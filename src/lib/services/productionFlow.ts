@@ -1,4 +1,4 @@
-import type { PlanLine } from "@/lib/domain/types";
+import type { PlanLine, RunSet } from "@/lib/domain/types";
 import { canViewCalendar, type CalendarDirectory, type CalendarPerson } from "@/lib/domain/calendarAccess";
 
 // Completing an activity: the actual quantity, the day it finished, and where the output goes:
@@ -7,7 +7,9 @@ import { canViewCalendar, type CalendarDirectory, type CalendarPerson } from "@/
 // weighed: the output was weighed (kg, g) or measured (L, mL) and converted to a count with the size of
 // one unit; unitWeightMg then holds mg per unit for a weight, or mL per unit for a volume.
 export type CompletionInput = { quantity: number; destinationId: string; notes: string; completedDate?: string; wipRoom?: boolean; uom?: string; machineId?: string;
-  weighed?: { quantity: number; uom: string; unitWeightMg: number } };
+  weighed?: { quantity: number; uom: string; unitWeightMg: number };
+  // Coating's sets; the quantity is then their total count.
+  sets?: RunSet[] };
 export type WipTransfer = {
   id: string; sourceLineId: string; sourceCalendarId: string; calendarId: string;
   productId: string; quantity: number; uom: string; orderReference?: string; notes: string;

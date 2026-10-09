@@ -35,7 +35,7 @@ import type {
   ScheduleEntryStatus,
   WorkCentre
 } from "@/lib/domain/types";
-import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
+import { priorities, scheduleStatuses, type Customer, type RunSet } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
 import { getScheduleReport } from "@/lib/services/reports";
@@ -779,8 +779,9 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     return [];
   }
   // Output reported by weight keeps what was weighed and the weight of one unit beside the count.
-  const weighedFields = (input: CompletionInput) => !input.weighed ? {} : { weighedQuantity: input.weighed.quantity, weighedUom: input.weighed.uom,
-    ...(isVolume(input.weighed.uom) ? { actualUnitVolumeMl: input.weighed.unitWeightMg } : { actualUnitWeightMg: input.weighed.unitWeightMg }) };
+  const weighedFields = (input: CompletionInput) => ({ ...(!input.weighed ? {} : { weighedQuantity: input.weighed.quantity, weighedUom: input.weighed.uom,
+    ...(isVolume(input.weighed.uom) ? { actualUnitVolumeMl: input.weighed.unitWeightMg } : { actualUnitWeightMg: input.weighed.unitWeightMg }) }),
+    ...(input.sets?.length ? { runSets: input.sets } : {}) });
   // Production's machine choice in its update: the bookings this save starts from, with the machine
   // changed when it differs (undefined when no choice was sent).
   function machineChange(line: PlanLine, machineId?: string): { entries?: ScheduleEntry[] } | { error: string } {
@@ -808,7 +809,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     setData((current) => {
       const lines = current.lines.map((item) => {
         if (item.id !== line.id) return item;
-        const { yieldUom: _u, startedAt: _s, productionNotes: _n, weighedQuantity: _wq, weighedUom: _wu, actualUnitWeightMg: _wm, actualUnitVolumeMl: _wv, ...rest } = item;
+        const { yieldUom: _u, startedAt: _s, productionNotes: _n, weighedQuantity: _wq, weighedUom: _wu, actualUnitWeightMg: _wm, actualUnitVolumeMl: _wv, runSets: _rs, ...rest } = item;
         return { ...rest, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input),
           startedAt: input.startedAt || input.completedDate!, ...(input.notes ? { productionNotes: input.notes } : {}) };
       });
@@ -825,7 +826,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     return [];
   }
   // Production's progress on an activity: the day it started and notes; its bookings go in progress.
-  function saveProgress(startedAt: string, notes: string, machineId?: string) {
+  function saveProgress(startedAt: string, notes: string, machineId?: string, sets?: RunSet[]) {
     const line = selectedLine;
     if (!line || !canProduce) return ["Production access to this activity is required."];
     if (line.completedAt) return ["This activity is already complete."];
@@ -833,7 +834,9 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     const machine = machineChange(line, machineId);
     if ("error" in machine) return [machine.error];
     setData((previous) => { const current = machine.entries ? { ...previous, entries: machine.entries } : previous; return { ...current,
-      lines: current.lines.map((item) => item.id !== line.id ? item : (({ startedAt: _s, productionNotes: _n, ...rest }) => ({ ...rest, ...(startedAt ? { startedAt } : {}), ...(notes ? { productionNotes: notes } : {}) }))(item)),
+      lines: current.lines.map((item) => item.id !== line.id ? item : (({ startedAt: _s, productionNotes: _n, runSets: _r, ...rest }) => ({ ...rest, ...(startedAt ? { startedAt } : {}), ...(notes ? { productionNotes: notes } : {}),
+        // Coating's sets so far are kept with its progress.
+        ...(sets ? sets.length ? { runSets: sets } : {} : item.runSets ? { runSets: item.runSets } : {}) }))(item)),
       entries: startedAt ? current.entries.map((entry) => entry.planLineId === line.id && (entry.status === "Draft" || entry.status === "Confirmed") ? { ...entry, status: "In Progress" as const, changedBy: member.name } : entry) : current.entries }; });
     return [];
   }
