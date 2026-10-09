@@ -47,7 +47,7 @@ describe("workspace change review", () => {
     const released = structuredClone(passed);
     Object.assign(released.data.jobOrders[0], { releaseQuantity: 4100, releaseUom: "boxes", releasedAt: "2026-10-09T10:00:00.000Z", releasedBy: "QA" });
     expect(reviewWorkspaceChange(passed, released, role("release.edit")).allowed).toBe(true);
-    expect(reviewWorkspaceChange(passed, released, role("testing.edit")).denied).toEqual(["release batches"]);
+    expect(reviewWorkspaceChange(passed, released, role("testing.edit")).denied).toEqual(["release or reject batches"]);
   });
   it("requires schedule edit to record results, not planning rights", () => {
     const next = copy();

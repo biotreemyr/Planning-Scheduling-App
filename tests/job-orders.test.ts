@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { recordTest, testResult, batchStatus, orderStatusSummary, passTesting, releaseBatch, releaseQueue, testingQueue, activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { rejectBatch, recordTest, testResult, batchStatus, orderStatusSummary, passTesting, releaseBatch, releaseQueue, testingQueue, activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { validateOrder } from "../src/lib/services/orders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
@@ -217,7 +217,7 @@ describe("job orders", () => {
     next.data.jobOrders = next.data.jobOrders.map((item) => item.id === released.id ? released : item);
     expect(() => parseWorkspace(next)).not.toThrow();
   });
-  it("records failed and under-investigation results: failed batches never reach release", () => {
+  it("records failed and under-investigation results: failed batches go to release to be rejected", () => {
     const job = state.data.jobOrders.find((item) => state.data.lines.some((line) => line.jobOrderId === item.id && line.activityType === "Packing" && line.completedAt))!;
     const lines = state.data.lines;
     const handed = lines.filter((line) => line.jobOrderId === job.id && line.completedAt && line.activityType !== "Packing").map((line) => ({ sourceLineId: line.id }));
@@ -230,13 +230,19 @@ describe("job orders", () => {
     const failed = recordTest(investigating, "Failed", lines, handed, "QC", today) as JobOrder;
     expect([testResult(failed), batchStatus(failed, lines, handed)]).toEqual(["Failed", "Failed testing"]);
     expect(testingQueue([failed], lines, handed)).toEqual([]);
-    expect(releaseQueue([failed])).toEqual([]);
+    expect(releaseQueue([failed])).toEqual([failed]);
+    // QA rejects it there; it is then closed and never released.
+    const rejected = rejectBatch(failed, "QA", today) as JobOrder;
+    expect([batchStatus(rejected, lines, handed), rejected.rejectedBy]).toEqual(["Rejected", "QA"]);
+    expect(releaseQueue([rejected])).toEqual([]);
+    expect(rejectBatch(rejected, "QA", today)).toMatchObject({ error: expect.stringContaining("already rejected") });
+    expect(rejectBatch(investigating, "QA", today)).toMatchObject({ error: expect.stringContaining("did not fail") });
     expect(recordTest(failed, "Passed", lines, handed, "QC", today)).toMatchObject({ error: expect.stringContaining("already failed") });
     expect(releaseBatch(failed, 1, "boxes", "QA", today)).toMatchObject({ error: expect.stringContaining("has not passed") });
     // Older records with only a testing date count as passed.
     expect(testResult({ testedAt: "2026-10-08T00:00:00Z" })).toBe("Passed");
     const next = structuredClone(state);
-    next.data.jobOrders = next.data.jobOrders.map((item) => item.id === failed.id ? failed : item);
+    next.data.jobOrders = next.data.jobOrders.map((item) => item.id === rejected.id ? rejected : item);
     expect(() => parseWorkspace(next)).not.toThrow();
   });
 });

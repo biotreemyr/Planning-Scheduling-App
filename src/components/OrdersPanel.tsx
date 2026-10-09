@@ -264,7 +264,7 @@ function statusText(status: Row["status"]) {
   return <>{status.awaitingTesting ? <span className="badge warning">{status.awaitingTesting} awaiting testing</span> : null}
     {status.investigating ? <span className="badge warning">{status.investigating} under investigation</span> : null}
     {status.failed ? <span className="badge danger">{status.failed} failed</span> : null}
-    <small>{status.passed}/{status.jobs} passed · {status.released}/{status.jobs} released</small>
+    <small>{status.passed}/{status.jobs} passed · {status.released}/{status.jobs} released{status.rejected ? ` · ${status.rejected} rejected` : ""}</small>
     {status.releasedQuantity.map((item) => <small key={item.uom}>{item.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {item.uom} released</small>)}</>;
 }
 const statusPrint = (status: Row["status"]) => !status.jobs || (!status.awaitingTesting && !status.passed && !status.failed && !status.investigating) ? "-"
@@ -411,7 +411,8 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
             if (state === "Awaiting release") return <><span className="badge info">Awaiting release</span><small>Passed testing {day(job.testedAt)}</small></>;
             if (state === "Awaiting testing") return <span className="badge warning">Awaiting testing</span>;
             if (state === "Under investigation") return <><span className="badge warning">Under investigation</span><small>since {day(job.testedAt)}</small></>;
-            if (state === "Failed testing") return <><span className="badge danger">Failed testing</span><small>{day(job.testedAt)}</small></>;
+            if (state === "Failed testing") return <><span className="badge danger">Failed testing</span><small>{day(job.testedAt)} · awaiting QA rejection</small></>;
+            if (state === "Rejected") return <><span className="badge danger">Rejected</span><small>Failed {day(job.testedAt)} · rejected {day(job.rejectedAt)}</small></>;
             return <span className="route-muted">In production</span>;
           })()}</td>
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
@@ -497,13 +498,14 @@ function OrderFlow({ order, jobOrders, lines, transfers, directory, format }: { 
             <small>{step.lines.some((line) => line.completedAt) ? `${amount(actual)} ${uom}` : started ? `Started ${shortDate(step.lines.map((line) => line.startedAt).filter((value): value is string => !!value).sort()[0] ?? first)}` : first ? shortDate(first) : ""}</small></li>;
         })}</ol></td>
         <td>{state === "Awaiting release" || state === "Released" ? <><span className="badge success">Passed</span><small>{job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></>
-          : state === "Failed testing" ? <><span className="badge danger">Failed</span><small>{job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}</small></>
+          : state === "Failed testing" || state === "Rejected" ? <><span className="badge danger">Failed</span><small>{job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}</small></>
           : state === "Under investigation" ? <><span className="badge warning">Under investigation</span><small>since {job.testedAt ? shortDate(job.testedAt.slice(0, 10)) : ""}</small></>
           : state === "Awaiting testing" ? <><span className="badge warning">Awaiting testing</span>{output ? <small>{amount(output.quantity)} {output.uom} finished</small> : null}</>
           : <span className="route-muted">-</span>}</td>
         <td>{state === "Released" ? <><span className="badge success">Released</span><small>{amount(job.releaseQuantity ?? 0)} {job.releaseUom}</small><small>{job.releasedAt ? shortDate(job.releasedAt.slice(0, 10)) : ""}{job.releasedBy ? ` · ${job.releasedBy}` : ""}</small></>
           : state === "Awaiting release" ? <span className="badge info">Awaiting release</span>
-          : state === "Failed testing" ? <span className="route-muted">Not released (failed testing)</span>
+          : state === "Rejected" ? <><span className="badge danger">Rejected</span><small>{job.rejectedAt ? shortDate(job.rejectedAt.slice(0, 10)) : ""}{job.rejectedBy ? ` · ${job.rejectedBy}` : ""}</small></>
+          : state === "Failed testing" ? <span className="badge warning">Awaiting QA rejection</span>
           : <span className="route-muted">-</span>}</td>
       </tr>;
     })}</tbody>

@@ -29,6 +29,8 @@ export type JobOrder = {
   // last recorded, and when (and how much of it) QA released. Older records hold testedAt alone: passed.
   testedAt?: string; testedBy?: string; testResult?: TestResult;
   releaseQuantity?: number; releaseUom?: string; releasedAt?: string; releasedBy?: string;
+  // A batch that failed testing goes to Release too, where QA rejects it.
+  rejectedAt?: string; rejectedBy?: string;
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;
@@ -241,11 +243,12 @@ export function activityFacts(line: PlanLine, jobs: JobOrder[], productUom = "")
 export type TestResult = "Passed" | "Failed" | "Under investigation";
 export const TEST_RESULTS: TestResult[] = ["Passed", "Failed", "Under investigation"];
 export const testResult = (job: Pick<JobOrder, "testResult" | "testedAt">): TestResult | undefined => job.testResult ?? (job.testedAt ? "Passed" : undefined);
-export type BatchStatus = "In production" | "Awaiting testing" | "Under investigation" | "Failed testing" | "Awaiting release" | "Released";
+export type BatchStatus = "In production" | "Awaiting testing" | "Under investigation" | "Failed testing" | "Awaiting release" | "Released" | "Rejected";
 // A job order is finished once it has final output; it then waits for testing, then for release.
-// A failed batch stops there; one under investigation waits for QC's final result.
+// A failed batch goes to Release for QA to reject; one under investigation waits for QC's final result.
 export function batchStatus(job: JobOrder, lines: PlanLine[], transfers: { sourceLineId: string }[]): BatchStatus {
   if (job.releasedAt) return "Released";
+  if (job.rejectedAt) return "Rejected";
   const result = testResult(job);
   if (result === "Passed") return "Awaiting release";
   if (result === "Failed") return "Failed testing";
@@ -259,8 +262,16 @@ export function finishedOn(job: JobOrder, lines: PlanLine[], transfers: { source
 }
 // Testing lists finished batches with no result yet, and those under investigation.
 export const testingQueue = (jobs: JobOrder[], lines: PlanLine[], transfers: { sourceLineId: string }[]) => jobs.filter((job) => ["Awaiting testing", "Under investigation"].includes(batchStatus(job, lines, transfers)));
-// Release lists only batches that passed; failed ones never reach it.
-export const releaseQueue = (jobs: JobOrder[]) => jobs.filter((job) => testResult(job) === "Passed" && !job.releasedAt);
+// Release lists batches QC has finished with: passed ones to release, failed ones to reject.
+export const releaseQueue = (jobs: JobOrder[]) => jobs.filter((job) => (testResult(job) === "Passed" || testResult(job) === "Failed") && !job.releasedAt && !job.rejectedAt);
+
+// Rejecting a batch that failed testing: once; it is then closed and never released.
+export function rejectBatch(job: JobOrder, by: string, at: Date): JobOrder | { error: string } {
+  if (testResult(job) !== "Failed") return { error: `${job.number} did not fail testing, so it cannot be rejected here.` };
+  if (job.rejectedAt) return { error: `${job.number} is already rejected.` };
+  if (job.releasedAt) return { error: `${job.number} is already released.` };
+  return { ...job, rejectedAt: at.toISOString(), rejectedBy: by };
+}
 
 // Recording QC's result for a finished batch. Under investigation can later become Passed or
 // Failed; Passed and Failed are final.
@@ -295,6 +306,7 @@ export function orderStatusSummary(orderId: string, jobs: JobOrder[], lines: Pla
     failed: own.filter((job) => testResult(job) === "Failed").length,
     investigating: own.filter((job) => testResult(job) === "Under investigation").length,
     released: own.filter((job) => job.releasedAt).length,
+    rejected: own.filter((job) => job.rejectedAt).length,
     releasedQuantity: [...released].map(([uom, quantity]) => ({ quantity, uom }))
   };
 }

@@ -53,7 +53,7 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
     const keys = changedKeys(old, job);
     if (only(keys, ["batchNumber", "batchNumberBy", "batchNumberAt"])) need(can.produce || can.editPlan, "enter batch numbers");
     else if (only(keys, ["testedAt", "testedBy", "testResult"])) need(can.passTesting, "record testing results");
-    else if (only(keys, ["releaseQuantity", "releaseUom", "releasedAt", "releasedBy"])) need(can.release, "release batches");
+    else if (only(keys, ["releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy"])) need(can.release, "release or reject batches");
     else need(can.editOrders, "edit job orders");
   }
   count("job orders added", jobs.added.length); count("job orders changed", jobs.changed.length); count("job orders removed", jobs.removed.length);
