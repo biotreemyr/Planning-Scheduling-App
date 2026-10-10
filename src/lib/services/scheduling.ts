@@ -50,3 +50,22 @@ export function validateScheduleEntry(entry: Pick<ScheduleEntry, "startAt" | "en
 
   return errors;
 }
+
+// Move a booking timestamp by whole days, keeping its time of day and its stored format
+// (UTC ISO strings stay UTC; local "YYYY-MM-DDTHH:mm" values stay local).
+export function shiftTimestamp(value: string, days: number): string {
+  const date = new Date(value);
+  if (/Z$|[+-]\d{2}:\d{2}$/.test(value)) return new Date(date.getTime() + days * 86400000).toISOString();
+  date.setDate(date.getDate() + days);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export function daysBetween(from: string, to: string) {
+  return Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86400000);
+}
+
+// The last planned day of an activity: its end date when it runs over several days.
+export const lineEnd = (line: { plannedDate: string; endDate?: string }) => line.endDate && line.endDate > line.plannedDate ? line.endDate : line.plannedDate;
+// How many calendar days an activity is planned over, counting both ends.
+export const lineDays = (line: { plannedDate: string; endDate?: string }) => daysBetween(line.plannedDate, lineEnd(line)) + 1;

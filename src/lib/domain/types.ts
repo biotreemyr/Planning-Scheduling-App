@@ -29,6 +29,10 @@ export type Product = {
   uom: string;
   productType: "Finished Good" | "Intermediate" | "Packaging" | "Raw Material";
   active: ActiveState;
+  // Allowable quantity of one batch, in the product's UOM, and the kilograms of that full batch.
+  // Job orders are split from a PO with these.
+  batchQuantity?: number;
+  batchSizeKg?: number;
 };
 
 export type WorkCentre = {
@@ -82,8 +86,17 @@ export type ProductionPlan = {
 
 export type PlanLine = {
   calendarId?: string;
+  // Production's progress: the day work started (YYYY-MM-DD) and anything noted during it.
+  startedAt?: string;
+  productionNotes?: string;
   completedAt?: string;
   yieldQuantity?: number;
+  // The unit the actual quantity was reported in, when it differs by process (kg at dispensing...).
+  yieldUom?: string;
+  // Tablets or capsules reported by weight: what was weighed, and the weight of one compressed or
+  // coated tablet / filled capsule production keyed in; yieldQuantity is then the count it gives.
+  // Measured by volume (L, mL) instead, the volume of one unit is in actualUnitVolumeMl.
+  weighedQuantity?: number; weighedUom?: string; actualUnitWeightMg?: number; actualUnitVolumeMl?: number;
   incomingWipId?: string;
   uom?: string;
   activityType?: string;
@@ -93,9 +106,13 @@ export type PlanLine = {
   id: string;
   planId: string;
   productionOrderId?: string;
+  // The job order (one batch of a PO item) this activity carries out.
+  jobOrderId?: string;
   productId: string;
   quantity: number;
   plannedDate: string;
+  // The last day of an activity that runs over several days (YYYY-MM-DD, after plannedDate).
+  endDate?: string;
   priority: Priority;
   status: PlanLineStatus;
   orderReference?: string;

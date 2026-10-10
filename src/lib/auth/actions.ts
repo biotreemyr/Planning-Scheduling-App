@@ -4,11 +4,14 @@ import { permissions, type BioTreeUser, type Permission } from "./permissions";
 import type { ScheduleEntryStatus } from "@/lib/domain/types";
 
 export const actionPermissions = {
-  readBoard: permissions.view,
+  readPlanningBoard: permissions.viewPlanning,
+  readScheduleBoard: permissions.viewSchedule,
   createPlanLine: permissions.createPlanLine,
   movePlanLine: permissions.editPlanLine,
   createEntry: permissions.createEntry,
   duplicateEntry: permissions.createEntry,
+  submitEntry: permissions.submitEntry,
+  reviewEntry: permissions.reviewEntry,
   editEntry: permissions.editEntry,
   cancelEntry: permissions.cancelEntry,
   confirmEntry: permissions.confirmEntry,

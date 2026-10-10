@@ -4,6 +4,10 @@ import { initialDirectory as d } from "../src/lib/domain/calendarAccess";
 import type { Machine } from "../src/lib/domain/types";
 
 describe("admin configuration", () => {
+  it("adds a process when signed in through Bio Tree Core (no local user or administrator)", () => {
+    const next = { ...d, people: [], processes: [...d.processes, { id: "blending", name: "Blending" }] };
+    expect(validateDirectoryChange({ ...d, people: [] }, next, [], [], "")).toEqual([]);
+  });
   it("deletes an unused unit and cleans its process calendars and people assignments", () => {
     const next = removeDirectoryItem(d, "units", "pilot");
     expect(validateDirectoryChange(d, next, [], [], "admin")).toEqual([]);
@@ -29,9 +33,17 @@ describe("admin configuration", () => {
     expect(validateDirectoryChange(d, next, [], [], "admin")).toEqual([]);
   });
   it("retains calendar IDs and custom names while editing a unit", () => {
-    const next = configureUnit(d, { id: "manufacturing", name: "Renamed Unit" }, ["production", "packing", "fermentation"], () => "unexpected");
+    const order = d.calendars.filter((item) => item.unitId === "manufacturing").map((item) => item.processId);
+    const next = configureUnit(d, { id: "manufacturing", name: "Renamed Unit" }, order, () => "unexpected");
     expect(next.calendars).toEqual(d.calendars);
     expect(next.units[0].name).toBe("Renamed Unit");
+  });
+  it("orders a unit's processes as given, which is its route order, keeping other units in place", () => {
+    const own = d.calendars.filter((item) => item.unitId === "manufacturing");
+    const reversed = [...own].reverse().map((item) => item.processId);
+    const next = configureUnit(d, { id: "manufacturing", name: "Manufacturing" }, reversed, () => "unexpected");
+    expect(next.calendars.filter((item) => item.unitId === "manufacturing").map((item) => item.id)).toEqual([...own].reverse().map((item) => item.id));
+    expect(next.calendars.filter((item) => item.unitId !== "manufacturing")).toEqual(d.calendars.filter((item) => item.unitId !== "manufacturing"));
   });
   it("blocks deleting calendar data or access assignments", () => {
     const next = { ...d, calendars: d.calendars.filter((item) => item.id !== "mfg-fermentation") };

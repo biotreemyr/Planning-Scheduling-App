@@ -1,5 +1,8 @@
+import type { ProcessSettings } from "@/lib/services/processSetup";
 export type Unit = { id: string; name: string };
-export type Process = { id: string; name: string };
+// settings: how the process takes part in routes and quantities (see processSetup); processes
+// without them use the built-in defaults for their name.
+export type Process = { id: string; name: string; settings?: ProcessSettings };
 export type UnitCalendar = { id: string; unitId: string; processId: string; name: string };
 export type ProcessTeam = { id: string; processId: string; name: string };
 export type CalendarPerson = { id: string; name: string; role: "admin" | "planner" | "production"; unitIds: string[]; teamIds: string[]; calendarIds: string[]; processIds?: string[] };

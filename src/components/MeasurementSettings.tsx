@@ -13,16 +13,16 @@ export function MeasurementProvider({ children, initial = measurementDefaults }:
   const [activities, setActivities] = useState(initial.activities);
   return <Context.Provider value={{ uoms, setUoms, activities, setActivities }}>{children}</Context.Provider>;
 }
-export function MeasurementFields() {
-  const { uoms, activities } = useSettings();
-  const [quantity, setQuantity] = useState("100");
-  const [selected, setSelected] = useState("");
+// Defaults come from a chosen job order; remount (key) the fields to apply new ones.
+export function MeasurementFields({ defaultQuantity, defaultUom }: { defaultQuantity?: number; defaultUom?: string } = {}) {
+  const { uoms } = useSettings();
+  const [quantity, setQuantity] = useState(defaultQuantity ? String(defaultQuantity) : "100");
+  const [selected, setSelected] = useState(defaultUom ?? "");
   const uom = uoms.find((item) => item.name === selected && item.active)?.name ?? uoms.find((item) => item.active)?.name ?? "";
   const [weight, setWeight] = useState("");
   const isMass = ["kg", "g", "mg"].includes(uom);
   const kg = batchKilograms(Number(quantity), uom, Number(weight));
   return <>
-    <label>Activity type<select name="activityType" required defaultValue=""><option value="" disabled>Select activity</option>{activities.filter((item) => item.active).map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
     <div className="quantity-fields"><label>Quantity<input name="quantity" type="number" required min={isMass ? "0.000001" : "1"} step={isMass ? "any" : "1"} value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
     <label>UOM<select name="uom" required value={uom} onChange={(event) => { setSelected(event.target.value); setWeight(""); }}>{uoms.filter((item) => item.active).map((item) => <option key={item.name}>{item.name}</option>)}</select></label></div>
     {!isMass ? <label>Weight per unit (mg / {uom})<input name="unitWeightMg" type="number" min="0.000001" step="any" placeholder="e.g. 332" value={weight} onChange={(event) => setWeight(event.target.value)} /></label> : null}

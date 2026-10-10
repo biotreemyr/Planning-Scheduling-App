@@ -16,23 +16,29 @@ export function removeDirectoryItem(directory: CalendarDirectory, kind: "units" 
   return cleanDirectoryLinks({ ...directory, [kind]: directory[kind].filter((item) => item.id !== id) });
 }
 
+// processIds are the unit's processes in route order: the unit's calendars follow that order.
 export function configureUnit(directory: CalendarDirectory, unit: Unit, processIds: string[], makeId: () => string): CalendarDirectory {
   const existing = directory.units.some((item) => item.id === unit.id);
+  const own = processIds.map((processId) => directory.calendars.find((item) => item.unitId === unit.id && item.processId === processId)
+    ?? { id: makeId(), unitId: unit.id, processId, name: directory.processes.find((item) => item.id === processId)?.name ?? "Process" });
+  const first = directory.calendars.findIndex((item) => item.unitId === unit.id);
+  const others = directory.calendars.filter((item) => item.unitId !== unit.id);
+  const at = first < 0 ? others.length : directory.calendars.slice(0, first).filter((item) => item.unitId !== unit.id).length;
   return cleanDirectoryLinks({
     ...directory,
     units: existing ? directory.units.map((item) => item.id === unit.id ? unit : item) : [...directory.units, unit],
-    calendars: [
-      ...directory.calendars.filter((item) => item.unitId !== unit.id || processIds.includes(item.processId)),
-      ...processIds.filter((processId) => !directory.calendars.some((item) => item.unitId === unit.id && item.processId === processId)).map((processId) => ({ id: makeId(), unitId: unit.id, processId, name: directory.processes.find((item) => item.id === processId)?.name ?? "Process" }))
-    ]
+    calendars: [...others.slice(0, at), ...own, ...others.slice(at)]
   });
 }
 
 export function validateDirectoryChange(previous: CalendarDirectory, next: CalendarDirectory, machines: Machine[], usedCalendarIds: string[], currentUserId: string) {
   const errors: string[] = [];
   const has = (items: { id: string }[], id: string) => items.some((item) => item.id === id);
-  if (!has(next.people, currentUserId)) errors.push("You cannot delete the current user.");
-  if (!next.people.some((person) => person.role === "admin")) errors.push("Keep at least one administrator.");
+  // With Bio Tree Core sign-in there is no local user ID; people and access live in Core.
+  if (currentUserId) {
+    if (!has(next.people, currentUserId)) errors.push("You cannot delete the current user.");
+    if (!next.people.some((person) => person.role === "admin")) errors.push("Keep at least one administrator.");
+  }
   for (const kind of ["units", "processes", "teams", "people", "calendars"] as const) {
     if (next[kind].some((item) => !item.name.trim())) errors.push("Names cannot be empty.");
     if (new Set(next[kind].map((item) => item.id)).size !== next[kind].length) errors.push("Duplicate record ID.");

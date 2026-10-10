@@ -21,3 +21,23 @@ describe("batch equivalents", () => {
     expect(readMeasurement(data)).toEqual({ uom: "tablets", activityType: "Tableting", unitWeightMg: 332, batchSizeKg: 33.2 });
   });
 });
+
+describe("tablets and capsules reported by weight", async () => {
+  const { countFromWeight, isWeight } = await import("../src/lib/services/measurements");
+  const { actualUoms } = await import("../src/lib/services/processRules");
+  it("converts weighed output to a count with the weight of one unit", () => {
+    expect(countFromWeight(23.975, "kg", 350)).toBe(68500);
+    expect(countFromWeight(450, "g", 450)).toBe(1000);
+    expect(countFromWeight(1, "kg", 0)).toBeUndefined();
+    // Volumes use the volume of one unit in mL: 2.5 L at 5 mL each is 500.
+    expect(countFromWeight(2.5, "L", 5)).toBe(500);
+    expect(countFromWeight(250, "mL", 5)).toBe(50);
+    expect(countFromWeight(1, "boxes", 5)).toBeUndefined();
+    expect(isWeight("g") && !isWeight("tablets")).toBe(true);
+  });
+  it("lets compression, coating and capsulation report by weight or volume", () => {
+    expect(actualUoms("Compression")).toEqual(["kg", "g", "L", "mL"]);
+    expect(actualUoms("Coating")).toEqual(["kg", "g", "L", "mL"]);
+    expect(actualUoms("Capsulation")).toEqual(["kg", "g", "L", "mL"]);
+  });
+});

@@ -9,7 +9,7 @@ The application is organized as a modular Next.js TypeScript app with a PostgreS
 - `src/lib/domain`: TypeScript domain types and status definitions.
 - `src/lib/services`: scheduling, conflict detection, report calculations, and future optimization adapters.
 - `src/lib/seed.ts`: realistic sample data for the first local MVP experience.
-- `prisma/schema.prisma`: PostgreSQL target schema for the database-backed version.
+- `src/lib/persistence/schema.ts`: Drizzle definition of the PostgreSQL schema; migrations live in `drizzle/`.
 
 ## Business Logic Boundary
 
@@ -17,7 +17,7 @@ UI components can hold short-lived screen state, but conflict checks, reporting 
 
 ## Data Strategy
 
-The first implementation uses local seeded data in the browser so the planner workflow can be tested immediately. The Prisma schema establishes the target database structure and names. The next backend phase should add migrations, repositories, and server actions using the same domain language.
+The first implementation uses local seeded data in the browser so the planner workflow can be tested immediately. The Drizzle schema establishes the target database structure and names. The next backend phase should add migrations, repositories, and server actions using the same domain language.
 
 ## Dashboard Identity Boundary
 

@@ -61,7 +61,9 @@
 .activity-dialog::backdrop { background: #14241f66; }
 .workstation .activity-dialog .form-panel { border: 0; }
 .calendar-notice { font-size: 13px; padding: 10px; background: #e9f2ed; }
-.planning-calendar [class*="resize-handle"] { display: none !important; }
+/* Drag an activity's right edge to stretch it over several days; the grip shows on hover. */
+.planning-calendar .toastui-calendar-weekday-resize-handle { display: block !important; position: absolute; top: 0; right: 0; bottom: 0; width: 8px; cursor: col-resize; opacity: 0; background: linear-gradient(90deg, transparent 2px, #2c3e3566 2px, #2c3e3566 4px, transparent 4px); }
+.planning-calendar .toastui-calendar-weekday-event-block:hover .toastui-calendar-weekday-resize-handle { opacity: 1; }
 .quantity-fields, .settings-columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
 .unified-activity { width: min(820px, calc(100vw - 24px)); padding: 22px; }
 .unified-activity > section { padding: 18px 0; border-top: 1px solid var(--line); }
@@ -148,23 +150,22 @@
   .print-day strong { font-size: 9pt; }
   .print-day .print-calendar-grid, .print-week .print-calendar-grid { grid-template-columns: 1fr; }
   .print-day .print-day, .print-week .print-day { min-height: 12mm; }
-}
-.workstation .plan-list { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.plan-list-date-column { width: 128px; }
-.workstation .plan-list tbody th { vertical-align: top; padding: 16px 12px; background: transparent; font-weight: 500; }
-.workstation .plan-list tbody td { padding: 0; vertical-align: top; }
-.workstation .plan-list tbody + tbody { border-top: 1px solid var(--line); }
-.workstation .plan-list-product { display: block; width: 100%; min-height: 48px; padding: 16px 12px; border: 0; border-radius: 0; background: transparent; color: var(--text); font: inherit; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
-.workstation .plan-list-product:hover { background: #eaf0ed; }
-.workstation .plan-list-product:focus-visible { outline: 2px solid #28634e; outline-offset: -2px; }
-@media (max-width: 760px) {
-  .plan-list-date-column { width: 106px; }
-  .workstation .plan-list tbody th { padding: 14px 8px; font-size: 13px; }
-  .workstation .plan-list-product { padding: 14px 8px; }
+  .print-list-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 7.5pt; }
+  .print-list-table th, .print-list-table td { border: 1px solid #999; padding: 1mm 1.5mm; vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+  .print-list-table thead { display: table-header-group; }
+  .print-list-table thead th { background: #eef3f7; font-size: 8pt; }
+  .print-list-table th:first-child { width: 22mm; }
+  .print-list-table tr { break-inside: avoid; }
+  .print-list-table .print-weekend th, .print-list-table .print-weekend td { background: #f3f4f2; }
+  .print-list-table article + article { margin-top: 1mm; padding-top: 1mm; border-top: 1px dotted #bbb; }
+  .print-list-table article p { margin: 0.5mm 0 0; font-size: 7pt; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 .workstation .workstation-topbar { padding-bottom: 14px; margin-bottom: 18px; }
 .workstation .user-selector { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; }
 .workstation .user-selector select { width: 210px; min-height: 36px; padding: 8px; }
+.workstation .user-selector.signed-in { flex-direction: row; font-size: 13px; color: var(--muted); }
+.workstation .user-selector.signed-in strong { color: var(--ink); }
 .calendar-filters { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
 .calendar-filters > label { width: 180px; }
 .process-ticks { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; border: 0; margin: 0; padding: 0 0 10px; min-width: 0; }
@@ -204,18 +205,51 @@
 .admin-delete-confirm { padding: 16px; border: 1px solid #b76868; border-radius: 4px; margin: 16px 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .admin-delete-confirm p { margin: 0; flex: 1 1 220px; }
 .admin-notice { padding: 12px 0; }
-.workstation .monthly-plan-list { max-height: 680px; overflow: auto; }
-.workstation .monthly-plan-list thead { position: sticky; top: 0; z-index: 1; background: #f3f6f4; }
-.workstation .monthly-plan-list tbody tr { border-bottom: 1px solid var(--line); }
-.workstation .monthly-plan-list time small { display: block; margin-top: 3px; color: #68736e; font-weight: 400; }
-.workstation .plan-list-day { display: flex; align-items: center; min-height: 64px; gap: 6px; padding-right: 8px; }
-.workstation .plan-list-items { flex: 1; min-width: 0; }
-.workstation .plan-list-item { display: flex; align-items: center; }
-.workstation .plan-list-item[draggable="true"] { cursor: grab; }
-.workstation .plan-list-item[draggable="true"] .plan-list-product { cursor: grab; }
-.workstation .plan-list-grip { flex-shrink: 0; border: 0; background: transparent; cursor: grab; }
-.workstation .plan-list-add { flex-shrink: 0; }
-.workstation .plan-list-drop-target { background: #e2f0e8; outline: 2px solid #28634e; outline-offset: -2px; }
+.workstation .monthly-plan-list { position: relative; }
+.workstation .plan-grid-scroll { max-height: 720px; overflow: auto; border: 1px solid var(--line); background: var(--panel); }
+.workstation .plan-grid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.plan-grid-date-column { width: 112px; }
+.workstation .plan-grid th, .workstation .plan-grid td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.workstation .plan-grid thead th { position: sticky; z-index: 2; background: #eef3f7; text-align: center; font-weight: 600; padding: 8px; }
+.workstation .plan-grid thead tr:first-child th { top: 0; height: 34px; }
+.workstation .plan-grid thead tr:nth-child(2) th { top: 34px; }
+.workstation .plan-grid thead .plan-grid-corner { left: 0; z-index: 3; }
+.workstation .plan-grid tbody th { position: sticky; left: 0; z-index: 1; background: var(--panel); vertical-align: top; text-align: left; padding: 8px 10px; font-weight: 500; }
+.workstation .plan-grid time small { display: block; margin-top: 2px; color: #68736e; font-weight: 400; }
+.workstation .plan-grid td { position: relative; padding: 0; vertical-align: top; }
+.workstation .plan-grid-weekend th, .workstation .plan-grid-weekend td { background: #f5f6f4; }
+.workstation .plan-grid-today th { box-shadow: inset 4px 0 0 var(--green); font-weight: 700; }
+.workstation .plan-grid-cell { display: flex; flex-direction: column; gap: 3px; min-height: 36px; padding: 3px; }
+/* The left tab is the order's colour; activities with no order get a grey tab. */
+.workstation .plan-grid-item { display: flex; align-items: stretch; border-left: 5px solid var(--order-color); background: color-mix(in srgb, var(--order-color) 10%, white); }
+/* No PO: no tab colour, a dashed outline instead (light grey is order colour 8). */
+.workstation .plan-grid-item.no-order { border-left-color: transparent; background: #fff; outline: 1px dashed #adb5bd; outline-offset: -1px; }
+.workstation .plan-grid-item.completed { background: var(--gray-soft); }
+.workstation .plan-grid-item.completed .plan-list-product strong { color: #4f5a60; }
+.workstation .plan-grid-item[data-movable], .workstation .plan-grid-item[data-movable] .plan-list-product { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.workstation .plan-grid-item.is-dragging { opacity: 0.4; }
+.workstation .plan-grid-dragging, .workstation .plan-grid-dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+.workstation .plan-grid td.plan-grid-droppable { background-image: linear-gradient(#28634e0d, #28634e0d); }
+.workstation .plan-grid-hint, .plan-grid-hint { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.plan-grid-ghost { position: fixed; z-index: 1000; pointer-events: none; max-width: 260px; padding: 6px 10px; border-left: 5px solid var(--order-color, #fff); background: var(--panel); box-shadow: 0 8px 24px #14241f33; font-size: 13px; }
+.plan-grid-ghost.invalid { border-left-color: var(--red); opacity: 0.85; }
+.plan-grid-ghost strong, .plan-grid-ghost small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-grid-ghost small { color: var(--muted); margin-top: 2px; }
+.workstation .plan-grid .plan-list-product { display: block; flex: 1; min-width: 0; min-height: 0; padding: 4px 6px; border: 0; border-radius: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.workstation .plan-grid .plan-list-product strong, .workstation .plan-grid .plan-list-product small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workstation .plan-grid .plan-list-product strong { display: block; font-weight: 600; line-height: 1.3; }
+.workstation .plan-grid .plan-list-product strong svg { margin-right: 4px; vertical-align: -1px; color: var(--green); }
+.workstation .plan-grid .plan-list-product small { display: block; color: #4f5a60; margin-top: 2px; }
+/* Batch number and batch quantity: the second thing read on a card. */
+.workstation .plan-grid .plan-list-product .plan-list-batch { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: #1f2528; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workstation .plan-grid .plan-list-product:focus-visible { outline: 2px solid #28634e; outline-offset: -2px; }
+.workstation .plan-list-grip { flex-shrink: 0; width: 22px; min-height: 0; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
+/* Fingers need a larger handle. */
+@media (pointer: coarse) { .workstation .plan-list-grip { width: 32px; } }
+.workstation .plan-list-add { position: absolute; right: 3px; bottom: 3px; width: 24px; height: 24px; min-height: 0; padding: 0; opacity: 0; background: var(--panel); }
+.workstation .plan-grid td:hover .plan-list-add, .workstation .plan-list-add:focus-visible { opacity: 1; }
+.workstation .plan-list-drop-target { background: #e2f0e8 !important; outline: 2px solid #28634e; outline-offset: -2px; }
+@media (hover: none) { .workstation .plan-list-add { opacity: 1; } }
 .workstation .calendar-scroll[hidden] { display: none; }
 .workstation .monthly-plan-list .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .admin-table-scroll { overflow-x: auto; }
@@ -234,3 +268,323 @@
 .workstation .admin-table-bounded:focus-visible { outline: 2px solid #28634e; outline-offset: 2px; }
 .persistence-status { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 0; color: #38634d; font-size: 13px; }
 .persistence-error { color: #9f3030; border-bottom: 1px solid #d3aaaa; }
+.orders-layout { display: grid; gap: 20px; }
+.orders-form { display: grid; grid-template-columns: minmax(170px, 1.2fr) minmax(130px, 0.8fr) minmax(210px, 1.6fr) minmax(110px, 0.6fr) minmax(190px, 1fr) auto; gap: 12px 14px; align-items: end; }
+.orders-form > h2, .orders-form > p, .orders-form > [role] { grid-column: 1 / -1; margin: 0; }
+/* A PO's product line items: one row each, under the customer and PO number. */
+.orders-form .order-items { grid-column: 1 / -1; display: grid; gap: 8px; min-width: 0; margin: 0; padding: 10px 12px; border: 1px solid var(--line, #d9dfdc); border-radius: 6px; }
+.orders-form .order-items legend { padding: 0 4px; font-weight: 600; }
+.orders-form .order-items > .calendar-button { justify-self: start; }
+.orders-form .order-item { display: grid; grid-template-columns: 86px minmax(210px, 1.6fr) minmax(110px, 0.6fr) minmax(190px, 1fr); gap: 8px 12px; align-items: end; padding-bottom: 8px; border-bottom: 1px dashed var(--line, #d9dfdc); }
+.orders-form .order-item-head { display: flex; align-items: center; gap: 4px; align-self: center; white-space: nowrap; }
+.orders-form .order-item > small { grid-column: 2 / -1; }
+.orders-form > .primary-button { justify-self: start; }
+@media (max-width: 760px) { .orders-form .order-item { grid-template-columns: minmax(0, 1fr); } .orders-form .order-item > small { grid-column: auto; } }
+.orders-form .quantity-fields { margin: 0; }
+.orders-form .primary-button { white-space: nowrap; }
+.orders-help { font-size: 13px; color: var(--muted); }
+.orders-table > tbody > tr > th { background: transparent; }
+@media (max-width: 1100px) { .orders-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.orders-list .panel-title h2 { display: flex; align-items: center; gap: 10px; }
+.orders-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; margin-bottom: 12px; }
+.orders-toolbar .result-count { margin-left: auto; }
+.orders-month { display: flex; gap: 8px; align-items: center; border: 0; margin: 0; padding: 0; min-width: 0; }
+.orders-month legend { float: left; margin-right: 4px; font-size: 12px; font-weight: 600; }
+.orders-month select, .orders-month input { min-height: 36px; padding: 6px 8px; width: auto; }
+.orders-columns { position: relative; }
+.orders-columns summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.orders-columns summary::-webkit-details-marker { display: none; }
+.orders-columns > div { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 210px; display: grid; gap: 8px; padding: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.orders-columns label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.orders-columns input { width: 16px; height: 16px; }
+/* The table body scrolls; both header rows stay in view. */
+.orders-table-scroll { max-height: min(65vh, 640px); overflow: auto; border: 1px solid var(--line); }
+.orders-table > thead { position: sticky; top: 0; z-index: 3; }
+.orders-table > thead > tr:first-child > th { padding-bottom: 4px; }
+.orders-filter-row th { padding-top: 0; }
+.orders-filter-row input, .orders-filter-row select { width: 100%; min-width: 90px; min-height: 30px; padding: 4px 8px; font-size: 13px; font-weight: 400; }
+.orders-table .table-sort { display: inline-flex; align-items: center; gap: 4px; min-height: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.orders-table th.numeric .table-sort { flex-direction: row-reverse; }
+.order-toggle-column { width: 40px; }
+/* The order's colour runs down the left edge of its row. */
+.orders-table .order-row > td:first-child { box-shadow: inset 5px 0 0 var(--order-color, transparent); }
+.order-number-cell .order-badge { margin-right: 0; min-width: 24px; height: 20px; font-size: 12px; }
+.orders-table { width: 100%; min-width: 860px; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+.orders-table > thead > tr > th, .orders-table > tbody > tr > th, .orders-table > tbody > tr > td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.orders-table > thead > tr > th { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; background: var(--panel-soft); }
+.orders-table tbody th { font-weight: 600; white-space: nowrap; }
+.orders-table .numeric { text-align: right; white-space: nowrap; }
+.orders-table td small { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
+.orders-table .badge { white-space: nowrap; }
+.orders-table td .badge.danger { margin-left: 6px; }
+.order-row { cursor: pointer; }
+.order-row:hover, .order-row.open { background: var(--panel-soft); }
+.order-toggle { width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; background: transparent; }
+.order-detail-row > td { background: #fafbfa; padding: 4px 16px 8px 44px; }
+.order-steps { display: flex; gap: 3px; }
+/* Each process segment fills with the share of its scheduled days completed. */
+.order-steps i { width: 24px; height: 8px; border-radius: 2px; border: 1px solid #b9c4bf; background: linear-gradient(to right, var(--green) var(--filled, 0%), var(--gray-soft) var(--filled, 0%)); }
+.order-detail { padding: 12px 4px 18px; display: grid; gap: 14px; }
+.order-process-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.order-process-table th, .order-process-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.order-process-table thead th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.order-process-table th small { display: block; color: var(--muted); font-weight: 400; }
+.order-process-table input[type="date"] { min-height: 34px; padding: 4px 8px; }
+.order-warning { display: block; color: var(--amber); margin-top: 3px; }
+.order-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.order-edit label { width: 200px; }
+.activity-order-ref { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 0; font-size: 14px; color: #3d4a50; }
+.production-route { margin-bottom: 8px; }
+.production-route table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.production-route th, .production-route td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.production-route thead th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.production-route tbody th { white-space: nowrap; }
+.production-route tbody th .badge { margin-left: 8px; }
+.production-route .route-current { background: var(--blue-soft); }
+.production-route .route-empty th, .route-muted { color: var(--muted); font-weight: 400; }
+.production-route select { min-width: 170px; min-height: 34px; padding: 4px 8px; }
+.production-route td small { display: block; margin-top: 3px; }
+.route-day { min-height: 0; padding: 2px 7px; margin: 2px 4px 2px 0; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); font-size: 13px; cursor: pointer; }
+.route-day[aria-current] { border-color: var(--blue); background: var(--blue); color: white; }
+@media (max-width: 760px) {
+  .orders-form { grid-template-columns: 1fr; }
+  .production-route { overflow-x: auto; }
+  .production-route select { min-width: 140px; }
+}
+
+/* Running order number: black box, white figures. */
+.order-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 16px; padding: 0 4px; margin-right: 5px; border-radius: 3px; background: #111; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; vertical-align: 1px; }
+.priority-mark { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 16px; margin-right: 4px; border-radius: 3px; color: #fff; font-size: 11px; font-weight: 800; vertical-align: 1px; }
+.priority-mark.high { background: var(--amber); }
+.priority-mark.urgent { background: var(--red); }
+.order-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.order-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.order-legend-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 2px; }
+.order-legend-swatch.no-order { background: #fff; outline: 1px dashed #868e96; outline-offset: -1px; }
+.calendar-plan-event.no-order { outline: 1px dashed #adb5bd; outline-offset: 1px; }
+.calendar-plan-event .order-badge, .calendar-plan-event .priority-mark { flex-shrink: 0; }
+.orders-table [data-col="number"] { width: 44px; padding-left: 4px; padding-right: 4px; text-align: center; }
+.orders-table [data-col="po"] { white-space: nowrap; }
+.orders-table [data-col="status"] { white-space: normal; min-width: 104px; }
+.orders-table [data-col="status"] .order-warn-badge { margin: 4px 0 0; display: inline-block; }
+.orders-table [data-col="customer"] { min-width: 140px; }
+/* Order detail: processes down the side, one column per batch, then a summary. */
+/* Many batches scroll sideways under the grid; the Process column stays pinned. */
+.order-batch-scroll { overflow-x: auto; padding-bottom: 4px; }
+.order-batch-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; background: var(--panel); }
+.order-batch-table th, .order-batch-table td { padding: 6px 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.order-batch-table tr > :first-child { border-left: 1px solid var(--line); }
+.order-batch-table thead tr:first-child > * { border-top: 1px solid var(--line); }
+.order-batch-table .order-batch-col { width: 168px; min-width: 168px; max-width: 168px; }
+.order-batch-table .order-batch-process { position: sticky; left: 0; z-index: 1; min-width: 110px; }
+.order-batch-table thead .order-batch-process { background: var(--panel-soft); }
+.order-batch-table thead th { background: var(--panel-soft); font-weight: 600; }
+.order-batch-table thead th small { display: block; font-weight: 400; color: var(--muted); margin-top: 2px; }
+.order-batch-table thead th .batch-kg { color: var(--ink); font-weight: 600; }
+.order-batch-table tbody th { white-space: nowrap; background: #fafbfa; }
+.order-batch-table tbody th small { display: block; font-weight: 400; color: var(--muted); }
+.order-batch-table .order-batch-summary { min-width: 170px; background: #f6faf8; }
+.order-batch-table input[type="date"] { min-height: 32px; padding: 3px 6px; }
+.batch-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.batch-cell .batch-dates { white-space: nowrap; }
+.batch-cell .badge { padding: 1px 6px; font-size: 11px; }
+.batch-cell small { flex-basis: 100%; font-size: 11px; }
+.batch-cell small { color: var(--muted); }
+.batch-progress { height: 8px; border-radius: 4px; background: var(--gray-soft); overflow: hidden; margin: 3px 0 5px; }
+.batch-progress span { display: block; height: 100%; background: var(--green); }
+
+/* Process-flow warnings: amber banner, list and ⚠ markers. */
+.flow-banner { margin: 0 0 12px; border: 1px solid #e0a12c; background: var(--amber-soft); border-radius: 4px; }
+.flow-banner summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600; color: #7a4d06; }
+.flow-banner ul { margin: 0; padding: 0 12px 10px 32px; display: grid; gap: 6px; }
+.flow-banner li { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
+.flow-banner li .calendar-button { min-height: 28px; padding: 2px 10px; }
+.flow-warnings { margin: 6px 0 10px; padding: 8px 12px 8px 28px; border-left: 4px solid #e0a12c; background: var(--amber-soft); font-size: 14px; color: #5f3d05; }
+.flow-warnings li + li { margin-top: 4px; }
+.flow-warning-text { color: #7a4d06; }
+.flow-mark { display: inline-block; margin-right: 4px; color: #c47f00; font-weight: 700; }
+.route-format { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+.route-format strong { color: var(--ink); }
+.order-warn-badge { margin-left: 6px; }
+.order-detail-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.order-detail-head .route-format { margin: 0; }
+.order-empty { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+@media print {
+  .print-orders header { margin-bottom: 4mm; }
+  .print-orders-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+  .print-orders-table th, .print-orders-table td { border: 1px solid #999; padding: 1mm 1.5mm; text-align: left; vertical-align: top; }
+  .print-orders-table thead th { background: #eef3f7; }
+  .print-orders-table thead { display: table-header-group; }
+  .print-orders-table tr { break-inside: avoid; }
+  .print-order-facts { margin: 0 0 3mm; font-size: 9pt; }
+  .print-order-warnings { margin: 0 0 3mm; padding-left: 5mm; font-size: 8.5pt; }
+}
+/* The order detail takes the row's width without widening it, so its batch grid scrolls inside. */
+.order-detail-row .order-detail { width: 0; min-width: 100%; }
+/* Long headings such as "Expected completion" may wrap so the table fits beside the sidebar. */
+.orders-table > thead > tr:first-child > th { white-space: normal; line-height: 1.25; }
+.orders-table [data-col="progress"] { min-width: 170px; }
+.orders-table [data-col="product"] { min-width: 130px; }
+.orders-table [data-col="format"] select { min-width: 70px; }
+.orders-table > thead > tr > th.order-toggle-column, .orders-table > tbody > tr.order-row > td:first-child { width: 32px; padding-left: 4px; padding-right: 0; }
+.orders-table td[data-col="quantity"] { white-space: normal; min-width: 84px; }
+
+/* Job orders: one per batch of a PO item, released from the Orders tab and planned from the planner. */
+.job-orders { display: grid; gap: 10px; margin: 14px 0; padding-top: 12px; border-top: 1px solid var(--line, #d9dfdc); }
+.job-orders h3 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.job-order-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.job-order-table th, .job-order-table td { padding: 6px 8px; border-bottom: 1px solid var(--line, #d9dfdc); text-align: left; vertical-align: middle; }
+.job-order-table thead th { font-weight: 600; color: var(--muted); white-space: nowrap; }
+.job-order-table .numeric { text-align: right; white-space: nowrap; }
+.job-order-table tbody th small, .job-queue li small, .orders-table td small { display: block; color: var(--muted); font-weight: 400; }
+.job-plan { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.job-plan input[type="date"] { width: auto; }
+.job-order-form { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, 1fr) auto; gap: 8px 12px; align-items: end; }
+.job-order-form > small { grid-column: 1 / -1; }
+.job-queue { margin: 0 0 12px; padding: 8px 12px; border: 1px solid #b8d4c8; border-radius: 6px; background: #f3f9f6; }
+.job-queue summary { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.job-queue ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.job-queue li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px dashed #c9ddd3; font-size: 13px; }
+.batch-number { padding-top: 4px; }
+@media (max-width: 760px) { .job-order-form { grid-template-columns: minmax(0, 1fr); } }
+
+/* Add activity: plan every process of a job order's route at once. */
+.plan-mode { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 0; border: 0; }
+.plan-mode legend { padding: 0; margin-bottom: 4px; font-weight: 600; font-size: 13px; }
+.plan-mode label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+.plan-mode input { width: auto; min-height: 0; }
+.route-plan { display: grid; gap: 8px; }
+.route-plan-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.route-plan-table th, .route-plan-table td { padding: 5px 6px; border-bottom: 1px solid var(--line, #d9dfdc); text-align: left; vertical-align: middle; }
+.route-plan-table th { color: var(--muted); font-weight: 600; }
+.route-plan-table td:first-child { width: 44px; }
+.route-plan-table input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; }
+.route-plan-table input[type="date"] { min-height: 34px; }
+.route-plan-table small { display: block; color: var(--muted); }
+.route-plan-table .route-missing td { color: #9f3030; }
+.route-plan-scroll { overflow-x: auto; }
+.route-plan-table input[type="number"] { width: 96px; min-height: 34px; }
+.route-plan-table select { width: 104px; min-height: 34px; }
+.activity-dialog.activity-dialog-wide { width: min(720px, calc(100vw - 24px)); }
+/* Job orders keyed in and edited inside a PO item. */
+.job-order-form { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.job-order-form > .primary-button { align-self: end; }
+.job-order-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 4px 0; }
+.job-order-edit label { min-width: 130px; flex: 1 1 130px; }
+.job-order-edit > small { flex-basis: 100%; }
+.job-actions { display: inline-flex; gap: 4px; }
+.job-order-table .job-order-editing td { background: #f6faf8; }
+@media (max-width: 760px) { .job-order-form { grid-template-columns: minmax(0, 1fr); } }
+/* New order pop-up. */
+.activity-dialog.order-dialog { width: min(1040px, calc(100vw - 24px)); }
+.order-dialog .orders-form > .panel-title { grid-column: 1 / -1; margin: 0; }
+.orders-list .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.order-dialog .orders-form { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 18px 20px 20px; }
+@media (max-width: 760px) { .order-dialog .orders-form { grid-template-columns: minmax(0, 1fr); } }
+/* Activity panel: planning summary and production's update. */
+.production-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 16px; margin: 6px 0 8px; }
+.production-facts div { display: grid; gap: 2px; }
+.production-facts dt { font-size: 12px; color: var(--muted); }
+.production-facts dd { margin: 0; font-weight: 600; }
+.production-facts dd small { font-weight: 400; color: var(--muted); }
+.production-update-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; align-items: end; }
+.production-update-form .production-notes, .production-update-form .production-destination, .production-update-form > p, .production-update-form .production-actions { grid-column: 1 / -1; }
+.production-update-form .production-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 760px) { .production-update-form { grid-template-columns: minmax(0, 1fr); } }
+/* Transaction history. */
+.history-table td { vertical-align: top; }
+.history-table .history-when { white-space: nowrap; }
+.history-link { padding: 0; min-height: 0; border: 0; background: none; color: #1971c2; font: inherit; text-decoration: underline; cursor: pointer; text-align: left; }
+
+/* Job order quantities: job order no., one group per process measure and the packing job order no., six equal columns on one
+   line; each heading stays on one line (the full text is in its tooltip). */
+.job-order-form, .job-order-edit { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 12px; align-items: end; }
+.job-order-edit > small, .job-order-buttons { grid-column: 1 / -1; }
+.job-order-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.job-measure { display: grid; grid-template-columns: minmax(0, 1fr) minmax(64px, 40%); gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.job-measure.job-number { grid-template-columns: minmax(0, 1fr); }
+.job-measure input, .job-measure select { min-width: 0; width: 100%; }
+.job-measure legend { float: left; width: 100%; grid-column: 1 / -1; padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-measure legend span { font-weight: 400; }
+.job-measure-unit { align-self: center; color: var(--muted); font-size: 13px; }
+@media (max-width: 760px) { .job-order-form, .job-order-edit { grid-template-columns: minmax(0, 1fr); } }
+.job-order-table thead th small { display: block; font-weight: 400; font-size: 11px; }
+.route-plan-table .route-plan-machine, .route-plan-table td select[aria-label$="machine"] { width: 150px; }
+.route-plan-table output { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.route-plan-table .numeric { text-align: right; }
+/* An open order's details stay in view while the wide orders table scrolls sideways: they are
+   pinned to the left and as wide as the visible table area, so the job order form fits on screen. */
+.orders-table-scroll { container-type: inline-size; }
+.order-detail-row > td > .order-detail { position: sticky; left: 44px; width: calc(100cqw - 60px); min-width: 0; box-sizing: border-box; }
+
+/* Planner Board: the process ticks share the "Production plan" line with the view switch. */
+.workstation .planner-title { flex-wrap: nowrap; justify-content: flex-start; align-items: center; gap: 10px 20px; }
+.planner-title h2 { white-space: nowrap; }
+.planner-title h2 { margin: 0; }
+.planner-title .calendar-filters { flex: 1 1 0; margin: 0; min-width: 0; }
+.planner-title .view-switch { margin-left: auto; flex: none; }
+@media (max-width: 760px) { .workstation .planner-title { flex-wrap: wrap; } .planner-title .calendar-filters { flex-basis: 100%; order: 3; } }
+.planner-title .process-ticks { padding: 0; }
+.planner-title .process-ticks legend { float: left; margin: 0 4px 0 0; font-size: 13px; color: var(--muted); }
+.job-order-table .job-output { display: block; font-weight: 600; } .job-order-table .job-output small { display: block; font-weight: 400; color: var(--muted); }
+.plan-save-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 12px; }
+.job-order-table td small, .status-table td small { display: block; color: var(--muted); font-weight: 400; }
+.status-table .status-release-qty { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.status-table .status-release-qty input { width: 110px; }
+.status-panel .panel-title { flex-wrap: wrap; }
+/* QA/QC's sections, listed under it in the sidebar while it is open. */
+.tab-sub { display: flex; flex-direction: column; gap: 4px; margin: -2px 0 2px 28px; }
+.workstation .tab-list .tab.sub { min-height: 32px; padding: 6px 10px; font-size: 13px; }
+@media (max-width: 760px) { .tab-sub { display: none; } }
+.status-mobile-switch { display: none; } @media (max-width: 760px) { .status-mobile-switch { display: inline-flex; } }
+.weighed-fields { align-items: end; } .weighed-count { margin: 0 0 10px; font-size: 14px; }
+/* Compression, coating, capsulation: output weight | UOM | unit weight | actual quantity in one row. */
+.quantity-fields.weighed-row { grid-template-columns: minmax(0, 1.2fr) minmax(70px, 0.7fr) minmax(0, 1.3fr) minmax(0, 1.3fr); grid-column: 1 / -1; }
+@media (max-width: 760px) { .quantity-fields.weighed-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.weighed-count { grid-column: 1 / -1; }
+.link-button { background: none; border: 0; padding: 0; color: var(--accent, #1b6b4a); text-decoration: underline; cursor: pointer; font: inherit; }
+/* List view: drag a card's bottom edge down its column to stretch it over several days. */
+.plan-grid-item { position: relative; }
+.plan-list-resize { position: absolute; left: 6px; right: 6px; bottom: -3px; height: 8px; cursor: row-resize; border-radius: 4px; touch-action: none; }
+.plan-grid-item:hover .plan-list-resize, .plan-grid-item:focus-within .plan-list-resize { background: repeating-linear-gradient(90deg, #2c3e3566 0 6px, transparent 6px 10px); background-size: 100% 2px; background-repeat: no-repeat; background-position: center; }
+/* A several-day activity: its card continues as one box down to its last day. The later days keep
+   an empty slot so other activities sit below it. */
+.plan-span-slot { height: 30px; flex: none; }
+.workstation .plan-grid-item.plan-grid-spanning { flex-wrap: wrap; z-index: 1; }
+.plan-span-extension { position: absolute; left: -5px; right: 0; top: 100%; border-left: 5px solid var(--order-color); background: color-mix(in srgb, var(--order-color) 10%, white); cursor: pointer; display: flex; align-items: flex-end; padding: 0 8px 4px; box-sizing: border-box; }
+.plan-span-extension small { color: var(--muted); font-size: 11px; }
+.plan-grid-item.completed .plan-span-extension { background: #ecefed; }
+.plan-span-extension .plan-list-resize { bottom: -3px; }
+.plan-list-resize-range { background: #dcefe5 !important; }
+.status-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; } .danger-button { color: #a12626; border-color: #e3b4b4; }
+/* An order's flow: one row per job order through planning, production, QC testing and QA release. */
+.order-flow-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.order-flow-table th, .order-flow-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.order-flow-table thead th { color: var(--muted); font-weight: 600; background: #eef3f7; }
+.order-flow-table tbody th small, .order-flow-table td small { display: block; color: var(--muted); font-weight: 400; }
+.order-flow-table tbody th { min-width: 150px; }
+.order-flow-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.order-flow-steps li { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-width: 104px; background: #fff; }
+.order-flow-process { display: block; font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+.order-process-detail { margin-top: 4px; } .order-process-detail > summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+/* An order's Summary and Job orders open on click. */
+.order-section { border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; background: #fff; }
+.order-section[open] { padding-bottom: 12px; }
+.order-section-summary { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; cursor: pointer; padding: 10px 0; list-style: none; }
+.order-section-summary::-webkit-details-marker { display: none; }
+.order-section-summary::before { content: "▸"; color: var(--muted); }
+.order-section[open] > .order-section-summary::before { content: "▾"; }
+.order-section-summary h3 { margin: 0; font-size: 15px; }
+/* Summary grid: each stage (Planning, Production, QC testing, QA release) heads its rows. */
+.order-flow-grid .order-flow-stage th { background: #eef3f7; color: #2c3e35; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; padding: 6px 8px; text-align: left; }
+.order-flow-grid td small, .order-flow-grid th small { display: block; color: var(--muted); font-weight: 400; }
+.order-flow-grid td.order-flow-done { background: #d3f0dc; } .order-flow-grid td.order-flow-done .badge.success { background: #2b8a3e; color: #fff; }
+.order-flow-grid td.order-flow-planned { background: #fff6cc; }
+/* Admin: a unit's route order, and a process's settings. */
+.route-order { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+.route-order ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.route-order li { display: flex; align-items: center; gap: 6px; }
+.route-order li span { flex: 1; font-size: 14px; }
+.process-form { display: grid; gap: 10px; max-width: 560px; }
+.process-optional { display: flex; align-items: center; gap: 8px; }
+.process-optional input { width: 16px; height: 16px; }
