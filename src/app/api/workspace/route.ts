@@ -9,6 +9,7 @@ import { AccessError, requireAnyPermission } from "@/lib/auth/guards";
 import { boardPermissions, effectivePermissions } from "@/lib/auth/permissions";
 import { capabilitiesFromPermissions } from "@/lib/auth/capabilities";
 import { reviewWorkspaceChange } from "@/lib/auth/workspaceAccess";
+import { loadOrderProducts } from "@/lib/masterdata/catalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +29,10 @@ async function coreAccess(request: NextRequest): Promise<{ actor: SaveActor; rev
   if (!expected || origin !== expected || !validWriteToken(request.headers.get("x-scheduler-token"))) return response({ error: "This save did not come from the scheduler page. Reload and try again." }, 403);
   const granted = effectivePermissions(user.apps.find((app) => app.appKey === "scheduler")?.permissions ?? []);
   const can = capabilitiesFromPermissions(granted);
-  return { actor: { id: user.id, clerkId: user.clerkUserId, name: user.name ?? "Bio Tree user" }, review: (before, after) => reviewWorkspaceChange(before, after, can) };
+  // Read here, not from the browser, so an order can only add a product exactly as Master Data has it.
+  // Unreachable, it is empty: saves still work, but taking a new product from it needs Admin.
+  const catalog = await loadOrderProducts().catch(() => null) ?? [];
+  return { actor: { id: user.id, clerkId: user.clerkUserId, name: user.name ?? "Bio Tree user" }, review: (before, after) => reviewWorkspaceChange(before, after, can, catalog) };
 }
 
 export async function PUT(request: NextRequest) {
@@ -44,7 +48,8 @@ export async function PUT(request: NextRequest) {
     if (!localPersistenceAllowed(host, process.env) || !sameLocalOrigin(host, request.headers.get("origin")) || !validWriteToken(request.headers.get("x-scheduler-token"))) return response({ error: "Local database access denied. Reload the app if the server restarted." }, 403);
     // The local demo has no verified identity; it allows every change but still logs what changed.
     const everything = Object.fromEntries(Object.keys(capabilitiesFromPermissions([])).map((key) => [key, true])) as ReturnType<typeof capabilitiesFromPermissions>;
-    access = { actor: { name: "Local demo" }, review: (before, after) => ({ denied: [], summary: reviewWorkspaceChange(before, after, everything).summary }) };
+    const catalog = await loadOrderProducts().catch(() => null) ?? [];
+    access = { actor: { name: "Local demo" }, review: (before, after) => ({ denied: [], summary: reviewWorkspaceChange(before, after, everything, catalog).summary }) };
   }
   if (!request.headers.get("content-type")?.startsWith("application/json")) return response({ error: "JSON required." }, 415);
   let payload: { snapshot: unknown; revision: number; mutationId: string };

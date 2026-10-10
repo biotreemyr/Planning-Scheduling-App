@@ -1,6 +1,8 @@
 // Server only: node:util keeps it out of browser bundles.
 import { isDeepStrictEqual } from "node:util";
 import type { WorkspaceSnapshot } from "@/lib/domain/workspace";
+import type { Product } from "@/lib/domain/types";
+import { productFor, type MasterProduct } from "@/lib/services/masterProducts";
 import type { WorkspaceCapabilities } from "./capabilities";
 
 type Keyed = { id: string };
@@ -26,14 +28,31 @@ export type ChangeReview = { allowed: boolean; denied: string[]; summary: string
  * snapshot and requiring the Core permission for every kind of change it contains.
  * The browser sends the whole workspace, so nothing it claims about itself is trusted.
  */
-export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: WorkspaceSnapshot, can: WorkspaceCapabilities): ChangeReview {
+// A product added or linked exactly as an order takes it from Master Data: nothing else about it changed.
+function takenFromMasterData(old: Product | undefined, product: Product, catalog: MasterProduct[]) {
+  const master = catalog.find((item) => item.id === product.masterDataId);
+  return !!master && isDeepStrictEqual(product, productFor(master, old ? [old] : []));
+}
+
+/**
+ * `catalog` is Master Data's list of products an order may be for, read by the server. Adding or
+ * linking one of those as it stands there is part of creating an order; any other product change
+ * is master data management.
+ */
+export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: WorkspaceSnapshot, can: WorkspaceCapabilities, catalog: MasterProduct[] = []): ChangeReview {
   const denied: string[] = [];
   const summary: string[] = [];
   const need = (allowed: boolean, what: string) => { if (!allowed && !denied.includes(what)) denied.push(what); };
   const count = (label: string, n: number) => { if (n) summary.push(`${label}: ${n}`); };
 
   const configuration = (["directory", "products", "workCentres", "machines", "measurements"] as const).filter((key) => !isDeepStrictEqual(before[key], after[key]));
-  if (configuration.length) { need(can.manage, "change units, people, products, machines or measurements"); summary.push(`configuration: ${configuration.join(", ")}`); }
+  const products = diff(before.products, after.products);
+  const fromMasterData = [...products.added.map((item) => ({ before: undefined, after: item })), ...products.changed].filter((change) => takenFromMasterData(change.before, change.after, catalog));
+  const onlyFromMasterData = configuration.length === 1 && configuration[0] === "products" && !products.removed.length && fromMasterData.length === products.added.length + products.changed.length;
+  if (onlyFromMasterData) need(can.createOrders, "add products from Master Data");
+  else if (configuration.length) need(can.manage, "change units, people, products, machines or measurements");
+  if (configuration.length) summary.push(`configuration: ${configuration.join(", ")}`);
+  count("products taken from Master Data", fromMasterData.length);
 
   const orders = diff(before.data.orders, after.data.orders);
   if (orders.added.length) need(can.createOrders, "add orders");

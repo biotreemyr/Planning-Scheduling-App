@@ -33,6 +33,8 @@ export type Product = {
   // Job orders are split from a PO with these.
   batchQuantity?: number;
   batchSizeKg?: number;
+  // Bio Tree Master Data's ID for this product, once an order has used it from there.
+  masterDataId?: string;
 };
 
 export type WorkCentre = {

@@ -8,6 +8,7 @@ import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, 
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
+import { productFor, type OrderCatalog } from "@/lib/services/masterProducts";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
 import { PRODUCT_FORMATS, inferFormat, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
@@ -27,13 +28,15 @@ export type JobActions = {
   onDelete: (id: string) => string[];
 };
 
-export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, transfers = [], lines, products, directory, visibleCalendarIds, creatable, editable, printable = true, userName, onSave, onAdd, onDelete, flow = [] }: {
+export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, transfers = [], lines, products, catalog, directory, visibleCalendarIds, creatable, editable, printable = true, userName, onSave, onAdd, onDelete, flow = [] }: {
   orders: PurchaseOrder[]; customers?: Customer[]; jobOrders?: JobOrder[]; jobActions?: JobActions;
   // WIP handovers, to tell final output from output sent on to another process.
   transfers?: { sourceLineId: string }[];
   lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[]; flow?: FlowWarning[];
+  // Master Data's finished goods for new orders; without it the form offers the scheduler's own products.
+  catalog?: OrderCatalog;
   // creatable: may key in new POs; editable: may change or delete them; printable: may print.
-  creatable?: boolean; editable: boolean; printable?: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer) => string[]; onDelete: (id: string) => string[];
+  creatable?: boolean; editable: boolean; printable?: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer, taken?: Product[]) => string[]; onDelete: (id: string) => string[];
 }) {
   const customerNames = [...new Set(orders.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
   // New order opens in a pop-up from the orders header, so the page shows just the orders.
@@ -44,7 +47,7 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
   const newOrderButton = canAdd ? <button type="button" className="primary-button" onClick={() => { setFormVersion((value) => value + 1); setAdded(""); dialog.current?.showModal(); }}><Plus size={17} />New order</button> : null;
   return <section className="orders-layout">
     {canAdd ? <dialog ref={dialog} className="activity-dialog order-dialog" aria-labelledby="new-order-title">
-      <NewOrderForm key={formVersion} orders={orders} customers={customers} products={products} units={directory.units} directory={directory} userName={userName} onAdd={onAdd}
+      <NewOrderForm key={formVersion} orders={orders} customers={customers} products={products} catalog={catalog} units={directory.units} directory={directory} userName={userName} onAdd={onAdd}
         onClose={() => dialog.current?.close()} onDone={(message) => { setAdded(message); dialog.current?.close(); }} />
     </dialog> : null}
     {added ? <p role="status" className="calendar-notice">{added}</p> : null}
@@ -57,12 +60,14 @@ const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", u
 
 // One PO keyed in once: customer and PO number, then as many product line items as it lists.
 // Typing an existing PO number of the same customer adds further items to that PO.
-function NewOrderForm({ orders, products, customers, units, directory, userName, onAdd, onClose, onDone }: {
-  directory: CalendarDirectory;
-  orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; units: CalendarDirectory["units"]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer) => string[];
+function NewOrderForm({ orders, products, catalog, customers, units, directory, userName, onAdd, onClose, onDone }: {
+  directory: CalendarDirectory; catalog?: OrderCatalog;
+  orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; units: CalendarDirectory["units"]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer, taken?: Product[]) => string[];
   onClose: () => void; onDone: (message: string) => void;
 }) {
   const uoms = useUoms();
+  // With Master Data, only its finished goods are offered, each as the scheduler product it becomes.
+  const choices = catalog?.status === "ok" ? catalog.products.map((master) => productFor(master, products)) : products;
   const [items, setItems] = useState<DraftItem[]>(() => [draftItem()]);
   const [poNumber, setPoNumber] = useState("");
   const [customerCode, setCustomerCode] = useState("");
@@ -76,7 +81,7 @@ function NewOrderForm({ orders, products, customers, units, directory, userName,
   const existing = poNumber.trim() ? poItems(poNumber, orders) : [];
   const firstItem = nextPoItem(poNumber, orders);
   const update = (key: string, change: Partial<DraftItem>) => setItems((current) => current.map((item) => item.key === key ? { ...item, ...change } : item));
-  const formatOf = (item: DraftItem) => item.format || inferFormat(products.find((product) => product.id === item.productId));
+  const formatOf = (item: DraftItem) => item.format || inferFormat(choices.find((product) => product.id === item.productId));
   return <form key={version} className="form-panel orders-form" onSubmit={(event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -86,10 +91,10 @@ function NewOrderForm({ orders, products, customers, units, directory, userName,
     const built: PurchaseOrder[] = items.map((item, index) => ({
       id: `order-${crypto.randomUUID()}`, number: number++, item: firstItem + index, format: formatOf(item), ...(units.length === 1 ? { unitId: units[0].id } : {}),
       customerId: customer.id, customerName: customer.name, poNumber: poNumber.trim(), productId: item.productId,
-      quantity: Number(data.get(`quantity-${item.key}`)), uom: item.uom || (products.find((product) => product.id === item.productId)?.uom ?? ""),
+      quantity: Number(data.get(`quantity-${item.key}`)), uom: item.uom || (choices.find((product) => product.id === item.productId)?.uom ?? ""),
       expectedDates: {}, receivedDate, ...(deliveryDate ? { deliveryDate } : {}), createdAt, createdBy: userName
     }));
-    const result = onAdd(built, customer);
+    const result = onAdd(built, customer, choices.filter((product) => product.masterDataId && built.some((order) => order.productId === product.id)));
     setErrors(result);
     if (!result.length) {
       const range = built.length === 1 ? `order ${built[0].number}` : `orders ${built[0].number}-${built.at(-1)!.number}`;
@@ -111,17 +116,18 @@ function NewOrderForm({ orders, products, customers, units, directory, userName,
     <label>PO received date<input name="receivedDate" type="date" required max={localDateKey(new Date())} value={receivedDate} onChange={(event) => setReceivedDate(event.target.value)} /></label>
     <label>Expected customer delivery<input name="deliveryDate" type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
     {customerCode.trim() && !known ? <p className="orders-help" role="status">New customer ID {customerCode.trim()}: it is added to the customer list with this PO.</p> : null}
+    {catalog?.status === "unavailable" ? <p className="orders-help" role="status">Bio Tree Master Data could not be reached, so the products listed are the scheduler&apos;s own. Reload to try again.</p> : null}
     {existing.length ? <p className="orders-help" role="status">{existing[0].poNumber} already has {existing.length} item{existing.length === 1 ? "" : "s"}{existing[0].customerName ? ` for ${existing[0].customerName}` : ""}. These are added as item {firstItem}{items.length > 1 ? ` to ${firstItem + items.length - 1}` : ""}.</p> : null}
     <fieldset className="order-items">
       <legend>Line items <span className="badge neutral">{items.length}</span></legend>
       {items.map((item, index) => {
-        const productUom = products.find((product) => product.id === item.productId)?.uom ?? "";
+        const productUom = choices.find((product) => product.id === item.productId)?.uom ?? "";
         const format = formatOf(item);
         return <div className="order-item" key={item.key} role="group" aria-label={`Item ${firstItem + index}`}>
           <div className="order-item-head"><strong>Item {firstItem + index}</strong>
             {items.length > 1 ? <button type="button" className="icon-button" aria-label={`Remove item ${firstItem + index}`} title="Remove this item" onClick={() => setItems((current) => current.filter((other) => other.key !== item.key))}><Trash2 size={15} /></button> : null}
           </div>
-          <ProductSelect products={products} name={`product-${item.key}`} value={item.productId} onChange={(id) => update(item.key, { productId: id, uom: "", format: "" })} />
+          <ProductSelect products={choices} name={`product-${item.key}`} value={item.productId} onChange={(id) => update(item.key, { productId: id, uom: "", format: "" })} />
           <label title={unitRouteLabel(directory, units[0]?.id, format)}>Dosage form<select value={format} onChange={(event) => update(item.key, { format: event.target.value as ProductFormat })}>{PRODUCT_FORMATS.map((option) => <option key={option}>{option}</option>)}</select></label>
           <div className="quantity-fields"><label>Quantity<input name={`quantity-${item.key}`} type="number" min="1" step="any" required /></label>
             <label>UOM<select value={item.uom || productUom} onChange={(event) => update(item.key, { uom: event.target.value })} required>{!productUom && !item.uom ? <option value="">Select</option> : null}{[...new Set([productUom, ...uoms.filter((unit) => unit.active).map((unit) => unit.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select></label></div>

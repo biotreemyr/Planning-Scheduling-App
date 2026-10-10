@@ -30,7 +30,7 @@ export const workspaceSchema = z.object({
     teams: z.array(record.extend({ processId: id })),
     people: z.array(record.extend({ role: z.enum(["admin", "planner", "production"]), unitIds: z.array(id), teamIds: z.array(id), calendarIds: z.array(id), processIds: z.array(id).optional() })).min(1)
   }),
-  products: z.array(record.extend({ sku: name, uom: name, productType: z.enum(["Finished Good", "Intermediate", "Packaging", "Raw Material"]), active, batchQuantity: number.positive().optional(), batchSizeKg: number.positive().optional() })),
+  products: z.array(record.extend({ sku: name, uom: name, productType: z.enum(["Finished Good", "Intermediate", "Packaging", "Raw Material"]), active, batchQuantity: number.positive().optional(), batchSizeKg: number.positive().optional(), masterDataId: z.string().uuid().optional() })),
   workCentres: z.array(record.extend({ code: name, description: text.optional(), active })),
   machines: z.array(record.extend({ code: name, workCentreId: id, unitId: id, processIds: z.array(id).min(1), setupMinutes: number.int().nonnegative(), capacity: number.positive().optional(), capacityUom: text.optional(), capacityNotes: text.optional(), active })),
   measurements: settings,

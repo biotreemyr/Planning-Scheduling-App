@@ -45,6 +45,7 @@ import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
 import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 import { formatDate, formatDateTime } from "@/lib/services/dates";
+import type { OrderCatalog } from "@/lib/services/masterProducts";
 
 type Tab = "planner" | "orders" | "status" | "master" | "reports" | "audit";
 type PlanningView = "calendar" | "list";
@@ -654,11 +655,11 @@ function ReportsPanel({
 // A person verified by Bio Tree Core. Their permissions come from Core; the server rechecks every save.
 export type CoreIdentity = { id: string; name: string; permissions: string[] };
 
-export default function SchedulerDemo({ initial, writeToken, identity }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity }) {
-  return <MeasurementProvider initial={initial.snapshot.measurements}><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} /></MeasurementProvider>;
+export default function SchedulerDemo({ initial, writeToken, identity, catalog }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog }) {
+  return <MeasurementProvider initial={initial.snapshot.measurements}><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} catalog={catalog} /></MeasurementProvider>;
 }
 
-function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity }) {
+function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog }) {
   const [directory, setDirectory] = useState<CalendarDirectory>(initial.snapshot.directory);
   const [memberId, setMemberId] = useState(initial.snapshot.directory.people.find((person) => person.role === "admin")!.id);
   // In Core mode the signed-in user replaces the demo person picker. Core has no unit model
@@ -878,20 +879,23 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
     return [];
   }
   // Several line items of one PO are added together, each checked against the ones before it.
-  // A customer ID not seen before is added to the customer list in the same save.
-  function addOrders(items: PurchaseOrder[], customer: Customer) {
+  // A customer ID not seen before is added to the customer list in the same save, and so is a
+  // product taken from Master Data that the scheduler did not have yet (or had under its code, unlinked).
+  function addOrders(items: PurchaseOrder[], customer: Customer, taken: Product[] = []) {
     if (!canCreateOrders) return ["Your access does not include creating orders."];
     const known = data.customers.find((item) => item.id === customer.id);
+    const withTaken = [...products.filter((product) => !taken.some((item) => item.id === product.id)), ...taken];
     const customerErrors = known ? [] : validateCustomer(customer, data.customers);
     if (customerErrors.length) return customerErrors;
     const accepted: PurchaseOrder[] = [];
     const errors = items.flatMap((order, index) => {
       const linked = { ...order, poNumber: order.poNumber.trim(), customerId: customer.id, customerName: (known ?? customer).name.trim() };
-      const problems = validateOrder(linked, [...data.orders, ...accepted], products);
+      const problems = validateOrder(linked, [...data.orders, ...accepted], withTaken);
       if (!problems.length) accepted.push(linked);
       return items.length > 1 ? problems.map((problem) => `Item ${index + 1}: ${problem}`) : problems;
     });
     if (errors.length) return errors;
+    if (taken.length) setProducts((current) => [...current.map((product) => taken.find((item) => item.id === product.id) ?? product), ...taken.filter((item) => !current.some((product) => product.id === item.id))]);
     setData((current) => ({ ...current, customers: known ? current.customers : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted] }));
     return [];
   }
@@ -1179,7 +1183,7 @@ function TeamWorkspace({ initial, writeToken, identity }: { initial: WorkspaceEn
       {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
         section={statusSection} onSection={setStatusSection} onTest={testJob} onRelease={releaseJob} onReject={rejectJob} /> : null}
-      {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
+      {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "audit" ? <HistoryPanel refreshKey={activeTab} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
