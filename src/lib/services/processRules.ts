@@ -47,12 +47,17 @@ export function actualUoms(processName: string, plannedUom?: string) {
 export type RouteStepName = Step;
 export const routeLabel = (format: ProductFormat) => format === "Other" ? "No fixed route" : ROUTES[format].map((step) => OPTIONAL_STEPS.has(step) ? `(${STEP_LABEL[step]})` : STEP_LABEL[step]).join(" → ");
 
-// A sensible default from the product's unit or name; the order's own format always wins.
-export function inferFormat(product?: Pick<Product, "name" | "uom">): ProductFormat {
+// A sensible default from the product's code, unit or name; the order's own format always wins.
+// SQL Account codes name the form: FG-CPS-004A is a capsule product, -TBT- tablet, -POW- powder sachet.
+export function inferFormat(product?: Pick<Product, "name" | "uom"> & { sku?: string }): ProductFormat {
   const text = `${product?.uom ?? ""} ${product?.name ?? ""}`.toLowerCase();
+  const code = product?.sku?.toUpperCase() ?? "";
   if (/capsule/.test(text)) return "Capsule";
   if (/tablet|\btabs?\b/.test(text)) return "Tablet";
   if (/sachet/.test(text)) return "Sachet";
+  if (/-CPS-/.test(code)) return "Capsule";
+  if (/-TBT-/.test(code)) return "Tablet";
+  if (/-POW-/.test(code)) return "Sachet";
   return "Other";
 }
 

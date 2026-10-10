@@ -22,6 +22,7 @@ describe("process routes by product format", () => {
   it("infers a default format from the product", () => {
     expect(inferFormat({ name: "Iron Pyro B-Plus Capsules", uom: "capsules" })).toBe("Capsule");
     expect(inferFormat({ name: "Vitamin C Plus (28 tabs x 1000mg)", uom: "tablets" })).toBe("Tablet");
+    expect(["FG-CPS-004A", "FG-TBT-002", "FG-POW-003A", "FG-PSP-001"].map((sku) => inferFormat({ sku, name: "Packed product x 10's", uom: "boxes" }))).toEqual(["Capsule", "Tablet", "Sachet", "Other"]);
     expect(inferFormat({ name: "Collagen Peptide Sachet", uom: "sachets" })).toBe("Sachet");
     expect(inferFormat({ name: "Black Soybean Fermented Powder", uom: "kg" })).toBe("Other");
   });

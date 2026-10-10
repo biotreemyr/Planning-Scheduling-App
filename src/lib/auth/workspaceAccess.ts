@@ -1,6 +1,8 @@
 // Server only: node:util keeps it out of browser bundles.
 import { isDeepStrictEqual } from "node:util";
 import type { WorkspaceSnapshot } from "@/lib/domain/workspace";
+import type { Customer, Product } from "@/lib/domain/types";
+import { customerFor, productFor, type MasterLists } from "@/lib/services/masterData";
 import type { WorkspaceCapabilities } from "./capabilities";
 
 type Keyed = { id: string };
@@ -26,14 +28,35 @@ export type ChangeReview = { allowed: boolean; denied: string[]; summary: string
  * snapshot and requiring the Core permission for every kind of change it contains.
  * The browser sends the whole workspace, so nothing it claims about itself is trusted.
  */
-export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: WorkspaceSnapshot, can: WorkspaceCapabilities): ChangeReview {
+// A record added or linked exactly as an order takes it from Master Data: nothing else about it changed.
+function productFromMasterData(old: Product | undefined, product: Product, lists: MasterLists) {
+  const master = lists.products.find((item) => item.id === product.masterDataId);
+  return !!master && isDeepStrictEqual(product, productFor(master, old ? [old] : []));
+}
+function customerFromMasterData(old: Customer, customer: Customer, lists: MasterLists) {
+  const master = lists.customers.find((item) => item.id === customer.masterDataId);
+  return !!master && isDeepStrictEqual(customer, customerFor(master, [old]));
+}
+
+/**
+ * `lists` is Master Data's products and customers an order may use, read by the server. Adding or
+ * linking one of those as it stands there is part of creating an order; any other product change
+ * is master data management, and any other customer change is editing orders.
+ */
+export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: WorkspaceSnapshot, can: WorkspaceCapabilities, lists: MasterLists = { products: [], customers: [] }): ChangeReview {
   const denied: string[] = [];
   const summary: string[] = [];
   const need = (allowed: boolean, what: string) => { if (!allowed && !denied.includes(what)) denied.push(what); };
   const count = (label: string, n: number) => { if (n) summary.push(`${label}: ${n}`); };
 
   const configuration = (["directory", "products", "workCentres", "machines", "measurements"] as const).filter((key) => !isDeepStrictEqual(before[key], after[key]));
-  if (configuration.length) { need(can.manage, "change units, people, products, machines or measurements"); summary.push(`configuration: ${configuration.join(", ")}`); }
+  const products = diff(before.products, after.products);
+  const fromMasterData = [...products.added.map((item) => ({ before: undefined, after: item })), ...products.changed].filter((change) => productFromMasterData(change.before, change.after, lists));
+  const onlyFromMasterData = configuration.length === 1 && configuration[0] === "products" && !products.removed.length && fromMasterData.length === products.added.length + products.changed.length;
+  if (onlyFromMasterData) need(can.createOrders, "add products from Master Data");
+  else if (configuration.length) need(can.manage, "change units, people, products, machines or measurements");
+  if (configuration.length) summary.push(`configuration: ${configuration.join(", ")}`);
+  count("products taken from Master Data", fromMasterData.length);
 
   const orders = diff(before.data.orders, after.data.orders);
   if (orders.added.length) need(can.createOrders, "add orders");
@@ -41,9 +64,10 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   count("orders added", orders.added.length); count("orders changed", orders.changed.length); count("orders removed", orders.removed.length);
 
   const customers = diff(before.data.customers, after.data.customers);
-  if (customers.added.length) need(can.createOrders, "add customers");
-  if (customers.removed.length || customers.changed.length) need(can.editOrders, "edit customers");
-  count("customers added", customers.added.length); count("customers changed", customers.changed.length);
+  const linked = customers.changed.filter((change) => customerFromMasterData(change.before, change.after, lists));
+  if (customers.added.length || linked.length) need(can.createOrders, "add customers");
+  if (customers.removed.length || customers.changed.length > linked.length) need(can.editOrders, "edit customers");
+  count("customers added", customers.added.length); count("customers taken from Master Data", linked.length); count("customers changed", customers.changed.length - linked.length);
 
   const jobs = diff(before.data.jobOrders, after.data.jobOrders);
   if (jobs.added.length) need(can.createOrders, "create or remove job orders");

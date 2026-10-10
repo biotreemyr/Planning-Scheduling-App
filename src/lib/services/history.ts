@@ -55,6 +55,7 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
       old.quantity !== row.quantity ? `quantity ${num(old.quantity)} → ${num(row.quantity)} ${str(row.uom)}` : "",
       old.format !== row.format ? `dosage form ${str(old.format) || "-"} → ${str(row.format)}` : "",
       old.receivedDate !== row.receivedDate ? `PO received ${str(old.receivedDate) || "-"} → ${str(row.receivedDate) || "-"}` : "",
+      (old.soNumber ?? "") !== (row.soNumber ?? "") ? `SO number ${str(old.soNumber) || "-"} → ${str(row.soNumber) || "-"}` : "",
       old.deliveryDate !== row.deliveryDate ? `expected delivery ${str(old.deliveryDate) || "-"} → ${str(row.deliveryDate) || "-"}` : ""
     ].filter(Boolean);
     changes.push({ kind: "PO", po: po(row.id), product: productName(row.productId), text: `PO ${po(row.id)} edited${parts.length ? `: ${parts.join("; ")}` : ""}` });

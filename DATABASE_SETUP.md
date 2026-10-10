@@ -64,6 +64,19 @@ The restore script refuses the active database and any non-empty destination.
 Verify recovered records, then deliberately update DATABASE_URL and restart.
 Never run drizzle-kit push, or any reset/drop, against pilot data.
 
+## Products from Bio Tree Master Data
+
+New orders pick their product from Master Data's active finished goods (FG- codes)
+and their customer from its active customers, for MASTER_DATA_COMPANY (default btp), read live through MASTER_DATA_DATABASE_URL
+with the read-only role master-data/docs/CONSUMING.md describes
+(scheduler_md_reader). The first order for a product or customer adds it to
+the scheduler's list, linked by Master Data's ID, or links the scheduler record
+that already has its code. A customer ID not in Master Data cannot be used for a
+new order: customers are added in SQL Account and imported into Master Data. The server checks such a product against Master Data
+itself, so anyone who may create orders can add one; any other product change
+still needs Admin. Without MASTER_DATA_DATABASE_URL the order form offers the
+scheduler's own products as before.
+
 ## Schema changes (Drizzle)
 
 The tables are defined in src/lib/persistence/schema.ts. After changing it, run

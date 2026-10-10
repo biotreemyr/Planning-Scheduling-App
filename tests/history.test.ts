@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newWorkspace } from "../src/lib/domain/workspace";
+import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
 import { buildHistory, describeChanges } from "../src/lib/services/history";
 
@@ -34,6 +34,14 @@ describe("transaction history", () => {
     const history = buildHistory([{ revision: 0, snapshot: base }, { revision: 1, snapshot: base }, { revision: 2, snapshot: next }],
       new Map([[2, { at: "2026-10-07T03:00:00.000Z", by: "Angeline Choo" }]]), new Map());
     expect(history).toEqual([{ revision: 2, at: "2026-10-07T03:00:00.000Z", by: "Angeline Choo", changes: [{ kind: "PO", po: "PO-2610-142", product: "Folic Acid 400mcg Tablets", text: "PO PO-2610-142 edited: quantity 600,000 → 700,000 tablets" }] }]);
+  });
+  it("keeps the SO number a planner keys in and records changes to it", () => {
+    const keyed = structuredClone(base);
+    keyed.data.orders = keyed.data.orders.map((item) => item.id === order.id ? { ...item, soNumber: " SO2610004 " } : item);
+    const saved = parseWorkspace(keyed);
+    expect(saved.data.orders.find((item) => item.id === order.id)?.soNumber).toBe("SO2610004");
+    expect(() => parseWorkspace({ ...keyed, data: { ...keyed.data, orders: keyed.data.orders.map((item) => item.id === order.id ? { ...item, soNumber: "S".repeat(61) } : item) } })).toThrow();
+    expect(describeChanges(base, saved).map((change) => change.text)).toEqual(["PO PO-2610-142 edited: SO number - → SO2610004"]);
   });
   it("reads versions saved before job orders and customers existed", () => {
     const old = JSON.parse(JSON.stringify(base));
