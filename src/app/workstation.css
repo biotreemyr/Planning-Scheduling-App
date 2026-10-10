@@ -182,16 +182,26 @@
   .workstation .user-selector select { width: 170px; max-width: 100%; }
   .calendar-filters { gap: 12px; }
 }
-.product-select { position: relative; min-width: 0; }
-.product-select > label { display: block; margin-bottom: 6px; }
-.product-select-input { position: relative; }
-.product-select-input input { padding-right: 40px; width: 100%; }
-.product-select-toggle { position: absolute; right: 2px; top: 2px; bottom: 2px; width: 36px; padding: 0; border: 0; background: transparent; color: inherit; display: grid; place-items: center; }
-.product-options { position: absolute; top: 100%; left: 0; right: 0; max-height: 240px; overflow-y: auto; z-index: 100; background: white; border: 1px solid var(--line); box-shadow: 0 5px 16px #14241f20; }
-.product-options button { display: block; width: 100%; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 12px; text-align: left; background: white; color: #182d25; white-space: normal; overflow-wrap: anywhere; }
-.product-options button.active { background: #eaf0ed; }
-.product-options small { display: block; margin-top: 4px; font-weight: 400; }
-.product-options p { padding: 12px; margin: 0; }
+/* Product and customer pickers: a compact table, filtered by column, under the field. */
+.record-picker { position: relative; min-width: 0; }
+.record-picker > label { display: block; margin-bottom: 6px; }
+.record-picker-input { position: relative; }
+.record-picker-input input { padding-right: 40px; width: 100%; text-overflow: ellipsis; }
+.record-picker-toggle { position: absolute; right: 2px; top: 2px; bottom: 2px; width: 36px; padding: 0; border: 0; background: transparent; color: inherit; display: grid; place-items: center; }
+.record-picker-panel { position: fixed; z-index: 100; display: flex; flex-direction: column; background: white; border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 18px #14241f24; font-size: 13px; }
+.record-picker-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.record-picker table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.record-picker thead th { position: sticky; background: #f4f7f5; text-align: left; font-weight: 600; color: var(--muted); padding: 6px 8px 2px; z-index: 1; }
+.record-picker thead tr:first-child th { top: 0; }
+.record-picker thead tr:nth-child(2) th { top: 26px; padding: 2px 8px 6px; border-bottom: 1px solid var(--line); }
+.record-picker thead input { width: 100%; min-height: 0; padding: 4px 6px; font-size: 12px; font-weight: 400; }
+.record-picker td { padding: 5px 8px; border-bottom: 1px solid #edf1ef; color: #182d25; vertical-align: top; overflow-wrap: anywhere; cursor: pointer; }
+.record-picker tbody tr.active td { background: #eaf0ed; }
+.record-picker tbody tr[aria-selected="true"] td { font-weight: 600; }
+.record-picker .col-code { width: 130px; white-space: nowrap; }
+.record-picker .col-uom { width: 80px; }
+.record-picker-panel p { padding: 10px 8px; margin: 0; }
+.record-picker-panel > small { display: block; padding: 5px 8px; border-top: 1px solid var(--line); color: var(--muted); }
 .admin-create-area { padding: 24px 0; border-bottom: 1px solid var(--line); }
 .admin-create-area > div > form { max-width: 960px; }
 .admin-create-area .access-editor { margin: 0; padding: 0; border: 0; }

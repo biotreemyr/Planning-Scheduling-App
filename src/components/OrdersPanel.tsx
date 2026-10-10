@@ -7,7 +7,7 @@ import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
-import { ProductSelect } from "./ProductSelect";
+import { RecordPicker, type PickerColumn } from "./RecordPicker";
 import { customerFor, productFor, type OrderCatalog } from "@/lib/services/masterData";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
@@ -56,6 +56,15 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
 }
 
 type DraftItem = { key: string; productId: string; uom: string; format: ProductFormat | "" };
+const productColumns: PickerColumn<Product>[] = [
+  { key: "code", label: "Item code", value: (product) => product.sku, filter: true },
+  { key: "name", label: "Item name", value: (product) => product.name, filter: true },
+  { key: "uom", label: "UOM", value: (product) => product.uom }
+];
+const customerColumns: PickerColumn<Customer>[] = [
+  { key: "code", label: "Customer ID", value: (customer) => customer.code, filter: true },
+  { key: "name", label: "Customer name", value: (customer) => customer.name, filter: true }
+];
 const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", uom: "", format: "" });
 
 // One PO keyed in once: customer and PO number, then as many product line items as it lists.
@@ -74,6 +83,8 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
   const [poNumber, setPoNumber] = useState("");
   const [customerCode, setCustomerCode] = useState("");
   const [customerName, setCustomerName] = useState("");
+  // Bumped when the PO number fills in the customer, so the picker shows it.
+  const [customerPickerVersion, setCustomerPickerVersion] = useState(0);
   const [deliveryDate, setDeliveryDate] = useState("");
   const [receivedDate, setReceivedDate] = useState(() => localDateKey(new Date()));
   // A known customer ID fills in its name. Without Master Data, a new one is added to the customer list with this PO.
@@ -106,15 +117,18 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
     }
   }}>
     <div className="panel-title"><h2 id="new-order-title">New order</h2><button className="icon-button" type="button" aria-label="Close new order" title="Close" onClick={onClose}><X size={18} /></button></div>
-    <label>Customer ID<input name="customerId" required maxLength={40} list="order-customers" placeholder="Type or choose, e.g. C0012" value={customerCode} onChange={(event) => setCustomerCode(event.target.value)} /></label>
-    <datalist id="order-customers">{customerChoices.map((item) => <option key={item.id} value={item.code}>{item.name}</option>)}</datalist>
+    {fromMasterData
+      ? <RecordPicker key={customerPickerVersion} label="Customer ID" name="customerId" noun="customer" records={customerChoices} columns={customerColumns} display={(item) => item.code}
+          value={known?.id} placeholder="Type or choose, e.g. 305-P0001" onText={setCustomerCode} />
+      : <><label>Customer ID<input name="customerId" required maxLength={40} list="order-customers" placeholder="Type or choose, e.g. C0012" value={customerCode} onChange={(event) => setCustomerCode(event.target.value)} /></label>
+        <datalist id="order-customers">{customerChoices.map((item) => <option key={item.id} value={item.code}>{item.name}</option>)}</datalist></>}
     <label>Customer name<input name="customer" required maxLength={120} placeholder={fromMasterData ? "Filled in from Master Data" : known ? "" : "New customer's name"} readOnly={!!known || fromMasterData} value={known ? known.name : fromMasterData ? "" : customerName} onChange={(event) => setCustomerName(event.target.value)} /></label>
     <label>PO number<input name="po" required maxLength={60} placeholder="e.g. PO-2610-140" value={poNumber} onChange={(event) => {
       setPoNumber(event.target.value);
       // An existing PO keeps its customer.
       const owner = poItems(event.target.value, orders).find((item) => item.customerId);
       const record = customers.find((item) => item.id === owner?.customerId);
-      if (record && !customerCode.trim()) setCustomerCode(record.code);
+      if (record && !customerCode.trim()) { setCustomerCode(record.code); setCustomerPickerVersion((value) => value + 1); }
     }} /></label>
     <label>PO received date<input name="receivedDate" type="date" required max={localDateKey(new Date())} value={receivedDate} onChange={(event) => setReceivedDate(event.target.value)} /></label>
     <label>Expected customer delivery<input name="deliveryDate" type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
@@ -130,7 +144,8 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
           <div className="order-item-head"><strong>Item {firstItem + index}</strong>
             {items.length > 1 ? <button type="button" className="icon-button" aria-label={`Remove item ${firstItem + index}`} title="Remove this item" onClick={() => setItems((current) => current.filter((other) => other.key !== item.key))}><Trash2 size={15} /></button> : null}
           </div>
-          <ProductSelect products={choices} name={`product-${item.key}`} value={item.productId} onChange={(id) => update(item.key, { productId: id, uom: "", format: "" })} />
+          <RecordPicker label="Product" name={`product-${item.key}`} noun="product" records={choices.filter((product) => product.active === "Active")} columns={productColumns}
+            display={(product) => `${product.sku} - ${product.name}`} placeholder="Search item code or name" value={item.productId} onChange={(id) => update(item.key, { productId: id, uom: "", format: "" })} />
           <label title={unitRouteLabel(directory, units[0]?.id, format)}>Dosage form<select value={format} onChange={(event) => update(item.key, { format: event.target.value as ProductFormat })}>{PRODUCT_FORMATS.map((option) => <option key={option}>{option}</option>)}</select></label>
           <div className="quantity-fields"><label>Quantity<input name={`quantity-${item.key}`} type="number" min="1" step="any" required /></label>
             <label>UOM<select value={item.uom || productUom} onChange={(event) => update(item.key, { uom: event.target.value })} required>{!productUom && !item.uom ? <option value="">Select</option> : null}{[...new Set([productUom, ...uoms.filter((unit) => unit.active).map((unit) => unit.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select></label></div>
