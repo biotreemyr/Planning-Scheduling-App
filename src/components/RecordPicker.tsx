@@ -1,21 +1,10 @@
 "use client";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ChevronDown } from "lucide-react";
+import { placeNear } from "./popover";
 
 export type PickerColumn<T> = { key: string; label: string; value: (record: T) => string; filter?: boolean };
 
-// The table is placed against the window, not the form, so a scrolling dialog cannot clip it: below
-// the field, or above it when there is more room there.
-function placeUnder(field: DOMRect): CSSProperties {
-  const margin = 16, wanted = 380;
-  const across = document.documentElement.clientWidth;
-  const width = Math.min(Math.max(field.width, 560), 720, across - 2 * margin);
-  const left = Math.max(margin, Math.min(field.left, across - width - margin));
-  const below = window.innerHeight - field.bottom - margin, above = field.top - margin;
-  return below >= Math.min(wanted, above)
-    ? { left, width, top: field.bottom + 4, maxHeight: Math.min(wanted, below) }
-    : { left, width, bottom: window.innerHeight - field.top + 4, maxHeight: Math.min(wanted, above) };
-}
 
 /**
  * Pick one record from a list too long to scroll: type in the field to search every column, or open
@@ -43,7 +32,7 @@ export function RecordPicker<T extends { id: string }>({ label, name, records, c
   const [place, setPlace] = useState<CSSProperties>();
   useLayoutEffect(() => {
     if (!open) return;
-    const update = () => { const field = box.current?.querySelector(".record-picker-input")?.getBoundingClientRect(); if (field) setPlace(placeUnder(field)); };
+    const update = () => { const field = box.current?.querySelector(".record-picker-input")?.getBoundingClientRect(); if (field) setPlace(placeNear(field, Math.min(Math.max(field.width, 560), 720))); };
     update();
     window.addEventListener("resize", update); window.addEventListener("scroll", update, true);
     return () => { window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };

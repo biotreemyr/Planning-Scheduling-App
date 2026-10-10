@@ -8,6 +8,8 @@ import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, 
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
+import { DateFilterPicker } from "./DateFilterPicker";
+import { matchesDateFilter } from "@/lib/services/dateFilter";
 import { customerFor, productFor, type OrderCatalog } from "@/lib/services/masterData";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
@@ -168,19 +170,6 @@ type Column = {
 };
 const COLUMN_STORAGE = "scheduler.orderColumns";
 
-// A date column's filter offers the years, months and days its rows actually have, so one choice
-// narrows to any of them. Values are "y:2026", "m:2026-10", "d:2026-10-09", or "none" for no date.
-function dateFilterOptions(dates: (string | undefined)[]) {
-  const known = [...new Set(dates.filter((date): date is string => !!date))].sort().reverse();
-  const month = (key: string) => new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1).toLocaleString("en-GB", { month: "short", year: "numeric" });
-  return {
-    years: [...new Set(known.map((date) => date.slice(0, 4)))],
-    months: [...new Set(known.map((date) => date.slice(0, 7)))].map((key) => ({ key, label: month(key) })),
-    days: known,
-    missing: dates.some((date) => !date)
-  };
-}
-const matchesDate = (date: string | undefined, choice: string) => choice === "none" ? !date : !!date && date.startsWith(choice.slice(2));
 
 function OrdersTable({ action, printable, orders, customerRecords, jobOrders, transfers, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
   customerRecords: Customer[]; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions; action?: ReactNode;
@@ -234,7 +223,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
   const table = all.filter((row) => orderInMonth(row.order, row.rows, row.progress, month, basis) && columns.every((column) => {
     const value = filters[column.key]?.trim().toLowerCase();
     if (!value || !column.filter) return true;
-    if (column.filter.kind === "date") return matchesDate(column.filter.date(row), value);
+    if (column.filter.kind === "date") return matchesDateFilter(column.filter.date(row), value);
     return column.filter.kind === "text" ? column.filter.text(row).toLowerCase().includes(value) : column.filter.value(row).toLowerCase() === value;
   })).sort((a, b) => {
     const x = sorter.sort(a), y = sorter.sort(b);
@@ -276,13 +265,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
             <th scope="col"><span className="admin-sr-only">Filters</span></th>
             {shown.map((column) => <th scope="col" key={column.key} data-col={column.key}>
               {column.filter?.kind === "text" ? <input type="search" aria-label={`Search ${column.label}`} placeholder="Search" value={filters[column.key] ?? ""} list={column.key === "customer" ? "order-filter-customers" : undefined} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })} /> : null}
-              {column.filter?.kind === "date" ? (() => { const date = column.filter.date; const options = dateFilterOptions(all.map((row) => date(row))); return <select className="date-filter" aria-label={`Filter ${column.label} by year, month or date`} value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })}>
-                <option value="">All</option>
-                {options.years.length ? <optgroup label="Year">{options.years.map((year) => <option key={year} value={`y:${year}`}>{year}</option>)}</optgroup> : null}
-                {options.months.length ? <optgroup label="Month">{options.months.map((month) => <option key={month.key} value={`m:${month.key}`}>{month.label}</option>)}</optgroup> : null}
-                {options.days.length ? <optgroup label="Date">{options.days.map((day) => <option key={day} value={`d:${day}`}>{displayDate(day)}</option>)}</optgroup> : null}
-                {options.missing ? <option value="none">Not set</option> : null}
-              </select>; })() : null}
+              {column.filter?.kind === "date" ? (() => { const date = column.filter.date; return <DateFilterPicker label={column.label} value={filters[column.key] ?? ""} dates={all.map((row) => date(row))} onChange={(value) => setFilters({ ...filters, [column.key]: value })} />; })() : null}
               {column.filter?.kind === "select" ? <select aria-label={`Filter ${column.label}`} value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })}><option value="">All</option>{column.filter.options.map((option) => <option key={option}>{option}</option>)}</select> : null}
             </th>)}
           </tr>
