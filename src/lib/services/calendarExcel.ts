@@ -1,5 +1,5 @@
 import type { Workbook, Worksheet } from "exceljs";
-import { listPrintCells, printDates, printedActivity, printedListActivity, scheduleDetail, type CalendarPrintInput, type ListPrintInput } from "./calendarPrint";
+import { WEEKDAY_HEADINGS, dayNumber, listPrintCells, periodLabel, printDates, printedActivity, printedListActivity, scheduleDetail, type CalendarPrintInput, type ListPrintInput } from "./calendarPrint";
 import { monthDates } from "./planningMonth";
 import type { PlanLine } from "@/lib/domain/types";
 import { formatDate, weekday } from "./dates";
@@ -103,15 +103,16 @@ export function buildCalendarWorkbook(excel: ExcelModule, input: CalendarPrintIn
   const dates = printDates(input.date, input.view);
   const perRow = input.view === "day" ? 1 : 7;
   const sheet = book.addWorksheet(`${input.view[0].toUpperCase()}${input.view.slice(1)} plan`, { views: [{ state: "frozen", ySplit: 4 }] });
-  sheetTitle(sheet, input.title, `${input.view.toUpperCase()} PLAN | ${input.view === "month" ? input.date.slice(0, 7) : `${dates[0]} to ${dates.at(-1)}`}`, perRow);
-  headingRow(sheet, 4, perRow === 1 ? [dayLabel(dates[0] ?? input.date, { weekday: "long" })] : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+  sheetTitle(sheet, input.title, `${input.view.toUpperCase()} PLAN | ${periodLabel(input.date, input.view, dates)}`, perRow);
+  headingRow(sheet, 4, perRow === 1 ? [dayLabel(dates[0] ?? input.date, { weekday: "long" })] : WEEKDAY_HEADINGS);
   for (let column = 1; column <= perRow; column++) sheet.getColumn(column).width = perRow === 1 ? 80 : 30;
   for (let offset = 0; offset < dates.length; offset += perRow) {
     const row = sheet.getRow(5 + offset / perRow);
     dates.slice(offset, offset + perRow).forEach((day, index) => {
       const activities = input.lines.filter((line) => line.plannedDate === day).map((line) => { const activity = printedActivity(line, input.products, input.orders, input.jobOrders); return activityText([activity.productName, activity.batch, activity.quantity]); });
       const cell = row.getCell(index + 1);
-      cell.value = [`${weekday(day)} ${formatDate(day)}`, ...activities].join("\n\n");
+      // The weekday heads the column, so a week row names each day by its number alone.
+      cell.value = [perRow === 7 ? dayNumber(day) : `${weekday(day)} ${formatDate(day)}`, ...activities].join("\n\n");
       cell.border = boxed; cell.alignment = { vertical: "top", wrapText: true };
       // Days outside the month are greyed, as on the calendar.
       if (input.view === "month" && day.slice(0, 7) !== input.date.slice(0, 7)) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: WEEKEND } };

@@ -1,4 +1,11 @@
 export type CalendarView = "month" | "week" | "day";
+// A month grid names the weekdays once along the top (weeks start on Monday) and each day by its number.
+export const WEEKDAY_HEADINGS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+export const dayNumber = (day: string) => String(Number(day.slice(8, 10)));
+export const monthTitle = (date: string) => new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, 1).toLocaleString("en-GB", { month: "long", year: "numeric" });
+export const inMonth = (day: string, date: string) => day.slice(0, 7) === date.slice(0, 7);
+// What the print, PDF and Excel headers say about the period shown.
+export const periodLabel = (date: string, view: CalendarView, dates: string[]) => view === "month" ? monthTitle(date) : view === "day" ? dates[0] ?? date : `${dates[0]} to ${dates.at(-1)}`;
 export const localDateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 export function printDates(date: string, view: CalendarView) {
   const start = new Date(`${date}T12:00:00`);

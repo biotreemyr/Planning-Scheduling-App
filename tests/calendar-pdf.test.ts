@@ -20,6 +20,14 @@ describe("calendar PDF", () => {
       if (process.env.CALENDAR_PDF_QA_DIR) { mkdirSync(process.env.CALENDAR_PDF_QA_DIR, { recursive: true }); pdf.save(`${process.env.CALENDAR_PDF_QA_DIR}/${view}.pdf`); }
     });
   }
+  it("names the weekdays once along the top of a month, with day numbers in the cells", () => {
+    const content = buildCalendarPdf({ title: "Manufacturing", date: "2026-09-14", view: "month", lines: [], products: seedData.products, processNames: {} }).output();
+    expect(content).toContain("MONTH PLAN | September 2026");
+    for (const name of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) expect(content).toContain(`(${name})`);
+    // Day numbers, not "Mon 14/09/2026" in every cell.
+    expect(content).not.toMatch(/\((Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d\d\/\d\d\/\d{4}\)/);
+    expect(content).toContain("(14)");
+  });
   it("paginates dense days without dropping the last activity", () => {
     const lines = Array.from({ length: 100 }, (_, index) => ({ ...seedData.planLines[0], id: `line-${index}`, calendarId: "ferm", quantity: 10000 + index }));
     const pdf = buildCalendarPdf({ title: "Manufacturing", date: "2026-09-14", view: "month", lines, products: seedData.products, processNames: { ferm: "Fermentation" } });
