@@ -164,9 +164,23 @@ type Row = { order: PurchaseOrder; number: number; rows: OrderProcessRow[]; prod
 type Column = {
   key: string; label: string; numeric?: boolean; required?: boolean;
   sort: (row: Row) => string | number; cell: (row: Row) => ReactNode;
-  filter?: { kind: "text"; text: (row: Row) => string } | { kind: "select"; options: string[]; value: (row: Row) => string };
+  filter?: { kind: "text"; text: (row: Row) => string } | { kind: "select"; options: string[]; value: (row: Row) => string } | { kind: "date"; date: (row: Row) => string | undefined };
 };
 const COLUMN_STORAGE = "scheduler.orderColumns";
+
+// A date column's filter offers the years, months and days its rows actually have, so one choice
+// narrows to any of them. Values are "y:2026", "m:2026-10", "d:2026-10-09", or "none" for no date.
+function dateFilterOptions(dates: (string | undefined)[]) {
+  const known = [...new Set(dates.filter((date): date is string => !!date))].sort().reverse();
+  const month = (key: string) => new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1).toLocaleString("en-GB", { month: "short", year: "numeric" });
+  return {
+    years: [...new Set(known.map((date) => date.slice(0, 4)))],
+    months: [...new Set(known.map((date) => date.slice(0, 7)))].map((key) => ({ key, label: month(key) })),
+    days: known,
+    missing: dates.some((date) => !date)
+  };
+}
+const matchesDate = (date: string | undefined, choice: string) => choice === "none" ? !date : !!date && date.startsWith(choice.slice(2));
 
 function OrdersTable({ action, printable, orders, customerRecords, jobOrders, transfers, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
   customerRecords: Customer[]; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions; action?: ReactNode;
@@ -193,9 +207,9 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
   }
   const columns: Column[] = [
     { key: "number", label: "#", required: true, sort: (row) => row.number, cell: (row) => <span className="order-number-cell" style={{ "--order-color": orderColor(row.number) } as React.CSSProperties}><OrderBadge number={row.number} poNumber={row.order.poNumber} /></span> },
+    { key: "received", label: "PO received", sort: (row) => row.order.receivedDate ?? "", cell: (row) => row.order.receivedDate ? displayDate(row.order.receivedDate) : <span className="route-muted">Not set</span>, filter: { kind: "date", date: (row) => row.order.receivedDate } },
     { key: "customer", label: "Customer", sort: (row) => row.order.customerName ?? "", cell: (row) => { const record = customerRecords.find((item) => item.id === row.order.customerId); return row.order.customerName ? <>{row.order.customerName}{record ? <small>ID {record.code}</small> : null}</> : <span className="route-muted">Not set</span>; }, filter: { kind: "text", text: (row) => `${row.order.customerName ?? ""} ${customerRecords.find((item) => item.id === row.order.customerId)?.code ?? ""}` } },
     { key: "po", label: "PO number", required: true, sort: (row) => `${row.order.poNumber}#${String(poItem(row.order)).padStart(4, "0")}`, cell: (row) => <><strong>{row.order.poNumber}</strong>{poItems(row.order.poNumber, orders).length > 1 ? <small>Item {poItem(row.order)} of {poItems(row.order.poNumber, orders).length}</small> : null}</>, filter: { kind: "text", text: (row) => row.order.poNumber } },
-    { key: "received", label: "PO received", sort: (row) => row.order.receivedDate ?? "", cell: (row) => row.order.receivedDate ? displayDate(row.order.receivedDate) : <span className="route-muted">Not set</span> },
     { key: "product", label: "Product", sort: (row) => row.product?.name ?? "", cell: (row) => row.product?.name ?? "Unknown product", filter: { kind: "text", text: (row) => `${row.product?.name ?? ""} ${row.product?.sku ?? ""}` } },
     { key: "format", label: "Dosage form", sort: (row) => row.format, cell: (row) => <span title={unitRouteLabel(directory, row.order.unitId ?? directory.units[0]?.id, row.format)}>{row.format}</span>, filter: { kind: "select", options: [...PRODUCT_FORMATS], value: (row) => row.format } },
     { key: "quantity", label: "Order qty", numeric: true, sort: (row) => row.order.quantity, cell: (row) => `${row.order.quantity.toLocaleString()} ${row.order.uom}` },
@@ -220,6 +234,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
   const table = all.filter((row) => orderInMonth(row.order, row.rows, row.progress, month, basis) && columns.every((column) => {
     const value = filters[column.key]?.trim().toLowerCase();
     if (!value || !column.filter) return true;
+    if (column.filter.kind === "date") return matchesDate(column.filter.date(row), value);
     return column.filter.kind === "text" ? column.filter.text(row).toLowerCase().includes(value) : column.filter.value(row).toLowerCase() === value;
   })).sort((a, b) => {
     const x = sorter.sort(a), y = sorter.sort(b);
@@ -261,6 +276,13 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
             <th scope="col"><span className="admin-sr-only">Filters</span></th>
             {shown.map((column) => <th scope="col" key={column.key} data-col={column.key}>
               {column.filter?.kind === "text" ? <input type="search" aria-label={`Search ${column.label}`} placeholder="Search" value={filters[column.key] ?? ""} list={column.key === "customer" ? "order-filter-customers" : undefined} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })} /> : null}
+              {column.filter?.kind === "date" ? (() => { const date = column.filter.date; const options = dateFilterOptions(all.map((row) => date(row))); return <select className="date-filter" aria-label={`Filter ${column.label} by year, month or date`} value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })}>
+                <option value="">All</option>
+                {options.years.length ? <optgroup label="Year">{options.years.map((year) => <option key={year} value={`y:${year}`}>{year}</option>)}</optgroup> : null}
+                {options.months.length ? <optgroup label="Month">{options.months.map((month) => <option key={month.key} value={`m:${month.key}`}>{month.label}</option>)}</optgroup> : null}
+                {options.days.length ? <optgroup label="Date">{options.days.map((day) => <option key={day} value={`d:${day}`}>{displayDate(day)}</option>)}</optgroup> : null}
+                {options.missing ? <option value="none">Not set</option> : null}
+              </select>; })() : null}
               {column.filter?.kind === "select" ? <select aria-label={`Filter ${column.label}`} value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })}><option value="">All</option>{column.filter.options.map((option) => <option key={option}>{option}</option>)}</select> : null}
             </th>)}
           </tr>

@@ -313,6 +313,7 @@
 .orders-table > thead > tr:first-child > th { padding-bottom: 4px; }
 .orders-filter-row th { padding-top: 0; }
 .orders-filter-row input, .orders-filter-row select { width: 100%; min-width: 90px; min-height: 30px; padding: 4px 8px; font-size: 13px; font-weight: 400; }
+.orders-filter-row select.date-filter { min-width: 122px; }
 .orders-table .table-sort { display: inline-flex; align-items: center; gap: 4px; min-height: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .orders-table th.numeric .table-sort { flex-direction: row-reverse; }
 .order-toggle-column { width: 40px; }
