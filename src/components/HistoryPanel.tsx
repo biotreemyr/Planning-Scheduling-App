@@ -60,7 +60,7 @@ export function HistoryPanel({ refreshKey }: { refreshKey: string }) {
   }
 
   return <section className="workspace-panel history-panel">
-    <div className="panel-title"><h2>Audit trail <span className="badge neutral">{rows.length}</span></h2>
+    <div className="panel-title"><h2>Changes <span className="badge neutral">{rows.length}</span></h2>
       <div className="calendar-navigation">
         <button type="button" className="calendar-button" onClick={() => setLoads((value) => value + 1)}><RotateCw size={15} />Refresh</button>
         <button type="button" className="calendar-button" disabled={!shown.length} onClick={() => void download()}><FileSpreadsheet size={15} />Download Excel</button>
