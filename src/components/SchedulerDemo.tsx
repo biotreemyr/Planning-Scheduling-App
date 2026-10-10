@@ -45,7 +45,7 @@ import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
 import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 import { formatDate, formatDateTime } from "@/lib/services/dates";
-import type { OrderCatalog } from "@/lib/services/masterProducts";
+import type { OrderCatalog } from "@/lib/services/masterData";
 
 type Tab = "planner" | "orders" | "status" | "master" | "reports" | "audit";
 type PlanningView = "calendar" | "list";
@@ -889,14 +889,15 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
     if (customerErrors.length) return customerErrors;
     const accepted: PurchaseOrder[] = [];
     const errors = items.flatMap((order, index) => {
-      const linked = { ...order, poNumber: order.poNumber.trim(), customerId: customer.id, customerName: (known ?? customer).name.trim() };
+      const linked = { ...order, poNumber: order.poNumber.trim(), customerId: customer.id, customerName: customer.name.trim() };
       const problems = validateOrder(linked, [...data.orders, ...accepted], withTaken);
       if (!problems.length) accepted.push(linked);
       return items.length > 1 ? problems.map((problem) => `Item ${index + 1}: ${problem}`) : problems;
     });
     if (errors.length) return errors;
     if (taken.length) setProducts((current) => [...current.map((product) => taken.find((item) => item.id === product.id) ?? product), ...taken.filter((item) => !current.some((product) => product.id === item.id))]);
-    setData((current) => ({ ...current, customers: known ? current.customers : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted] }));
+    // A customer taken from Master Data may be the scheduler's own, linked now: it replaces the old record.
+    setData((current) => ({ ...current, customers: known ? current.customers.map((item) => item.id === customer.id ? customer : item) : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted] }));
     return [];
   }
   // The plan form. New: one activity per ticked process of the job order's route. Edit: rows with an

@@ -20,6 +20,8 @@ export type Customer = {
   name: string;
   contactNotes?: string;
   active: ActiveState;
+  // Bio Tree Master Data's ID for this customer, once an order has used it from there.
+  masterDataId?: string;
 };
 
 export type Product = {

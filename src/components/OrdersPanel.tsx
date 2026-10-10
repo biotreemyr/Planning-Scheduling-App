@@ -8,7 +8,7 @@ import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, 
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { ProductSelect } from "./ProductSelect";
-import { productFor, type OrderCatalog } from "@/lib/services/masterProducts";
+import { customerFor, productFor, type OrderCatalog } from "@/lib/services/masterData";
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
 import { PRODUCT_FORMATS, inferFormat, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
@@ -66,16 +66,18 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
   onClose: () => void; onDone: (message: string) => void;
 }) {
   const uoms = useUoms();
-  // With Master Data, only its finished goods are offered, each as the scheduler product it becomes.
+  // With Master Data, only its finished goods and customers are offered, each as the scheduler record it becomes.
+  const fromMasterData = catalog?.status === "ok";
   const choices = catalog?.status === "ok" ? catalog.products.map((master) => productFor(master, products)) : products;
+  const customerChoices = catalog?.status === "ok" ? catalog.customers.map((master) => customerFor(master, customers)) : customers.filter((item) => item.active === "Active");
   const [items, setItems] = useState<DraftItem[]>(() => [draftItem()]);
   const [poNumber, setPoNumber] = useState("");
   const [customerCode, setCustomerCode] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [receivedDate, setReceivedDate] = useState(() => localDateKey(new Date()));
-  // A known customer ID fills in its name; a new one is added to the customer list with this PO.
-  const known = customers.find((item) => item.code.trim().toLowerCase() === customerCode.trim().toLowerCase() && customerCode.trim());
+  // A known customer ID fills in its name. Without Master Data, a new one is added to the customer list with this PO.
+  const known = (fromMasterData ? customerChoices : customers).find((item) => item.code.trim().toLowerCase() === customerCode.trim().toLowerCase() && customerCode.trim());
   const [errors, setErrors] = useState<string[]>([]);
   const [version, setVersion] = useState(0);
   const existing = poNumber.trim() ? poItems(poNumber, orders) : [];
@@ -84,6 +86,7 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
   const formatOf = (item: DraftItem) => item.format || inferFormat(choices.find((product) => product.id === item.productId));
   return <form key={version} className="form-panel orders-form" onSubmit={(event) => {
     event.preventDefault();
+    if (fromMasterData && !known) { setErrors([`Customer ID ${customerCode.trim()} is not in Master Data. Choose a customer from the list.`]); return; }
     const data = new FormData(event.currentTarget);
     const createdAt = new Date().toISOString();
     let number = nextOrderNumber(orders);
@@ -104,8 +107,8 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
   }}>
     <div className="panel-title"><h2 id="new-order-title">New order</h2><button className="icon-button" type="button" aria-label="Close new order" title="Close" onClick={onClose}><X size={18} /></button></div>
     <label>Customer ID<input name="customerId" required maxLength={40} list="order-customers" placeholder="Type or choose, e.g. C0012" value={customerCode} onChange={(event) => setCustomerCode(event.target.value)} /></label>
-    <datalist id="order-customers">{customers.filter((item) => item.active === "Active").map((item) => <option key={item.id} value={item.code}>{item.name}</option>)}</datalist>
-    <label>Customer name<input name="customer" required maxLength={120} placeholder={known ? "" : "New customer's name"} readOnly={!!known} value={known ? known.name : customerName} onChange={(event) => setCustomerName(event.target.value)} /></label>
+    <datalist id="order-customers">{customerChoices.map((item) => <option key={item.id} value={item.code}>{item.name}</option>)}</datalist>
+    <label>Customer name<input name="customer" required maxLength={120} placeholder={fromMasterData ? "Filled in from Master Data" : known ? "" : "New customer's name"} readOnly={!!known || fromMasterData} value={known ? known.name : fromMasterData ? "" : customerName} onChange={(event) => setCustomerName(event.target.value)} /></label>
     <label>PO number<input name="po" required maxLength={60} placeholder="e.g. PO-2610-140" value={poNumber} onChange={(event) => {
       setPoNumber(event.target.value);
       // An existing PO keeps its customer.
@@ -115,7 +118,7 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
     }} /></label>
     <label>PO received date<input name="receivedDate" type="date" required max={localDateKey(new Date())} value={receivedDate} onChange={(event) => setReceivedDate(event.target.value)} /></label>
     <label>Expected customer delivery<input name="deliveryDate" type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
-    {customerCode.trim() && !known ? <p className="orders-help" role="status">New customer ID {customerCode.trim()}: it is added to the customer list with this PO.</p> : null}
+    {customerCode.trim() && !known ? <p className="orders-help" role="status">{fromMasterData ? `Customer ID ${customerCode.trim()} is not in Master Data's customer list. Customers are added in SQL Account and imported into Master Data.` : `New customer ID ${customerCode.trim()}: it is added to the customer list with this PO.`}</p> : null}
     {catalog?.status === "unavailable" ? <p className="orders-help" role="status">Bio Tree Master Data could not be reached, so the products listed are the scheduler&apos;s own. Reload to try again.</p> : null}
     {existing.length ? <p className="orders-help" role="status">{existing[0].poNumber} already has {existing.length} item{existing.length === 1 ? "" : "s"}{existing[0].customerName ? ` for ${existing[0].customerName}` : ""}. These are added as item {firstItem}{items.length > 1 ? ` to ${firstItem + items.length - 1}` : ""}.</p> : null}
     <fieldset className="order-items">
