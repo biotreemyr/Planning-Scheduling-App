@@ -5,6 +5,7 @@ import { FormEvent, Fragment, useMemo, useState, type ReactNode } from "react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { StatusBadge } from "@/components/StatusBadge";
 import PlanningCalendar from "@/components/PlanningCalendar";
+import { ToolbarMenu } from "@/components/ToolbarMenu";
 import { ActivityWorkspace } from "@/components/ActivityWorkspace";
 import { CalendarAdmin } from "@/components/CalendarAdmin";
 import { CatalogAdmin } from "@/components/CatalogAdmin";
@@ -210,19 +211,22 @@ function PlannerBoard({
         <div className="panel-title planner-title">
           <h2>Production plan</h2>
           {filterControls}
+          <label className="planning-search"><span className="admin-sr-only">Search plans</span><input type="search" placeholder="Search product, order, remarks" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <ToolbarMenu label="Filters" badge={[priorityFilter, statusFilter].filter(Boolean).length || undefined} active={!!(priorityFilter || statusFilter)}>
+            <div className="toolbar-menu-fields">
+              <label>Priority<select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="">All priorities</option>{priorities.map((value) => <option key={value}>{value}</option>)}</select></label>
+              <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{["Unscheduled", "Partially Scheduled", "Fully Scheduled"].map((value) => <option key={value}>{value}</option>)}</select></label>
+              {priorityFilter || statusFilter ? <button type="button" className="calendar-button" onClick={() => { setPriorityFilter(""); setStatusFilter(""); }}>Clear filters</button> : null}
+            </div>
+          </ToolbarMenu>
+          <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} />
+          <span className="result-count" aria-live="polite">{visibleLines.length} of {planLines.length} lines</span>
           <div className="view-switch" aria-label="Planning view">
             <button type="button" aria-pressed={planningView === "calendar"} onClick={() => setPlanningView("calendar")}>Calendar</button>
             <button type="button" aria-pressed={planningView === "list"} onClick={() => setPlanningView("list")}>List</button>
           </div>
         </div>
-        <div className="operational-filters">
-          <label className="planning-search">Search plans<input type="search" placeholder="Product, order or remarks" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          <label>Priority<select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="">All priorities</option>{priorities.map((value) => <option key={value}>{value}</option>)}</select></label>
-          <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{["Unscheduled", "Partially Scheduled", "Fully Scheduled"].map((value) => <option key={value}>{value}</option>)}</select></label>
-          <span className="result-count" aria-live="polite">{visibleLines.length} of {planLines.length} lines</span>
-        </div>
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
-        <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
         <PlanningCalendar canPrint={canPrint} processNames={processNames} processSettings={processSettings} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onResize={onResizeLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
           const result = onJobPlan(plan, mode);
@@ -240,8 +244,8 @@ function JobOrderQueue({ jobOrders, orders, products, lines, calendars }: { jobO
   // Every activity of the job counts, even in processes filtered out of view.
   const waiting = jobOrders.filter((job) => !lines.some((line) => line.jobOrderId === job.id) && calendars.length > 0 && inUnit(job, orders, calendars[0]?.unitId));
   if (!waiting.length) return null;
-  return <details className="job-queue">
-    <summary>Job orders waiting to be planned <span className="badge info">{waiting.length}</span></summary>
+  return <ToolbarMenu className="job-queue" label="Waiting to plan" badge={waiting.length} active>
+    <p className="job-queue-title">Job orders waiting to be planned</p>
     <ul>{waiting.map((job) => {
       const order = orders.find((item) => item.id === job.orderId);
       const product = products.find((item) => item.id === order?.productId);
@@ -249,7 +253,7 @@ function JobOrderQueue({ jobOrders, orders, products, lines, calendars }: { jobO
         <span><strong>{job.number}</strong> · {product?.name ?? "Unknown product"} · {job.quantity.toLocaleString()} {job.uom}{job.batchSizeKg ? ` (${job.batchSizeKg.toLocaleString()} kg)` : job.batchVolumeL ? ` (${job.batchVolumeL.toLocaleString()} L)` : ""}<small>{order ? `${order.poNumber}${order.customerName ? ` · ${order.customerName}` : ""}` : ""}{job.batchNumber ? ` · Batch no. ${job.batchNumber}` : ""}</small></span>
       </li>;
     })}</ul>
-  </details>;
+  </ToolbarMenu>;
 }
 
 function ScheduleBoard({
@@ -1135,19 +1139,20 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
   // The unit picker shows only when there is more than one unit to choose from (BTP alone today).
   const filterControls = <div className="calendar-filters">
     {availableUnits.length > 1 ? <label>Unit<select value={unit?.id ?? ""} disabled={!unit} onChange={(event) => { setUnitSelection(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{!unit ? <option value="">No unit assigned</option> : availableUnits.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
-    <fieldset className="process-ticks"><legend>Processes</legend>
-      <label><input type="checkbox" checked={unitCalendars.length > 0 && visibleCalendars.length === unitCalendars.length} onChange={(event) => { setProcessSelection(event.target.checked ? null : []); setSelectedActivity(null); }} />All</label>
-      {unitCalendars.map((item) => <label key={item.id}><input type="checkbox" checked={visibleCalendars.some((entry) => entry.id === item.id)} onChange={(event) => { const ids = visibleCalendars.map((entry) => entry.id); setProcessSelection(event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id)); setSelectedActivity(null); }} />{item.name}</label>)}
-    </fieldset>
+    {/* Which processes the calendar and list show, in route order, tucked in a menu. */}
+    <ToolbarMenu label="Processes" badge={visibleCalendars.length === unitCalendars.length ? "All" : `${visibleCalendars.length} of ${unitCalendars.length}`} active={visibleCalendars.length !== unitCalendars.length}>
+      <fieldset className="process-ticks"><legend>Show processes</legend>
+        <label className="process-all"><input type="checkbox" checked={unitCalendars.length > 0 && visibleCalendars.length === unitCalendars.length} onChange={(event) => { setProcessSelection(event.target.checked ? null : []); setSelectedActivity(null); }} />All processes</label>
+        {unitCalendars.map((item) => <label key={item.id}><input type="checkbox" checked={visibleCalendars.some((entry) => entry.id === item.id)} onChange={(event) => { const ids = visibleCalendars.map((entry) => entry.id); setProcessSelection(event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id)); setSelectedActivity(null); }} />{item.name}</label>)}
+      </fieldset>
+    </ToolbarMenu>
   </div>;
   return <main className="workstation">
     <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
       statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }] : [])]}
       statusSection={statusSection} onStatusSection={setStatusSection} />
     <div className="workstation-content">
-      <header className="workstation-topbar"><span>Bio Tree / Production</span>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
-      {persistenceStatus}
-      {activeTab !== "planner" ? <div className="workspace-heading"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1></div> : null}
+      <header className="workstation-topbar"><div className="topbar-title"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>{persistenceStatus}</div>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}

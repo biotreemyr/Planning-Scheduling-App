@@ -1,5 +1,5 @@
 import { jsPDF } from "jspdf";
-import { listPrintCells, printDates, printedActivity, printedListActivity, type CalendarPrintInput, type ListPrintInput } from "./calendarPrint";
+import { WEEKDAY_HEADINGS, dayNumber, inMonth, listPrintCells, periodLabel, printDates, printedActivity, printedListActivity, type CalendarPrintInput, type ListPrintInput } from "./calendarPrint";
 import { monthDates } from "./planningMonth";
 import { formatDate, weekday } from "./dates";
 
@@ -11,12 +11,25 @@ export function buildCalendarPdf(input: CalendarPdfInput) {
   const width = 277 / columns;
   const lineHeight = 3.5;
   const minimumRowHeight = input.view === "month" ? 26 : 18;
-  let y = 34;
+  const month = input.view === "month";
+  // A month names the weekdays once, in a row along the top of each page; its cells carry day numbers.
+  const weekdayRow = 6;
+  const top = month ? 34 + weekdayRow : 34;
+  let y = top;
   function header() {
     doc.setFont("helvetica", "bold").setFontSize(15);
     doc.text(doc.splitTextToSize(`Unit: ${input.title}`, 275).slice(0, 2), 10, 13);
     doc.setFont("helvetica", "normal").setFontSize(9);
-    doc.text(`${input.view.toUpperCase()} PLAN | ${input.view === "month" ? input.date.slice(0, 7) : `${dates[0]} to ${dates.at(-1)}`}`, 10, 28);
+    doc.text(`${input.view.toUpperCase()} PLAN | ${periodLabel(input.date, input.view, dates)}`, 10, 28);
+    if (month) {
+      WEEKDAY_HEADINGS.forEach((name, index) => {
+        const x = 10 + index * width;
+        doc.setFillColor(238, 243, 247).setDrawColor(160).setLineWidth(0.2).rect(x, 34, width, weekdayRow, "FD");
+        doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(index > 4 ? 177 : 0, index > 4 ? 58 : 0, index > 4 ? 50 : 0);
+        doc.text(name, x + 2.5, 38.2);
+      });
+      doc.setTextColor(0);
+    }
     doc.setFontSize(8);
   }
   header();
@@ -29,16 +42,19 @@ export function buildCalendarPdf(input: CalendarPdfInput) {
     }));
     let continuation = false;
     do {
-      if (y > 196 - minimumRowHeight) { doc.addPage(); header(); y = 34; }
+      if (y > 196 - minimumRowHeight) { doc.addPage(); header(); y = top; }
       const maxLines = Math.max(1, Math.floor((196 - y - 11) / lineHeight));
       const count = Math.min(maxLines, Math.max(1, ...contents.map((lines) => lines.length)));
       const height = Math.max(minimumRowHeight, 11 + count * lineHeight);
       days.forEach((day, index) => {
         const x = 10 + index * width;
+        const outside = month && !inMonth(day, input.date);
+        if (outside) doc.setFillColor(240, 241, 239).rect(x, y, width, height, "F");
         doc.setDrawColor(160).setLineWidth(0.2).rect(x, y, width, height);
-        doc.setFont("helvetica", "bold").setFontSize(8);
-        const label = `${weekday(day)} ${formatDate(day)}`;
+        doc.setFont("helvetica", "bold").setFontSize(month ? 9.5 : 8).setTextColor(outside ? 138 : 0, outside ? 144 : 0, outside ? 150 : 0);
+        const label = month ? dayNumber(day) : `${weekday(day)} ${formatDate(day)}`;
         doc.text(`${label}${continuation ? " (cont.)" : ""}`, x + 2.5, y + 5);
+        doc.setTextColor(0);
         doc.setFont("helvetica", "normal").setFontSize(8);
         const chunk = contents[index].splice(0, count);
         chunk.forEach((text, line) => doc.text(text, x + 2.5, y + 10 + line * lineHeight));

@@ -30,9 +30,11 @@ describe("schedule as Excel", () => {
   it("lays the calendar out as weeks, like the calendar PDF", async () => {
     const book = await reload(buildCalendarWorkbook(ExcelJS, { title: "Manufacturing", date: "2026-10-01", view: "month", lines, products: seedData.products, processNames: {}, orders, jobOrders: [job] }));
     const sheet = book.getWorksheet("Month plan")!;
-    expect(sheet.getCell("A2").value).toBe("MONTH PLAN | 2026-10");
+    expect(sheet.getCell("A2").value).toBe("MONTH PLAN | October 2026");
+    // Weekdays head the columns once; each cell names its day by number only.
     expect(sheet.getRow(4).values).toEqual([, "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
     // 19 Oct 2026 is the Monday of the fourth week row.
-    expect(String(sheet.getCell("A8").value)).toMatch(/^Mon 19\/10\/2026[\s\S]*Batch FA-050/);
+    expect(String(sheet.getCell("A8").value)).toMatch(/^19\n\n[\s\S]*Batch FA-050/);
+    expect(String(sheet.getCell("A5").value)).toBe("28");
   });
 });

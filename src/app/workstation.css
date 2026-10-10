@@ -633,3 +633,86 @@
 .process-form { display: grid; gap: 10px; max-width: 560px; }
 .process-optional { display: flex; align-items: center; gap: 8px; }
 .process-optional input { width: 16px; height: 16px; }
+
+/* Compact layout: one slim header row per tab (title, save status, user), and toolbars whose
+   occasional options open in menus, so the calendar, list and tables start near the top. */
+.workstation .workstation-topbar { min-height: 0; padding: 10px 0; margin-bottom: 12px; }
+.topbar-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.topbar-title h1 { margin: 0; font-size: 20px; line-height: 1.3; color: var(--ink); }
+.topbar-title .persistence-status { padding: 2px 10px; gap: 8px; border-radius: 999px; background: var(--green-soft); color: #2f5f49; font-size: 12px; }
+.topbar-title .persistence-status.persistence-error { padding: 4px 10px; border: 1px solid #d3aaaa; border-radius: 8px; background: var(--red-soft); color: #9f3030; }
+.topbar-title .persistence-status .calendar-button { min-height: 28px; padding: 3px 8px; font-size: 12px; }
+@media (max-width: 760px) { .topbar-title h1 { font-size: 18px; } }
+
+/* Planner Board: title and its controls on one row; the calendar's own toolbar on the next. */
+.workstation .planner-grid .workspace-panel { padding: 12px 14px; }
+.workstation .planner-title { flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.workstation .planner-title h2 { font-size: 16px; margin-right: 4px; }
+.planner-title .calendar-filters { flex: none; margin: 0; gap: 8px; align-items: center; }
+.planner-title .calendar-filters > label { width: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.planner-title .calendar-filters > label select { min-height: 32px; padding: 4px 8px; }
+.planner-title .planning-search { flex: 0 1 230px; margin: 0; }
+.planner-title .planning-search input { min-height: 32px; padding: 5px 10px; font-size: 13px; }
+.planner-title .result-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.planner-title .view-switch button { min-height: 32px; padding: 5px 12px; }
+.workstation .planning-calendar .calendar-toolbar { align-items: center; gap: 8px; margin-bottom: 8px; }
+.workstation .planning-calendar .calendar-navigation { gap: 6px; }
+.workstation .planning-calendar .calendar-navigation h3 { font-size: 15px; margin-left: 4px; }
+.workstation .planning-calendar .icon-button { width: 32px; height: 32px; }
+.workstation .planning-calendar .calendar-button, .workstation .planning-calendar .view-switch button { min-height: 32px; padding: 5px 12px; }
+.workstation .planning-calendar .primary-button { min-height: 32px; padding: 5px 12px; }
+.workstation .planning-calendar .calendar-navigation input[type="date"] { min-height: 32px; padding: 4px 8px; width: 140px; }
+
+/* Toolbar menus (Processes, Filters, Waiting to plan). */
+.toolbar-menu { position: relative; flex: none; }
+.toolbar-menu-button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink); font-size: 13px; white-space: nowrap; }
+.toolbar-menu-button.active { border-color: #9cc9b6; background: var(--green-soft); }
+.toolbar-menu-button[aria-expanded="true"] { border-color: var(--green); }
+.toolbar-menu-badge { padding: 0 7px; border-radius: 999px; background: var(--gray-soft); color: var(--ink); font-size: 12px; font-weight: 600; line-height: 18px; }
+.toolbar-menu-button.active .toolbar-menu-badge { background: white; color: #2f5f49; }
+.toolbar-menu-panel { position: absolute; top: calc(100% + 4px); z-index: 60; min-width: 220px; max-width: min(460px, calc(100vw - 32px)); max-height: 380px; overflow-y: auto; padding: 10px 12px; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 22px #14241f26; }
+.toolbar-menu-panel.left { left: 0; }
+.toolbar-menu-panel.right { right: 0; }
+.toolbar-menu-panel .process-ticks { display: grid; gap: 2px; padding: 0; }
+.toolbar-menu-panel .process-ticks legend { float: none; margin: 0 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.toolbar-menu-panel .process-ticks label { padding: 5px 4px; border-radius: 4px; font-size: 13px; cursor: pointer; }
+.toolbar-menu-panel .process-ticks label:hover { background: var(--gray-soft); }
+.toolbar-menu-panel .process-ticks .process-all { margin-bottom: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line); border-radius: 0; font-weight: 600; }
+.toolbar-menu-fields { display: grid; gap: 10px; min-width: 220px; }
+.toolbar-menu-fields label { font-size: 12px; }
+.toolbar-menu-fields select { min-height: 34px; margin-top: 4px; }
+.toolbar-menu.job-queue { margin: 0; padding: 0; border: 0; background: transparent; }
+.toolbar-menu.job-queue .toolbar-menu-panel { width: 420px; }
+.job-queue-title { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.toolbar-menu.job-queue ul { margin: 0; }
+
+/* Other tabs: section headings and toolbars sit closer to their tables. */
+.workstation .workspace-panel .panel-title { margin-bottom: 10px; }
+.workstation .orders-toolbar { margin-bottom: 8px; }
+.toolbar-menu-panel .process-ticks label { display: flex; align-items: center; gap: 8px; }
+.toolbar-menu-panel input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; flex: none; }
+/* Orders: title, month, columns, print and New order on one row. */
+.workstation .orders-toolbar { align-items: center; gap: 8px 10px; }
+.workstation .orders-toolbar h2 { margin: 0 6px 0 0; font-size: 16px; white-space: nowrap; }
+.workstation .orders-toolbar .orders-month { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0; border: 0; }
+.workstation .orders-toolbar .orders-month legend { float: left; margin: 0 2px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
+.workstation .orders-toolbar select, .workstation .orders-toolbar input { min-height: 32px; padding: 4px 8px; font-size: 13px; }
+.workstation .orders-toolbar .calendar-button, .workstation .orders-toolbar .primary-button, .workstation .orders-toolbar summary.calendar-button { min-height: 32px; padding: 5px 12px; }
+.workstation .orders-toolbar .result-count { font-size: 12px; color: var(--muted); }
+@media (max-width: 760px) { .planner-title .calendar-filters { flex-basis: auto; order: 0; } }
+
+/* Printed month: weekday names once along the top (repeated on each page), day numbers in cells. */
+@media print {
+  .print-month-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+  .print-month-table thead { display: table-header-group; }
+  .print-month-table th { padding: 1.5mm 2mm; border: 1px solid #999; background: #eef3f7; font-size: 9pt; text-align: left; }
+  .print-month-table th.print-weekend { color: #b13a32; }
+  .print-month-table td { height: 24mm; padding: 1.5mm 2mm; border: 1px solid #999; vertical-align: top; overflow-wrap: anywhere; }
+  .print-month-table tr { break-inside: avoid; }
+  .print-month-table td.print-weekend { background: #f7f8f6; }
+  .print-month-table td.print-other-month { background: #f0f1ef; color: #8a9096; }
+  .print-day-number { display: block; font-size: 10pt; font-weight: 700; }
+  .print-month-table article { margin: 1.5mm 0 0; padding-top: 1mm; border-top: 1px solid #bbb; break-inside: avoid; }
+  .print-month-table article strong { font-size: 8.5pt; }
+  .print-month-table article p { margin: 0.5mm 0 0; font-size: 7.5pt; }
+}

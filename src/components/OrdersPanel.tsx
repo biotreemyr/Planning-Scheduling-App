@@ -238,8 +238,8 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
   });
   const filtering = !!month || Object.values(filters).some((value) => value.trim());
   return <div className="workspace-panel orders-list">
-    <div className="panel-title"><h2>Customer orders <span className="badge neutral">{orders.length}</span></h2>{action}</div>
     <div className="orders-toolbar">
+      <h2>Customer orders <span className="badge neutral">{orders.length}</span></h2>
       <fieldset className="orders-month"><legend>Month</legend>
         <select aria-label="Month based on" value={basis} onChange={(event) => setBasis(event.target.value as MonthBasis)}>
           <option value="scheduled">Scheduled in</option><option value="expected">Expected delivery in</option><option value="received">PO received in</option><option value="created">Order created in</option>
@@ -253,6 +253,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
       {filtering ? <button type="button" className="calendar-button" onClick={() => { setFilters({}); setMonth(""); }}><X size={16} />Clear filters</button> : null}
       {printable ? <button type="button" className="calendar-button" onClick={() => setPrint((current) => ({ request: current.request + 1 }))} title="Print the orders shown, or save as PDF"><Printer size={16} />Print summary</button> : null}
       <span className="result-count" aria-live="polite">{table.length} of {orders.length} orders</span>
+      {action}
     </div>
     <div className="orders-table-scroll" tabIndex={0} role="region" aria-label="Customer orders">
       <table className="orders-table">
