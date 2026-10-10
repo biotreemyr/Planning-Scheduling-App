@@ -24,6 +24,8 @@ export type PurchaseOrder = {
   deliveryDate?: string;
   // When the customer's PO was received (YYYY-MM-DD).
   receivedDate?: string;
+  // The SQL Account sales order (SO) number for this PO, keyed in by the planner for reference.
+  soNumber?: string;
   // Per-process expected completion dates from before delivery dates; no longer entered or shown.
   expectedDates: Record<string, string>;
   notes?: string; createdAt: string; createdBy: string;

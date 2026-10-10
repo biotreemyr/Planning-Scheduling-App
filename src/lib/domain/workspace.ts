@@ -51,7 +51,7 @@ export const workspaceSchema = z.object({
       orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional(),
       wipRoom: z.boolean().optional() })),
     // Added after the first pilot release; older snapshots load with no orders.
-    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), customerId: id.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), unitId: id.optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date), deliveryDate: date.optional(), receivedDate: date.optional(),
+    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), customerId: id.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), unitId: id.optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date), deliveryDate: date.optional(), receivedDate: date.optional(), soNumber: z.string().trim().max(60).optional(),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([]),
     // Customer master and job orders came later still; older snapshots load with none.
     customers: z.array(z.object({ id, code: name, name, contactNotes: text.optional(), active, masterDataId: z.string().uuid().optional() })).default([]),

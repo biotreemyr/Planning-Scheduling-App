@@ -39,11 +39,11 @@ export function RecordPicker<T extends { id: string }>({ label, name, records, c
   }, [open]);
   const selected = records.find((record) => display(record) === query);
   const text = (record: T) => columns.map((column) => column.value(record)).join(" ").toLowerCase();
-  const matches = records.filter((record) => (selected || text(record).includes(query.trim().toLowerCase()))
-    && columns.every((column) => !filters[column.key]?.trim() || column.value(record).toLowerCase().includes(filters[column.key].trim().toLowerCase())));
+  const filtered = (record: T) => columns.every((column) => !filters[column.key]?.trim() || column.value(record).toLowerCase().includes(filters[column.key].trim().toLowerCase()));
+  const matches = records.filter((record) => (selected || text(record).includes(query.trim().toLowerCase())) && filtered(record));
   useEffect(() => { input.current?.setCustomValidity(query && !selected ? `Choose a ${noun} from the list.` : ""); }, [query, selected, noun]);
   useEffect(() => { if (active >= matches.length) setActive(Math.max(0, matches.length - 1)); }, [active, matches.length]);
-  useEffect(() => { if (open) box.current?.querySelector(`[data-row="${active}"]`)?.scrollIntoView({ block: "nearest" }); }, [active, open]);
+  useEffect(() => { if (open) box.current?.querySelector(`[data-row="${active}"]`)?.scrollIntoView?.({ block: "nearest" }); }, [active, open]);
 
   function choose(record: T) {
     const shown = display(record);
@@ -62,7 +62,11 @@ export function RecordPicker<T extends { id: string }>({ label, name, records, c
     <div className="record-picker-input">
       <input id={id} ref={input} role="combobox" aria-expanded={open} aria-controls={`${id}-table`} aria-autocomplete="list" type="text" required autoComplete="off" placeholder={placeholder} value={query} title={query}
         onFocus={() => { if (!quiet.current) setOpen(true); }} onClick={() => setOpen(true)} onKeyDown={keys}
-        onChange={(event) => { const next = event.target.value; setQuery(next); setActive(0); setOpen(true); onText?.(next); onChange?.(records.find((record) => display(record) === next)?.id ?? ""); }} />
+        onChange={(event) => {
+          // Typing a record's code exactly shows the whole list again: highlight that record in the same
+          // update, so an Enter that follows at once (a fast typist, a scanner) keeps it.
+          const next = event.target.value, exact = records.find((record) => display(record) === next);
+          setQuery(next); setActive(exact ? Math.max(0, records.filter(filtered).indexOf(exact)) : 0); setOpen(true); onText?.(next); onChange?.(records.find((record) => display(record) === next)?.id ?? ""); }} />
       <button type="button" className="record-picker-toggle" aria-label={`Show ${noun}s`} title={`Show ${noun}s`} onMouseDown={(event) => event.preventDefault()} onClick={() => { input.current?.focus(); setOpen(!open); }}><ChevronDown size={16} /></button>
     </div>
     {open ? <div className="record-picker-panel" id={`${id}-table`} style={place}>
