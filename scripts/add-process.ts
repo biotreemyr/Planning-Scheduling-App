@@ -1,8 +1,8 @@
 // One-off: add a process to a unit, placed right after another of its processes (Admin adds new
 // processes at the end). Dry run by default; pass --apply to save. Take a backup first.
 //   npx vite-node --config vitest.config.ts scripts/add-process.ts "BTP - Production" Granulation Dispensing [--apply]
-import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { createDatabase } from "@/lib/persistence/client";
 import { workspaceRepository } from "@/lib/persistence/repository";
 import { parseWorkspace } from "@/lib/domain/workspace";
 
@@ -12,7 +12,7 @@ if (!unitName || !processName || !afterName) throw new Error("Usage: add-process
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const slug = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
-const db = new PrismaClient();
+const db = createDatabase();
 const repository = workspaceRepository(db);
 try {
   const { revision, snapshot } = await repository.load();
@@ -37,5 +37,5 @@ try {
   });
   console.log(`Saved as revision ${saved}.`);
 } finally {
-  await db.$disconnect();
+  await db.$client.end();
 }

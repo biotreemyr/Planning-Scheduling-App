@@ -9,7 +9,7 @@ are inserted after initialisation. The starter administrator is created only whe
 the workspace does not exist.
 
 The first implementation uses a versioned JSONB aggregate in SchedulerWorkspace,
-managed through Prisma. This preserves the current evolving data model and makes
+managed through Drizzle. This preserves the current evolving data model and makes
 multi-record production completion atomic. The older relational tables are still
 scaffolding, not a second source of truth. Normalized per-entity APIs and verified
 user authorization are required before shared deployment or larger scale use.
@@ -33,7 +33,6 @@ commit credentials. For localhost only, set SCHEDULER_AUTH_MODE=demo and
 SCHEDULER_PERSISTENCE=local.
 
     npm ci
-    npm run db:generate
     npm run db:migrate
     npm run dev -- --port 3001
 
@@ -63,14 +62,26 @@ For recovery, create a NEW empty database, set RESTORE_DATABASE_URL to it, then:
 
 The restore script refuses the active database and any non-empty destination.
 Verify recovered records, then deliberately update DATABASE_URL and restart.
-Never run prisma migrate reset or db push --accept-data-loss on pilot data.
+Never run drizzle-kit push, or any reset/drop, against pilot data.
+
+## Schema changes (Drizzle)
+
+The tables are defined in src/lib/persistence/schema.ts. After changing it, run
+npm run db:generate to write a new SQL migration into drizzle/, review it, and
+commit it. npm run db:migrate applies pending migrations.
+
+drizzle/0000_prisma_baseline.sql reproduces exactly what the earlier Prisma
+migrations built. On a database that Prisma already migrated (it has the
+_prisma_migrations table), db:migrate records the baseline as applied instead of
+running it, so existing tables and data are untouched. Leave _prisma_migrations
+in place; drizzle.config.ts excludes it from Drizzle's view.
 
 ## Deploying updates
 
 1. Test changes against the separate test database.
 2. Take a fresh backup and verify restore capability.
 3. Review migration SQL; use additive/compatible migrations first.
-4. Run prisma migrate deploy and prisma generate, then build/restart.
+4. Run npm run db:migrate, then build/restart.
 5. Check saved records and save status after restart. Reload existing clients
    after saving or exporting pending edits, because session tokens rotate.
 

@@ -29,7 +29,7 @@ const withClerk = clerkMiddleware(async (auth) => {
   await auth.protect({ unauthenticatedUrl: signInUrl });
 });
 
-export default function middleware(request: NextRequest, event: Parameters<typeof withClerk>[1]) {
+export default function proxy(request: NextRequest, event: Parameters<typeof withClerk>[1]) {
   if (!clerkConfigured) return NextResponse.next();
   return withClerk(request, event);
 }

@@ -31,7 +31,7 @@ before fetching/returning data. Updating a record uses both record ID and team I
 creating uses the validated team ID and checks linked plan/order ownership. Never
 fetch all teams and filter on the client. Admin roles have no implicit team bypass.
 
-Prisma defines Department/ProjectTeam and nullable teamId on existing records for
+The database schema defines Department/ProjectTeam and nullable teamId on existing records for
 future migration. Backfill ownership explicitly before enabling live reads; null
 does not mean public. No database migration was run in this client-state MVP.
 

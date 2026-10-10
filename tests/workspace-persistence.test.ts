@@ -1,7 +1,9 @@
 import { describe, expect, it, afterAll } from "vitest";
-import { PrismaClient } from "@prisma/client";
+import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
+import { createDatabase } from "../src/lib/persistence/client";
+import { schedulerWorkspace, schedulerWorkspaceRevision } from "../src/lib/persistence/schema";
 import { workspaceRepository, RevisionConflict } from "../src/lib/persistence/repository";
 import { localPersistenceAllowed, sameLocalOrigin } from "../src/lib/persistence/access";
 
@@ -35,12 +37,12 @@ describe("workspace boundary", () => {
 
 const enabled = !!process.env.TEST_DATABASE_URL;
 describe.skipIf(!enabled)("PostgreSQL round trips", () => {
-  const db = enabled ? new PrismaClient({ datasourceUrl: process.env.TEST_DATABASE_URL }) : null!;
+  const db = enabled ? createDatabase(process.env.TEST_DATABASE_URL) : null!;
   const ids: string[] = [];
   const create = () => { const id = `test-${randomUUID()}`; ids.push(id); return { id, repository: workspaceRepository(db, id) }; };
   afterAll(async () => {
-    for (const id of ids) { await db.schedulerWorkspaceRevision.deleteMany({ where: { workspaceId: id } }); await db.schedulerWorkspace.deleteMany({ where: { id } }); }
-    await db.$disconnect();
+    for (const id of ids) { await db.delete(schedulerWorkspaceRevision).where(eq(schedulerWorkspaceRevision.workspaceId, id)); await db.delete(schedulerWorkspace).where(eq(schedulerWorkspace.id, id)); }
+    await db.$client.end();
   });
   it("saves and reloads configuration and measurement settings without reseeding", async () => {
     const { repository, id } = create(); const initial = await repository.load();
@@ -48,9 +50,9 @@ describe.skipIf(!enabled)("PostgreSQL round trips", () => {
     initial.snapshot.products.push({ id: "product", sku: "P-001", name: "Durable Product", uom: "boxes", productType: "Finished Good", active: "Active" });
     initial.snapshot.measurements.uoms.push({ name: "trays", active: true });
     expect(await repository.save(initial.snapshot, 0, randomUUID())).toBe(1);
-    const secondClient = new PrismaClient({ datasourceUrl: process.env.TEST_DATABASE_URL });
-    try { expect((await workspaceRepository(secondClient, id).load()).snapshot).toEqual(initial.snapshot); } finally { await secondClient.$disconnect(); }
-    expect(await db.schedulerWorkspaceRevision.count({ where: { workspaceId: id } })).toBe(1);
+    const secondClient = createDatabase(process.env.TEST_DATABASE_URL);
+    try { expect((await workspaceRepository(secondClient, id).load()).snapshot).toEqual(initial.snapshot); } finally { await secondClient.$client.end(); }
+    expect(await db.$count(schedulerWorkspaceRevision, eq(schedulerWorkspaceRevision.workspaceId, id))).toBe(1);
   });
   it("atomically rejects stale concurrent writes and supports retrying the same save", async () => {
     const { repository } = create(); const initial = await repository.load();

@@ -2,13 +2,13 @@
 // production result and WIP handover; Admin set-up, products and customers stay.
 // Dry run by default; pass --apply to save. Take a backup first (npm run db:backup).
 //   npx vite-node --config vitest.config.ts scripts/clear-orders.ts [--apply]
-import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { createDatabase } from "@/lib/persistence/client";
 import { workspaceRepository } from "@/lib/persistence/repository";
 import { parseWorkspace } from "@/lib/domain/workspace";
 
 const apply = process.argv.includes("--apply");
-const db = new PrismaClient();
+const db = createDatabase();
 const repository = workspaceRepository(db);
 try {
   const { revision, snapshot } = await repository.load();
@@ -23,5 +23,5 @@ try {
   });
   console.log(`Saved as revision ${saved}.`);
 } finally {
-  await db.$disconnect();
+  await db.$client.end();
 }

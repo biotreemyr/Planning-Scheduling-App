@@ -1,14 +1,14 @@
 // One-off: fold "Manufacturing (Sample)" into "BTP - Production" and remove the empty BTB unit.
 // Dry run by default; pass --apply to save. Take a backup first (npm run db:backup).
 //   DATABASE_URL=... npx vite-node --config vitest.config.ts scripts/merge-sample-unit.ts [--apply]
-import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { createDatabase } from "@/lib/persistence/client";
 import { workspaceRepository } from "@/lib/persistence/repository";
 import { mergeSampleUnit } from "@/lib/domain/unitMerge";
 import { parseWorkspace } from "@/lib/domain/workspace";
 
 const apply = process.argv.includes("--apply");
-const db = new PrismaClient();
+const db = createDatabase();
 const repository = workspaceRepository(db);
 const named = (name: string, units: { id: string; name: string }[]) => {
   const unit = units.find((item) => item.name.trim().toLowerCase() === name.toLowerCase());
@@ -40,5 +40,5 @@ try {
   });
   console.log(`Saved as revision ${saved}.`);
 } finally {
-  await db.$disconnect();
+  await db.$client.end();
 }
