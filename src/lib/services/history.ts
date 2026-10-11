@@ -56,6 +56,8 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
       old.format !== row.format ? `dosage form ${str(old.format) || "-"} → ${str(row.format)}` : "",
       old.receivedDate !== row.receivedDate ? `PO received ${str(old.receivedDate) || "-"} → ${str(row.receivedDate) || "-"}` : "",
       (old.soNumber ?? "") !== (row.soNumber ?? "") ? `SO number ${str(old.soNumber) || "-"} → ${str(row.soNumber) || "-"}` : "",
+      old.unitWeightMg !== row.unitWeightMg ? `unit weight ${num(old.unitWeightMg) || "-"} → ${num(row.unitWeightMg) || "-"} mg` : "",
+      old.unitsPerPack !== row.unitsPerPack ? `units per pack ${num(old.unitsPerPack) || "-"} → ${num(row.unitsPerPack) || "-"}` : "",
       old.deliveryDate !== row.deliveryDate ? `expected delivery ${str(old.deliveryDate) || "-"} → ${str(row.deliveryDate) || "-"}` : ""
     ].filter(Boolean);
     changes.push({ kind: "PO", po: po(row.id), product: productName(row.productId), text: `PO ${po(row.id)} edited${parts.length ? `: ${parts.join("; ")}` : ""}` });

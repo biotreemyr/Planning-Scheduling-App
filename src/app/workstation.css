@@ -748,3 +748,14 @@
 .workstation .orders-table [data-col="progress"] { min-width: 140px; max-width: 170px; }
 .workstation .orders-table [data-col="release"] { min-width: 112px; }
 .workstation .orders-table [data-col="status"] { min-width: 0; }
+
+/* Order weight: unit weight, units per pack and the live total kg, under each line item. */
+.order-weight { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.orders-form .order-weight { grid-column: 2 / -1; }
+.order-weight label { width: 150px; font-size: 12px; }
+.order-weight input { min-height: 34px; }
+.order-weight-total { margin: 0 0 6px; font-size: 13px; }
+.order-weight-total strong { font-size: 15px; }
+.order-weight-total small { display: block; color: var(--muted); font-size: 11.5px; }
+.order-edit .order-weight { grid-column: 1 / -1; }
+.workstation .orders-table td[data-col="kg"] { white-space: nowrap; }
