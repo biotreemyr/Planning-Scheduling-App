@@ -7,16 +7,25 @@ import type { FlowWarning, ProductFormat } from "@/lib/services/processRules";
 import { OrderBadge } from "./OrderBadge";
 import type { JobOrder } from "@/lib/services/jobOrders";
 import { formatDate } from "@/lib/services/dates";
+import { Who } from "./Who";
+import { equivalence, factorsFor, type Factors } from "@/lib/services/equivalence";
+import type { WipTransfer } from "@/lib/services/productionFlow";
 
-export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, children, jobOrders = [], format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], canAssign = false, onAssignMachine, onOpenLine }: {
+export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, children, jobOrders = [], format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], transfers = [], visibleCalendarIds, canAssign = false, canUpdate = false, updating = false, notice = "", onAssignMachine, onOpenLine }: {
+  // The production update form for this activity, shown under its row in the route while updating.
   children?: ReactNode;
   // Opens the plan form for this activity's job order, to correct its whole route.
   onEditJobPlanning?: () => void;
   jobOrders?: JobOrder[];
   // The batch's product format and any process-flow warnings for its activities.
   format?: ProductFormat; warnings?: FlowWarning[];
-  orders?: PurchaseOrder[]; route?: RouteStep[]; routeMachines?: Machine[]; routeEntries?: ScheduleEntry[];
-  canAssign?: boolean; onAssignMachine?: (lineIds: string[], machineId: string) => string[]; onOpenLine?: (id: string) => void;
+  orders?: PurchaseOrder[]; route?: RouteStep[]; routeMachines?: Machine[]; routeEntries?: ScheduleEntry[]; transfers?: WipTransfer[];
+  canAssign?: boolean; canUpdate?: boolean; updating?: boolean; notice?: string;
+  // The processes this person may see; others in the route show as not theirs rather than not planned.
+  visibleCalendarIds?: string[];
+  onAssignMachine?: (lineIds: string[], machineId: string) => string[];
+  // Opens another day of the batch; with update, its production form too.
+  onOpenLine?: (id: string, update?: boolean) => void;
   line: PlanLine; product?: Product; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -24,12 +33,13 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, c
   const numbers = orderNumbers(orders);
   const job = jobOrders.find((item) => item.id === line.jobOrderId);
   useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className="activity-dialog unified-activity" aria-labelledby="activity-workspace-title" onClose={onClose}>
+  return <dialog ref={dialog} className="activity-dialog unified-activity route-wide" aria-labelledby="activity-workspace-title" onClose={onClose}>
     <header className="panel-title"><div><p className="eyebrow">Activity workspace</p><h2 id="activity-workspace-title">{product?.name}</h2>
       <p className="activity-order-ref">{order?.customerName ? <span>Customer: <strong>{order.customerName}</strong></span> : null}<span>{order ? <OrderBadge number={numbers.get(order.id)} poNumber={order.poNumber} /> : null}PO number: <strong>{order ? poLabel(order, orders) : "Not linked"}</strong></span>{job ? <span>Job order: <strong>{job.number}</strong></span> : line.orderReference ? <span>{line.orderReference}</span> : null}{job ? <span>Batch no.: <strong>{job.batchNumber ?? "Not entered"}</strong></span> : null}{order ? <span>Order quantity: {order.quantity.toLocaleString()} {order.uom}</span> : null}</p>
       {job && onEditJobPlanning ? <button type="button" className="calendar-button" onClick={() => { dialog.current?.close(); onEditJobPlanning(); }}>Edit job order planning</button> : null}</div><button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></header>
-    {route.length ? <ProductionRoute line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} editable={canAssign} onAssign={onAssignMachine} onOpenLine={onOpenLine} /> : null}
-    {children}
+    {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
+    {route.length ? <ProductionRoute line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} transfers={transfers} visibleCalendarIds={visibleCalendarIds} factors={factorsFor(order, job, format === "Capsule" ? "capsules" : format === "Sachet" ? "sachets" : "tablets")}
+      editable={canAssign} canUpdate={canUpdate} updating={updating} update={children} onAssign={onAssignMachine} onOpenLine={onOpenLine} /> : children}
   </dialog>;
 }
 export function MachineConfiguration({ machines, onSave }: { machines: Machine[]; onSave: (machine: Machine) => void }) {
@@ -38,42 +48,66 @@ export function MachineConfiguration({ machines, onSave }: { machines: Machine[]
   </form>)}</section>;
 }
 
-// Every process of the unit in order, with the batch's days in each and the machine it runs on.
-function ProductionRoute({ line, route, format, warnings, machines, entries, editable, onAssign, onOpenLine }: {
-  line: PlanLine; route: RouteStep[]; format: ProductFormat; warnings: FlowWarning[]; machines: Machine[]; entries: ScheduleEntry[]; editable: boolean;
-  onAssign?: (lineIds: string[], machineId: string) => string[]; onOpenLine?: (id: string) => void;
+
+/**
+ * Every process of the unit in order, one row per planned day: what was planned (date, quantity, its
+ * equivalence, machine) beside what production reported (run date, quantity, equivalence, machine
+ * used, remarks, where the output went), each with who did it. Update opens production's form for
+ * that day right under its row.
+ */
+function ProductionRoute({ line, route, format, warnings, machines, entries, transfers, visibleCalendarIds, factors, editable, canUpdate, updating, update, onAssign, onOpenLine }: {
+  line: PlanLine; route: RouteStep[]; format: ProductFormat; warnings: FlowWarning[]; machines: Machine[]; entries: ScheduleEntry[]; transfers: WipTransfer[]; visibleCalendarIds?: string[]; factors: Factors;
+  editable: boolean; canUpdate: boolean; updating: boolean; update?: ReactNode;
+  onAssign?: (lineIds: string[], machineId: string) => string[]; onOpenLine?: (id: string, update?: boolean) => void;
 }) {
   const [messages, setMessages] = useState<Record<string, string[]>>({});
   const day = (value: string) => formatDate(value.slice(0, 10));
+  const amount = (value: number) => value.toLocaleString("en-GB", { maximumFractionDigits: 3 });
+  const machineName = (id?: string) => machines.find((machine) => machine.id === id)?.name ?? "";
+  const COLUMNS = 13;
   return <section className="production-route"><h3>Production route{line.orderReference ? ` · ${line.orderReference}` : ""}</h3>
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
-    <table>
-      <thead><tr><th scope="col">Process</th><th scope="col">Days</th><th scope="col">Quantity</th><th scope="col">Machine</th></tr></thead>
-      <tbody>{route.map((step) => {
-        const ids = step.lines.map((item) => item.id);
-        const booked = [...new Set(entries.filter((entry) => ids.includes(entry.planLineId ?? "") && entry.status !== "Cancelled").map((entry) => entry.machineId).filter((id): id is string => !!id))];
-        const options = machines.filter((machine) => machine.processIds?.includes(step.calendar.processId) && (machine.active === "Active" || booked.includes(machine.id)));
-        const open = step.lines.filter((item) => !item.completedAt);
-        const done = step.lines.length > 0 && !open.length;
-        const current = step.lines.some((item) => item.id === line.id);
+    <div className="route-table-scroll"><table className="route-table">
+      <thead>
+        <tr><th scope="col" rowSpan={2} className="route-plan-mark">Plan</th><th scope="col" rowSpan={2}>Process</th><th scope="colgroup" colSpan={4} className="route-group planned">Planned</th><th scope="colgroup" colSpan={6} className="route-group actual">Actual</th><th scope="col" rowSpan={2}><span className="admin-sr-only">Update</span></th></tr>
+        <tr><th scope="col">Date planned</th><th scope="col" className="numeric">Qty planned</th><th scope="col">Planned equivalence</th><th scope="col">Machine planned</th>
+          <th scope="col">Actual run date</th><th scope="col" className="numeric">Actual quantity</th><th scope="col">Actual equivalence</th><th scope="col">Machine used</th><th scope="col">Remarks</th><th scope="col">Send to next process</th></tr>
+      </thead>
+      <tbody>{route.flatMap((step) => {
         // A process not used for this dosage form (set in Admin) is shown as not used.
         const outside = format !== "Other" && !step.settings.forms.includes(format);
-        return <tr key={step.calendar.id} className={[current ? "route-current" : "", step.lines.length ? "" : "route-empty"].join(" ").trim() || undefined}>
-          <th scope="row">{step.processName}{done ? <span className="badge success">Done</span> : null}</th>
-          <td>{step.lines.length ? step.lines.map((item) => <button key={item.id} type="button" className="route-day" aria-current={item.id === line.id || undefined} title={item.completedAt ? "Completed" : "Open this day"} onClick={() => onOpenLine?.(item.id)}>{day(item.plannedDate)}</button>) : <span className="route-muted">{outside ? `Not used for ${format.toLowerCase()}s` : "Not planned"}</span>}</td>
-          <td>{step.lines.length ? `${step.lines.reduce((total, item) => total + item.quantity, 0).toLocaleString()} ${step.lines[0].uom ?? ""}` : "-"}</td>
-          <td>{step.lines.length ? <>
-            <select aria-label={`Machine for ${step.processName}`} disabled={!editable || !open.length || !onAssign} value={booked.length === 1 ? booked[0] : booked.length > 1 ? "mixed" : ""}
-              onChange={(event) => { if (event.target.value !== "mixed") setMessages({ ...messages, [step.calendar.id]: onAssign!(open.map((item) => item.id), event.target.value) }); }}>
-              <option value="">Not assigned</option>
-              {booked.length > 1 ? <option value="mixed" disabled>Several machines</option> : null}
-              {options.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
-            </select>
-            {!options.length ? <small className="route-muted">No machines set up for this process</small> : null}
-            {(messages[step.calendar.id] ?? []).map((message) => <small role="alert" key={message}>{message}</small>)}
-          </> : "-"}</td>
-        </tr>;
+        if (!step.lines.length) return [<tr key={step.calendar.id} className="route-empty"><td className="route-plan-mark" /><th scope="row">{step.processName}</th><td colSpan={COLUMNS - 2} className="route-muted">{outside ? `Not used for ${format.toLowerCase()}s` : visibleCalendarIds && !visibleCalendarIds.includes(step.calendar.id) ? "Not in your processes" : "Not planned"}</td></tr>];
+        const done = step.lines.every((item) => item.completedAt);
+        return step.lines.flatMap((item, index) => {
+          const booked = entries.find((entry) => entry.planLineId === item.id && entry.status !== "Cancelled")?.machineId;
+          const options = machines.filter((machine) => machine.processIds?.includes(step.calendar.processId) && (machine.active === "Active" || machine.id === booked));
+          const planned = item.plannedMachineId ?? booked;
+          const reported = item.completedAt ? item.yieldQuantity : undefined, reportedUom = item.yieldUom ?? item.uom;
+          const outgoing = transfers.find((transfer) => transfer.sourceLineId === item.id);
+          const next = outgoing ? outgoing.wipRoom ? "WIP room" : route.find((other) => other.calendar.id === outgoing.calendarId)?.processName ?? "Next process" : item.completedAt ? "Final output" : "";
+          const current = item.id === line.id;
+          const rows = [<tr key={item.id} className={[current ? "route-current" : "", item.completedAt ? "route-done" : ""].join(" ").trim() || undefined}>
+            {index === 0 ? <><td rowSpan={step.lines.length} className="route-plan-mark" aria-label="Planned">✓</td>
+              <th scope="row" rowSpan={step.lines.length}>{step.processName}{done ? <span className="badge success">Done</span> : null}</th></> : null}
+            <td><button type="button" className="route-day" aria-current={current || undefined} title="Open this day" onClick={() => onOpenLine?.(item.id)}>{day(item.plannedDate)}{item.endDate ? ` – ${day(item.endDate)}` : ""}</button><Who verb="Planned" who={item.plannedBy} at={item.plannedAt} /></td>
+            <td className="numeric">{amount(item.quantity)} {item.uom ?? ""}</td>
+            <td className="route-equivalence">{equivalence(item.quantity, item.uom, factors) || <span className="route-muted">-</span>}</td>
+            <td>{editable && onAssign && !item.completedAt ? <select aria-label={`Machine for ${step.processName} on ${day(item.plannedDate)}`} value={booked ?? ""} onChange={(event) => setMessages({ ...messages, [item.id]: onAssign([item.id], event.target.value) })}>
+                <option value="">Not assigned</option>{options.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select>
+              : machineName(planned) || <span className="route-muted">Not assigned</span>}
+              {(messages[item.id] ?? []).map((message) => <small role="alert" key={message}>{message}</small>)}</td>
+            <td>{item.completedAt ? day(item.completedAt) : item.startedAt ? <>Started {day(item.startedAt)}</> : <span className="route-muted">-</span>}<Who verb="Updated" who={item.updatedBy} at={item.updatedAt} /></td>
+            <td className="numeric">{reported !== undefined ? `${amount(reported)} ${reportedUom ?? ""}` : <span className="route-muted">-</span>}</td>
+            <td className="route-equivalence">{reported !== undefined ? equivalence(reported, reportedUom, factors) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
+            <td>{item.completedAt || item.startedAt ? machineName(booked) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
+            <td className="route-remarks">{item.productionNotes || <span className="route-muted">-</span>}</td>
+            <td>{next || <span className="route-muted">-</span>}</td>
+            <td><button type="button" className={current && updating ? "primary-button" : "calendar-button"} onClick={() => onOpenLine?.(item.id, !(current && updating))}>{!canUpdate ? "View" : item.completedAt ? "Correct" : "Update"}</button></td>
+          </tr>];
+          if (current && updating && update) rows.push(<tr key={`${item.id}-update`} className="route-update-row"><td colSpan={COLUMNS}>{update}</td></tr>);
+          return rows;
+        });
       })}</tbody>
-    </table>
+    </table></div>
   </section>;
 }

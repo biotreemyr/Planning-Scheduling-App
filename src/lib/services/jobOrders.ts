@@ -36,6 +36,8 @@ export type JobOrder = {
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;
   notes?: string; createdAt: string; createdBy: string;
+  // Who last edited it, and when.
+  updatedBy?: string; updatedAt?: string;
 };
 
 export const jobsFor = (orderId: string, jobs: JobOrder[]) => jobs.filter((job) => job.orderId === orderId).sort((a, b) => a.sequence - b.sequence);
