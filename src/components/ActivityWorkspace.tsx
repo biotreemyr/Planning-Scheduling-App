@@ -12,8 +12,9 @@ import { equivalence, factorsFor, type Factors } from "@/lib/services/equivalenc
 import type { WipTransfer } from "@/lib/services/productionFlow";
 
 export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, children, jobOrders = [], format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], transfers = [], visibleCalendarIds, canAssign = false, canUpdate = false, updating = false, notice = "", onAssignMachine, onOpenLine }: {
-  // The production update form for this activity, shown under its row in the route while updating.
-  children?: ReactNode;
+  // Production's update for this activity: keyed in on its own row of the route while updating (inRow,
+  // with the job's equivalence for the typed quantity), or on its own when there is no route.
+  children?: (inRow: boolean, equivalence?: (quantity: number, uom: string) => string) => ReactNode;
   // Opens the plan form for this activity's job order, to correct its whole route.
   onEditJobPlanning?: () => void;
   jobOrders?: JobOrder[];
@@ -39,7 +40,7 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, c
       {job && onEditJobPlanning ? <button type="button" className="calendar-button" onClick={() => { dialog.current?.close(); onEditJobPlanning(); }}>Edit job order planning</button> : null}</div><button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></header>
     {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
     {route.length ? <ProductionRoute line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} transfers={transfers} visibleCalendarIds={visibleCalendarIds} factors={factorsFor(order, job, format === "Capsule" ? "capsules" : format === "Sachet" ? "sachets" : "tablets")}
-      editable={canAssign} canUpdate={canUpdate} updating={updating} update={children} onAssign={onAssignMachine} onOpenLine={onOpenLine} /> : children}
+      editable={canAssign} canUpdate={canUpdate} updating={updating} update={children} onAssign={onAssignMachine} onOpenLine={onOpenLine} /> : children?.(false)}
   </dialog>;
 }
 export function MachineConfiguration({ machines, onSave }: { machines: Machine[]; onSave: (machine: Machine) => void }) {
@@ -52,12 +53,12 @@ export function MachineConfiguration({ machines, onSave }: { machines: Machine[]
 /**
  * Every process of the unit in order, one row per planned day: what was planned (date, quantity, its
  * equivalence, machine) beside what production reported (run date, quantity, equivalence, machine
- * used, remarks, where the output went), each with who did it. Update opens production's form for
- * that day right under its row.
+ * used, remarks, where the output went), each with who did it. Update turns that day's Actual cells
+ * into production's inputs, right on its row.
  */
 function ProductionRoute({ line, route, format, warnings, machines, entries, transfers, visibleCalendarIds, factors, editable, canUpdate, updating, update, onAssign, onOpenLine }: {
   line: PlanLine; route: RouteStep[]; format: ProductFormat; warnings: FlowWarning[]; machines: Machine[]; entries: ScheduleEntry[]; transfers: WipTransfer[]; visibleCalendarIds?: string[]; factors: Factors;
-  editable: boolean; canUpdate: boolean; updating: boolean; update?: ReactNode;
+  editable: boolean; canUpdate: boolean; updating: boolean; update?: (inRow: boolean, equivalence?: (quantity: number, uom: string) => string) => ReactNode;
   onAssign?: (lineIds: string[], machineId: string) => string[]; onOpenLine?: (id: string, update?: boolean) => void;
 }) {
   const [messages, setMessages] = useState<Record<string, string[]>>({});
@@ -86,6 +87,8 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
           const outgoing = transfers.find((transfer) => transfer.sourceLineId === item.id);
           const next = outgoing ? outgoing.wipRoom ? "WIP room" : route.find((other) => other.calendar.id === outgoing.calendarId)?.processName ?? "Next process" : item.completedAt ? "Final output" : "";
           const current = item.id === line.id;
+          // Production can click anywhere on a day's Actual cells to key them in.
+          const open = (className = "") => canUpdate ? { className: `${className} route-actual-open`.trim(), title: item.completedAt ? "Correct this day" : "Update this day", onClick: () => onOpenLine?.(item.id, true) } : { className: className || undefined };
           const rows = [<tr key={item.id} className={[current ? "route-current" : "", item.completedAt ? "route-done" : ""].join(" ").trim() || undefined}>
             {index === 0 ? <><td rowSpan={step.lines.length} className="route-plan-mark" aria-label="Planned">✓</td>
               <th scope="row" rowSpan={step.lines.length}>{step.processName}{done ? <span className="badge success">Done</span> : null}</th></> : null}
@@ -96,15 +99,16 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
                 <option value="">Not assigned</option>{options.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select>
               : machineName(planned) || <span className="route-muted">Not assigned</span>}
               {(messages[item.id] ?? []).map((message) => <small role="alert" key={message}>{message}</small>)}</td>
-            <td>{item.completedAt ? day(item.completedAt) : item.startedAt ? <>Started {day(item.startedAt)}</> : <span className="route-muted">-</span>}<Who verb="Updated" who={item.updatedBy} at={item.updatedAt} /></td>
-            <td className="numeric">{reported !== undefined ? `${amount(reported)} ${reportedUom ?? ""}` : <span className="route-muted">-</span>}</td>
-            <td className="route-equivalence">{reported !== undefined ? equivalence(reported, reportedUom, factors) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
-            <td>{item.completedAt || item.startedAt ? machineName(booked) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
-            <td className="route-remarks">{item.productionNotes || <span className="route-muted">-</span>}</td>
-            <td>{next || <span className="route-muted">-</span>}</td>
-            <td><button type="button" className={current && updating ? "primary-button" : "calendar-button"} onClick={() => onOpenLine?.(item.id, !(current && updating))}>{!canUpdate ? "View" : item.completedAt ? "Correct" : "Update"}</button></td>
+            {current && updating && update ? update(true, (quantity, uom) => equivalence(quantity, uom, factors)) : <>
+              <td {...open()}>{item.completedAt ? day(item.completedAt) : item.startedAt ? <>Started {day(item.startedAt)}</> : <span className="route-muted">-</span>}<Who verb="Updated" who={item.updatedBy} at={item.updatedAt} /></td>
+              <td {...open("numeric")}>{reported !== undefined ? `${amount(reported)} ${reportedUom ?? ""}` : <span className="route-muted">-</span>}</td>
+              <td {...open("route-equivalence")}>{reported !== undefined ? equivalence(reported, reportedUom, factors) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
+              <td {...open()}>{item.completedAt || item.startedAt ? machineName(booked) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
+              <td {...open("route-remarks")}>{item.productionNotes || <span className="route-muted">-</span>}</td>
+              <td {...open()}>{next || <span className="route-muted">-</span>}</td>
+              <td>{canUpdate ? <button type="button" className="calendar-button" onClick={() => onOpenLine?.(item.id, true)}>{item.completedAt ? "Correct" : "Update"}</button> : null}</td>
+            </>}
           </tr>];
-          if (current && updating && update) rows.push(<tr key={`${item.id}-update`} className="route-update-row"><td colSpan={COLUMNS}>{update}</td></tr>);
           return rows;
         });
       })}</tbody>

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useDateCheck } from "./DateCheck";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Machine, PlanLine, Product } from "@/lib/domain/types";
@@ -20,8 +20,12 @@ const localDay = (value: string) => { const date = new Date(value); return `${da
  * actual quantity, notes on any issue, and where the output goes: the next process of the job's
  * route, the WIP room (held for that process), or nowhere when it is the final output.
  */
-export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineId = "" }: {
+export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineId = "", inRow = false, onCancel, equivalence }: {
   line: PlanLine; uom: string; directory: CalendarDirectory; editable: boolean;
+  // Keyed in on the activity's own row of the route table: renders that row's Actual cells and buttons.
+  inRow?: boolean; onCancel?: () => void;
+  // In the row, what the typed quantity comes to in other units (kg, tablets, boxes).
+  equivalence?: (quantity: number, uom: string) => string;
   // Machines set up for this process, and the one the activity is booked on ("" for none).
   machines?: Machine[]; machineId?: string;
   // Called after a successful save, to close the activity and say what was saved.
@@ -37,7 +41,8 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const checkDates = useDateCheck();
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState("");
-  const [correcting, setCorrecting] = useState(false);
+  // On the row, a completed day opens straight into its correction.
+  const [correcting, setCorrecting] = useState(inRow && !!line.completedAt);
   const source = d.calendars.find((calendar) => calendar.id === line.calendarId);
   const processName = (id?: string) => d.processes.find((process) => process.id === d.calendars.find((calendar) => calendar.id === id)?.processId)?.name ?? d.calendars.find((calendar) => calendar.id === id)?.name ?? "";
   // The units this process reports in; the planned unit first when it is one of them.
@@ -87,8 +92,47 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     {saved ? <p role="status">{saved}</p> : null}
     {editable && onCorrect ? <button type="button" className="calendar-button" onClick={() => { setCorrecting(true); setErrors([]); setSaved(""); }}>Correct this update</button> : null}
   </section>;
-  return <section className="production-update"><h3>{correcting ? "Correct production update" : "Production update"}</h3>
-    {!editable ? <p className="route-muted">{line.startedAt ? `Started ${display(line.startedAt)}. ` : "Not started yet. "}Production records progress here.</p> : <form className="production-update-form" onSubmit={(event) => {
+  if (!editable) return inRow ? null : <section className="production-update"><h3>Production update</h3><p className="route-muted">{line.startedAt ? `Started ${display(line.startedAt)}. ` : "Not started yet. "}Production records progress here.</p></section>;
+
+  // The fields sit inside the form in the panel, or across the row's cells in the route table, where
+  // they join the form (kept in the last cell) through their form attribute.
+  const formId = `production-update-${line.id}`;
+  const started = <label>{inRow ? "Started" : "Date started"}<input form={formId} name="startedAt" type="date" defaultValue={line.startedAt ?? ""} /></label>;
+  const completed = <label>{inRow ? "Completed" : "Date completed"}<input form={formId} name="completedAt" type="date" defaultValue={completedDay} max={today()} /></label>;
+  const quantity = <div className={weighing ? "quantity-fields weighed-row" : "quantity-fields"}><label>{weighing ? `Output ${sizeUom === "mL" ? "volume" : "weight"}` : "Actual quantity"}<input form={formId} name="quantity" type="number" min="0" step="any" value={quantityText} onChange={(event) => setQuantityText(event.target.value)} readOnly={handedOver} placeholder={weighing ? "e.g. 23.975" : `Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
+    <label>UOM<select form={formId} name="yieldUom" value={chosenUom} onChange={(event) => setChosenUom(event.target.value)} disabled={handedOver}>{[...new Set([...reportUoms, ...(line.completedAt && !counting ? [doneUom] : []), ...(line.weighedUom ? [line.weighedUom] : [])])].map((name) => <option key={name}>{name}</option>)}</select></label>
+    {handedOver ? <input form={formId} type="hidden" name="yieldUom" value={chosenUom} /> : null}
+    {weighing ? <>
+      <label>{unitLabel} ({sizeUom} each)<input form={formId} name="unitWeightMg" type="number" min="0" step="any" required value={unitMg} onChange={(event) => setUnitMg(event.target.value)} readOnly={handedOver} placeholder={sizeUom === "mL" ? "e.g. 5" : "e.g. 350"} /></label>
+      <label>Actual quantity ({countUom})<input form={formId} name="actualQuantity" type="number" min="0" step="1" value={actualShown} readOnly={handedOver} placeholder={`Planned ${line.quantity.toLocaleString()}`}
+        onChange={(event) => { setActualText(event.target.value); setActualEdited(true); }} /></label>
+    </> : null}</div>;
+  const weighedNote = weighing ? <p className="weighed-count" role="status">{actualEdited && counted !== undefined && actualShown !== String(counted)
+    ? <>Calculated from the {sizeUom === "mL" ? "volume" : "weight"}: {counted.toLocaleString()} {countUom} · <button type="button" className="link-button" onClick={() => setActualEdited(false)}>Use calculated</button></>
+    : <span className="route-muted">Actual quantity is worked out from the {sizeUom === "mL" ? "volume" : "weight"}; change it if needed.</span>}</p> : null;
+  const machineField = <label>Machine<select form={formId} name="machine" defaultValue={machineId}>
+    <option value="">{machines.length ? "Not assigned" : "No machine set up"}</option>
+    {machines.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+  </select></label>;
+  const notesField = <label className="production-notes">{inRow ? "Remarks" : "Notes"}<textarea form={formId} name="notes" defaultValue={line.productionNotes ?? ""} placeholder="Anything that happened during production: issues, stoppages, deviations" /></label>;
+  const destination = <label className="production-destination">{inRow ? "Send to" : "After completion, send to"}<select form={formId} name="destination" defaultValue={destinationValue} disabled={handedOver}>
+    {wipFor ? <option value={`wip:${wipFor}`}>WIP room</option> : null}
+    {destinations.map((calendar) => <option key={calendar.id} value={`next:${calendar.id}`}>{processName(calendar.id)}{calendar.id === nextCalendarId ? " (next process)" : ""}</option>)}
+    <option value="final">Final output</option>
+  </select>{handedOver ? <input form={formId} type="hidden" name="destination" value={destinationValue} /> : null}</label>;
+  const cancel = () => { setErrors([]); if (inRow) onCancel?.(); else setCorrecting(false); };
+  const actions = <div className="production-actions">
+    {correcting ? <>
+      <button type="button" className="calendar-button" onClick={cancel}>Cancel</button>
+      <button type="submit" className="primary-button">Save correction</button>
+    </> : <>
+      {inRow ? <button type="button" className="calendar-button" onClick={cancel}>Cancel</button> : null}
+      <button type="submit" value="progress" className="calendar-button">Save progress</button>
+      <button type="submit" value="complete" className="primary-button">Complete production</button>
+    </>}
+  </div>;
+  const messages = <>{errors.map((error) => <p role="alert" key={error}>{error}</p>)}{saved && !errors.length ? <p role="status">{saved}</p> : null}</>;
+  const form = (content: ReactNode) => <form id={formId} className="production-update-form" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const startedAt = String(data.get("startedAt") ?? ""), completedDate = String(data.get("completedAt") ?? ""), notes = String(data.get("notes") ?? "").trim();
@@ -115,45 +159,26 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       if (progress.length) { setErrors(progress); return; }
       done(onComplete(output), "Production completed.");
       });
-    }}>
-      <label>Date started<input name="startedAt" type="date" defaultValue={line.startedAt ?? ""} /></label>
-      <label>Date completed<input name="completedAt" type="date" defaultValue={completedDay} max={today()} /></label>
-      <div className={weighing ? "quantity-fields weighed-row" : "quantity-fields"}><label>{weighing ? `Output ${sizeUom === "mL" ? "volume" : "weight"}` : "Actual quantity"}<input name="quantity" type="number" min="0" step="any" value={quantityText} onChange={(event) => setQuantityText(event.target.value)} readOnly={handedOver} placeholder={weighing ? "e.g. 23.975" : `Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
-        <label>UOM<select name="yieldUom" value={chosenUom} onChange={(event) => setChosenUom(event.target.value)} disabled={handedOver}>{[...new Set([...reportUoms, ...(line.completedAt && !counting ? [doneUom] : []), ...(line.weighedUom ? [line.weighedUom] : [])])].map((name) => <option key={name}>{name}</option>)}</select></label>
-        {handedOver ? <input type="hidden" name="yieldUom" value={chosenUom} /> : null}
-        {weighing ? <>
-          <label>{unitLabel} ({sizeUom} each)<input name="unitWeightMg" type="number" min="0" step="any" required value={unitMg} onChange={(event) => setUnitMg(event.target.value)} readOnly={handedOver} placeholder={sizeUom === "mL" ? "e.g. 5" : "e.g. 350"} /></label>
-          <label>Actual quantity ({countUom})<input name="actualQuantity" type="number" min="0" step="1" value={actualShown} readOnly={handedOver} placeholder={`Planned ${line.quantity.toLocaleString()}`}
-            onChange={(event) => { setActualText(event.target.value); setActualEdited(true); }} /></label>
-        </> : null}</div>
-      {weighing ? <p className="weighed-count" role="status">{actualEdited && counted !== undefined && actualShown !== String(counted)
-        ? <>Calculated from the {sizeUom === "mL" ? "volume" : "weight"}: {counted.toLocaleString()} {countUom} · <button type="button" className="link-button" onClick={() => setActualEdited(false)}>Use calculated</button></>
-        : <span className="route-muted">Actual quantity is worked out from the {sizeUom === "mL" ? "volume" : "weight"}; change it if needed.</span>}</p> : null}
-      <label>Machine<select name="machine" defaultValue={machineId}>
-        <option value="">{machines.length ? "Not assigned" : "No machine set up"}</option>
-        {machines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
-      </select></label>
-      <label className="production-notes">Notes<textarea name="notes" defaultValue={line.productionNotes ?? ""} placeholder="Anything that happened during production: issues, stoppages, deviations" /></label>
-      <label className="production-destination">After completion, send to<select name="destination" defaultValue={destinationValue} disabled={handedOver}>
-        {wipFor ? <option value={`wip:${wipFor}`}>WIP room</option> : null}
-        {destinations.map((calendar) => <option key={calendar.id} value={`next:${calendar.id}`}>{processName(calendar.id)}{calendar.id === nextCalendarId ? " (next process)" : ""}</option>)}
-        <option value="final">Final output</option>
-      </select></label>
-      {handedOver ? <input type="hidden" name="destination" value={destinationValue} /> : null}
-      <div className="production-actions">
-        {correcting ? <>
-          <button type="button" className="calendar-button" onClick={() => { setCorrecting(false); setErrors([]); }}>Cancel</button>
-          <button type="submit" className="primary-button">Save correction</button>
-        </> : <>
-          <button type="submit" value="progress" className="calendar-button">Save progress</button>
-          <button type="submit" value="complete" className="primary-button">Complete production</button>
-        </>}
-      </div>
-      {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
-      {saved && !errors.length ? <p role="status">{saved}</p> : null}
-      <p className="route-muted">{correcting ? handedOver ? `${processName(outgoing!.calendarId)} has already received this output, so its quantity and destination stay as they are. Dates and notes can still be corrected.` : "Correct anything keyed in by mistake. The handover to the next process follows the correction."
-        : `Save progress records the start date and notes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`}</p>
-    </form>}
+    }}>{content}</form>;
+  const help = correcting ? handedOver ? `${processName(outgoing!.calendarId)} has already received this output, so its quantity and destination stay as they are. Dates and notes can still be corrected.` : "Correct anything keyed in by mistake. The handover to the next process follows the correction."
+    : `Save progress records the start date and notes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`;
+
+  // In the route table: one cell per Actual column, then the buttons.
+  if (inRow) {
+    const typed = weighing ? (actualShown.trim() ? Number(actualShown) : undefined) : quantityText.trim() ? Number(quantityText) : undefined;
+    const shown = equivalence?.(typed ?? 0, weighing ? countUom ?? "" : chosenUom);
+    return <>
+      <td className="route-edit">{started}{completed}</td>
+      <td className="route-edit route-edit-quantity">{quantity}{weighedNote}</td>
+      <td className="route-equivalence">{shown || <span className="route-muted">-</span>}</td>
+      <td className="route-edit">{machineField}</td>
+      <td className="route-edit">{notesField}</td>
+      <td className="route-edit">{destination}</td>
+      <td className="route-edit route-edit-actions">{form(<>{actions}{messages}</>)}<small className="route-muted" title={help}>{correcting ? "Correcting" : "Updating"} this day</small></td>
+    </>;
+  }
+  return <section className="production-update"><h3>{correcting ? "Correct production update" : "Production update"}</h3>
+    {form(<>{started}{completed}{quantity}{weighedNote}{machineField}{notesField}{destination}{actions}{messages}<p className="route-muted">{help}</p></>)}
   </section>;
 }
 
