@@ -6,7 +6,7 @@ import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
-import { type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
+import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
 import { DateFilterPicker } from "./DateFilterPicker";
 import { matchesDateFilter } from "@/lib/services/dateFilter";
@@ -57,7 +57,7 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
   </section>;
 }
 
-type DraftItem = { key: string; productId: string; uom: string; format: ProductFormat | "" };
+type DraftItem = { key: string; productId: string; uom: string; format: ProductFormat | ""; quantity: string; unitWeightMg: string; unitsPerPack: string };
 const productColumns: PickerColumn<Product>[] = [
   { key: "code", label: "Item code", value: (product) => product.sku, filter: true },
   { key: "name", label: "Item name", value: (product) => product.name, filter: true },
@@ -67,7 +67,15 @@ const customerColumns: PickerColumn<Customer>[] = [
   { key: "code", label: "Customer ID", value: (customer) => customer.code, filter: true },
   { key: "name", label: "Customer name", value: (customer) => customer.name, filter: true }
 ];
-const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", uom: "", format: "" });
+const draftItem = (): DraftItem => ({ key: crypto.randomUUID(), productId: "", uom: "", format: "", quantity: "", unitWeightMg: "", unitsPerPack: "" });
+const positive = (value: string) => Number(value) > 0 ? Number(value) : undefined;
+// The weights an order line saves: only those its unit needs, and only when keyed in.
+function draftWeights(item: DraftItem, uom: string): Pick<PurchaseOrder, "unitWeightMg" | "unitsPerPack"> {
+  const kind = orderWeightKind(uom);
+  const unitWeightMg = kind === "single" || kind === "pack" ? positive(item.unitWeightMg) : undefined;
+  const unitsPerPack = kind === "pack" ? positive(item.unitsPerPack) : undefined;
+  return { ...(unitWeightMg ? { unitWeightMg } : {}), ...(unitsPerPack ? { unitsPerPack: Math.round(unitsPerPack) } : {}) };
+}
 
 // One PO keyed in once: customer and PO number, then as many product line items as it lists.
 // Typing an existing PO number of the same customer adds further items to that PO.
@@ -98,17 +106,22 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
   const firstItem = nextPoItem(poNumber, orders);
   const update = (key: string, change: Partial<DraftItem>) => setItems((current) => current.map((item) => item.key === key ? { ...item, ...change } : item));
   const formatOf = (item: DraftItem) => item.format || inferFormat(choices.find((product) => product.id === item.productId));
+  const uomOf = (item: DraftItem) => item.uom || (choices.find((product) => product.id === item.productId)?.uom ?? "");
+  // Choosing a product pre-fills the weights from its last order, as its defaults.
+  const chooseProduct = (key: string, productId: string) => {
+    const last = productId ? lastOrderWeights(productId, orders) : {};
+    update(key, { productId, uom: "", format: "", unitWeightMg: last.unitWeightMg ? String(last.unitWeightMg) : "", unitsPerPack: last.unitsPerPack ? String(last.unitsPerPack) : "" });
+  };
   return <form key={version} className="form-panel orders-form" onSubmit={(event) => {
     event.preventDefault();
     if (fromMasterData && !known) { setErrors([`Customer ID ${customerCode.trim()} is not in Master Data. Choose a customer from the list.`]); return; }
-    const data = new FormData(event.currentTarget);
     const createdAt = new Date().toISOString();
     let number = nextOrderNumber(orders);
     const customer: Customer = known ?? { id: `customer-${crypto.randomUUID()}`, code: customerCode.trim(), name: customerName.trim(), active: "Active" };
     const built: PurchaseOrder[] = items.map((item, index) => ({
       id: `order-${crypto.randomUUID()}`, number: number++, item: firstItem + index, format: formatOf(item), ...(units.length === 1 ? { unitId: units[0].id } : {}),
       customerId: customer.id, customerName: customer.name, poNumber: poNumber.trim(), ...(soNumber.trim() ? { soNumber: soNumber.trim() } : {}), productId: item.productId,
-      quantity: Number(data.get(`quantity-${item.key}`)), uom: item.uom || (choices.find((product) => product.id === item.productId)?.uom ?? ""),
+      quantity: Number(item.quantity), uom: uomOf(item), ...draftWeights(item, uomOf(item)),
       expectedDates: {}, receivedDate, ...(deliveryDate ? { deliveryDate } : {}), createdAt, createdBy: userName
     }));
     const result = onAdd(built, customer, choices.filter((product) => product.masterDataId && built.some((order) => order.productId === product.id)));
@@ -152,10 +165,12 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
             {items.length > 1 ? <button type="button" className="icon-button" aria-label={`Remove item ${firstItem + index}`} title="Remove this item" onClick={() => setItems((current) => current.filter((other) => other.key !== item.key))}><Trash2 size={15} /></button> : null}
           </div>
           <RecordPicker label="Product" name={`product-${item.key}`} noun="product" records={choices.filter((product) => product.active === "Active")} columns={productColumns}
-            display={(product) => `${product.sku} - ${product.name}`} placeholder="Search item code or name" value={item.productId} onChange={(id) => update(item.key, { productId: id, uom: "", format: "" })} />
+            display={(product) => `${product.sku} - ${product.name}`} placeholder="Search item code or name" value={item.productId} onChange={(id) => chooseProduct(item.key, id)} />
           <label title={unitRouteLabel(directory, units[0]?.id, format)}>Dosage form<select value={format} onChange={(event) => update(item.key, { format: event.target.value as ProductFormat })}>{PRODUCT_FORMATS.map((option) => <option key={option}>{option}</option>)}</select></label>
-          <div className="quantity-fields"><label>Quantity<input name={`quantity-${item.key}`} type="number" min="1" step="any" required /></label>
+          <div className="quantity-fields"><label>Quantity<input name={`quantity-${item.key}`} type="number" min="1" step="any" required value={item.quantity} onChange={(event) => update(item.key, { quantity: event.target.value })} /></label>
             <label>UOM<select value={item.uom || productUom} onChange={(event) => update(item.key, { uom: event.target.value })} required>{!productUom && !item.uom ? <option value="">Select</option> : null}{[...new Set([productUom, ...uoms.filter((unit) => unit.active).map((unit) => unit.name)].filter(Boolean))].map((name) => <option key={name}>{name}</option>)}</select></label></div>
+          <OrderWeightFields uom={uomOf(item)} quantity={item.quantity} unitWeightMg={item.unitWeightMg} unitsPerPack={item.unitsPerPack} names={item.key}
+            onChange={(change) => update(item.key, change)} remembered={(() => { const last = lastOrderWeights(item.productId, orders); return !!last.unitWeightMg && String(last.unitWeightMg) === item.unitWeightMg && String(last.unitsPerPack ?? "") === (orderWeightKind(uomOf(item)) === "pack" ? item.unitsPerPack : String(last.unitsPerPack ?? "")); })()} />
           <small className="route-muted">Route: {unitRouteLabel(directory, units[0]?.id, format)}</small>
         </div>;
       })}
@@ -165,6 +180,24 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
     <p className="orders-help">Each product becomes its own numbered order. After saving, open it in the list to key in its job orders, one per batch.</p>
   </form>;
+}
+
+// Unit weight and, for packs, units per pack, with the order's total kg worked out as they are keyed in.
+function OrderWeightFields({ uom, quantity, unitWeightMg, unitsPerPack, names, onChange, remembered }: {
+  uom: string; quantity: string; unitWeightMg: string; unitsPerPack: string; names: string; remembered?: boolean;
+  onChange: (change: { unitWeightMg?: string; unitsPerPack?: string }) => void;
+}) {
+  const kind = orderWeightKind(uom);
+  if (!uom) return null;
+  const kg = orderKg({ quantity: Number(quantity), uom, unitWeightMg: positive(unitWeightMg), unitsPerPack: positive(unitsPerPack) });
+  const one = uom.replace(/(x|ch|sh)es$/i, "$1").replace(/s$/i, "") || "unit";
+  return <div className="order-weight">
+    {kind === "single" || kind === "pack" ? <label>Unit weight (mg)<input name={`unitWeightMg-${names}`} type="number" min="0" step="any" placeholder="e.g. 332" title="One tablet, capsule or sachet, in mg (a 2.5 g sachet is 2500)" value={unitWeightMg} onChange={(event) => onChange({ unitWeightMg: event.target.value })} /></label> : null}
+    {kind === "pack" ? <label>Units per {one}<input name={`unitsPerPack-${names}`} type="number" min="1" step="1" placeholder="e.g. 90" title={`Tablets, capsules or sachets in one ${one}`} value={unitsPerPack} onChange={(event) => onChange({ unitsPerPack: event.target.value })} /></label> : null}
+    <p className="order-weight-total" aria-live="polite">{kind === "volume" ? <span className="route-muted">No weight for a volume</span>
+      : kg !== undefined ? <>Total <strong>{formatKg(kg)}</strong>{remembered && kind !== "weight" ? <small>from this product&apos;s last order</small> : null}</>
+      : <span className="route-muted">{kind === "pack" ? `Key in the unit weight and units per ${one} for the total kg` : "Key in the unit weight for the total kg"}</span>}</p>
+  </div>;
 }
 
 type Row = { order: PurchaseOrder; number: number; rows: OrderProcessRow[]; product?: Product; progress: OrderProgress; format: ProductFormat; warnings: FlowWarning[]; status: ReturnType<typeof orderStatusSummary> };
@@ -208,6 +241,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
     { key: "product", label: "Product", sort: (row) => row.product?.name ?? "", cell: (row) => row.product?.name ?? "Unknown product", filter: { kind: "text", text: (row) => `${row.product?.name ?? ""} ${row.product?.sku ?? ""}` } },
     { key: "format", label: "Dosage form", sort: (row) => row.format, cell: (row) => <span title={unitRouteLabel(directory, row.order.unitId ?? directory.units[0]?.id, row.format)}>{row.format}</span>, filter: { kind: "select", options: [...PRODUCT_FORMATS], value: (row) => row.format } },
     { key: "quantity", label: "Order qty", numeric: true, sort: (row) => row.order.quantity, cell: (row) => `${row.order.quantity.toLocaleString()} ${row.order.uom}` },
+    { key: "kg", label: "Total kg", numeric: true, sort: (row) => orderKg(row.order) ?? -1, cell: (row) => { const kg = orderKg(row.order); return kg !== undefined ? kg.toLocaleString("en-GB", { maximumFractionDigits: 3 }) : <span className="route-muted" title="Key in the unit weight on the order">-</span>; } },
     { key: "progress", label: "Progress", sort: (row) => row.progress.batchCount ? row.progress.batchesFinished / row.progress.batchCount : -1, cell: (row) => <>
       <div className="order-steps" role="img" aria-label={row.rows.map((item) => `${item.processName} ${Math.round(item.completedCount / item.lineCount * 100)}%`).join(", ")}>
         {row.rows.map((item) => <i key={item.calendar.id} title={`${item.processName}: ${item.completedCount} of ${item.lineCount} days complete`} style={{ "--filled": `${item.completedCount / item.lineCount * 100}%` } as React.CSSProperties} />)}
@@ -320,10 +354,10 @@ function OrdersPrint({ rows, orders, detail, lines, directory, visibleCalendarId
     {detail && rows[0] ? <OrderPrintDetail row={rows[0]} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} printed={printed} /> : <>
       <header><h1>Customer orders</h1><p>{rows.length} order{rows.length === 1 ? "" : "s"}{filtered ? " (filtered)" : ""} · printed {printed}</p></header>
       <table className="print-orders-table">
-        <thead><tr><th>#</th><th>PO received</th><th>Customer</th><th>PO number</th><th>SO number</th><th className="print-col-product">Product</th><th>Dosage form</th><th>Order qty</th><th>Progress</th><th>Finished</th><th>Testing / release</th><th>Expected delivery</th><th>Status</th></tr></thead>
+        <thead><tr><th>#</th><th>PO received</th><th>Customer</th><th>PO number</th><th>SO number</th><th className="print-col-product">Product</th><th>Dosage form</th><th>Order qty</th><th>Total kg</th><th>Progress</th><th>Finished</th><th>Testing / release</th><th>Expected delivery</th><th>Status</th></tr></thead>
         <tbody>{rows.map((row) => <tr key={row.order.id}>
           <td>{row.number}</td><td>{row.order.receivedDate ? displayDate(row.order.receivedDate) : ""}</td><td>{row.order.customerName ?? ""}</td><td>{poLabel(row.order, orders)}</td><td>{row.order.soNumber ?? ""}</td><td className="print-col-product">{row.product?.name ?? "Unknown product"}</td><td>{row.format}</td>
-          <td>{row.order.quantity.toLocaleString()} {row.order.uom}</td><td>{progressText(row.progress)}</td>
+          <td>{row.order.quantity.toLocaleString()} {row.order.uom}</td><td>{(() => { const kg = orderKg(row.order); return kg !== undefined ? kg.toLocaleString("en-GB", { maximumFractionDigits: 3 }) : "-"; })()}</td><td>{progressText(row.progress)}</td>
           <td>{row.progress.finishedQuantity ? `${row.progress.finishedQuantity.toLocaleString()} (${row.progress.percent}%)` : "-"}</td>
           <td>{statusPrint(row.status)}</td>
           <td>{row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " · Overdue" : ""}</td>
@@ -534,6 +568,8 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
 }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
+  // Quantity and weights are live here so the total kg follows what is keyed in.
+  const [weights, setWeights] = useState({ quantity: String(order.quantity), unitWeightMg: order.unitWeightMg ? String(order.unitWeightMg) : "", unitsPerPack: order.unitsPerPack ? String(order.unitsPerPack) : "" });
   const [confirming, setConfirming] = useState(false);
   const matrix = orderBatchMatrix(order, lines, directory, localDateKey(new Date()), visibleCalendarIds);
   const lastDate = rows.reduce((latest, row) => row.lastDate > latest ? row.lastDate : latest, "");
@@ -553,8 +589,9 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
       const data = new FormData(event.currentTarget);
       const delivery = String(data.get("deliveryDate") ?? ""), received = String(data.get("receivedDate") ?? "");
       const so = String(data.get("so") ?? "").trim();
-      const { deliveryDate: _d, receivedDate: _r, soNumber: _s, ...rest } = order;
-      const result = onSave({ ...rest, ...(delivery ? { deliveryDate: delivery } : {}), ...(received ? { receivedDate: received } : {}), ...(so ? { soNumber: so } : {}), customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), quantity: Number(data.get("quantity")), format: String(data.get("format")) as ProductFormat });
+      const { deliveryDate: _d, receivedDate: _r, soNumber: _s, unitWeightMg: _w, unitsPerPack: _p, ...rest } = order;
+      const weighed = draftWeights({ ...draftItem(), ...weights }, order.uom);
+      const result = onSave({ ...rest, ...(delivery ? { deliveryDate: delivery } : {}), ...(received ? { receivedDate: received } : {}), ...(so ? { soNumber: so } : {}), ...weighed, customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), quantity: Number(weights.quantity), format: String(data.get("format")) as ProductFormat });
       setErrors(result); setSaved(!result.length);
     }}>
       <label>Customer name<input name="customer" required defaultValue={order.customerName} list={`customers-${order.id}`} /></label>
@@ -564,7 +601,8 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
       <label>PO received date<input name="receivedDate" type="date" max={localDateKey(new Date())} defaultValue={order.receivedDate ?? ""} /></label>
       <label>Expected customer delivery<input name="deliveryDate" type="date" defaultValue={order.deliveryDate ?? ""} /></label>
       <label>Dosage form<select name="format" defaultValue={format}>{PRODUCT_FORMATS.map((item) => <option key={item}>{item}</option>)}</select></label>
-      <label>Quantity ({order.uom})<input name="quantity" type="number" min="1" step="any" required defaultValue={order.quantity} /></label>
+      <label>Quantity ({order.uom})<input name="quantity" type="number" min="1" step="any" required value={weights.quantity} onChange={(event) => setWeights({ ...weights, quantity: event.target.value })} /></label>
+      <OrderWeightFields uom={order.uom} quantity={weights.quantity} unitWeightMg={weights.unitWeightMg} unitsPerPack={weights.unitsPerPack} names={order.id} onChange={(change) => setWeights({ ...weights, ...change })} />
       <button type="submit" className="calendar-button">Save order</button>
       {confirming ? <><span>Delete {order.poNumber}?</span><button type="button" className="calendar-button" onClick={() => { setErrors(onDelete(order.id)); setConfirming(false); }}>Confirm delete</button><button type="button" className="calendar-button" onClick={() => setConfirming(false)}>Cancel</button></>
         : <button type="button" className="icon-button danger" title={linked ? "Unlink its activities before deleting" : `Delete ${order.poNumber}`} aria-label={`Delete ${order.poNumber}`} onClick={() => setConfirming(true)}><Trash2 size={16} /></button>}

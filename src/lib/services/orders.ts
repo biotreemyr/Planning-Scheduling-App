@@ -26,6 +26,10 @@ export type PurchaseOrder = {
   receivedDate?: string;
   // The SQL Account sales order (SO) number for this PO, keyed in by the planner for reference.
   soNumber?: string;
+  // For the order's weight: one tablet, capsule or sachet in mg, and for packed goods how many of
+  // those are in one pack (box, bottle...). Total kg is worked out from these and the quantity.
+  unitWeightMg?: number;
+  unitsPerPack?: number;
   // Per-process expected completion dates from before delivery dates; no longer entered or shown.
   expectedDates: Record<string, string>;
   notes?: string; createdAt: string; createdBy: string;
@@ -211,4 +215,31 @@ export function orderBatchMatrix(order: PurchaseOrder, lines: PlanLine[], direct
   });
   const kgKnown = batches.length > 0 && batches.every((batch) => batch.kg !== undefined);
   return { batches, rows, total: { quantity: batches.reduce((sum, batch) => sum + batch.quantity, 0), kg: kgKnown ? Number(batches.reduce((sum, batch) => sum + batch.kg!, 0).toPrecision(6)) : undefined } };
+}
+
+// Weight units convert directly; single units need a unit weight; packs also need units per pack.
+// Volumes (mL, L) have no weight.
+const WEIGHT_TO_KG: Record<string, number> = { kg: 1, g: 0.001, mg: 0.000001 };
+const SINGLE_UNITS = ["tablet", "tablets", "capsule", "capsules", "sachet", "sachets", "pcs", "piece", "pieces", "unit", "units"];
+const VOLUMES = ["ml", "l"];
+const unit = (uom: string) => uom.trim().toLowerCase();
+export type OrderWeightKind = "weight" | "single" | "pack" | "volume";
+export function orderWeightKind(uom: string): OrderWeightKind {
+  const key = unit(uom);
+  return key in WEIGHT_TO_KG ? "weight" : SINGLE_UNITS.includes(key) ? "single" : VOLUMES.includes(key) ? "volume" : "pack";
+}
+/** The order's total weight in kg, or undefined when what it needs has not been keyed in. */
+export function orderKg(order: Pick<PurchaseOrder, "quantity" | "uom" | "unitWeightMg" | "unitsPerPack">): number | undefined {
+  if (!(order.quantity > 0)) return undefined;
+  const kind = orderWeightKind(order.uom);
+  if (kind === "weight") return order.quantity * WEIGHT_TO_KG[unit(order.uom)];
+  if (kind === "volume" || !(order.unitWeightMg && order.unitWeightMg > 0)) return undefined;
+  const units = kind === "single" ? order.quantity : order.unitsPerPack && order.unitsPerPack > 0 ? order.quantity * order.unitsPerPack : undefined;
+  return units === undefined ? undefined : Number((units * order.unitWeightMg / 1_000_000).toPrecision(10));
+}
+export const formatKg = (kg: number) => `${kg.toLocaleString("en-GB", { maximumFractionDigits: 3 })} kg`;
+/** A product's weights as last keyed in on one of its orders, to pre-fill the next one. */
+export function lastOrderWeights(productId: string, orders: PurchaseOrder[]): Pick<PurchaseOrder, "unitWeightMg" | "unitsPerPack"> {
+  const last = orders.filter((order) => order.productId === productId && (order.unitWeightMg || order.unitsPerPack)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  return last ? { ...(last.unitWeightMg ? { unitWeightMg: last.unitWeightMg } : {}), ...(last.unitsPerPack ? { unitsPerPack: last.unitsPerPack } : {}) } : {};
 }
