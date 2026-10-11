@@ -772,3 +772,21 @@
 /* One line on a wide screen; on narrower ones the six fields wrap rather than shrink unreadably. */
 .job-order-form, .job-order-edit { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 @media (max-width: 760px) { .job-order-form, .job-order-edit { grid-template-columns: minmax(0, 1fr); } }
+
+/* Date check: a short confirmation before saving a date that looks like a slip. */
+.date-check-dialog { width: min(440px, calc(100vw - 24px)); }
+.date-check { display: grid; gap: 10px; padding: 18px 20px; }
+.date-check h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 17px; color: #8a5a12; }
+.date-check ul { margin: 0; padding: 10px 12px 10px 28px; border: 1px solid #ecd3a3; border-radius: 6px; background: var(--amber-soft); display: grid; gap: 6px; font-size: 14px; }
+.date-check p { margin: 0; font-size: 13px; }
+.date-check-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Production Planning as a floating window: the calendar behind stays in view and usable. */
+.plan-window { position: fixed; margin: 0; right: auto; bottom: auto; z-index: 70; max-height: calc(100dvh - 24px); box-shadow: 0 14px 36px #14241f40; }
+.plan-window-bar { cursor: move; user-select: none; touch-action: none; }
+.plan-window-buttons { display: flex; gap: 6px; flex: none; }
+.plan-window.minimised { width: min(340px, calc(100vw - 24px)); overflow: hidden; }
+.plan-window.minimised .form-panel { padding-top: 10px; padding-bottom: 10px; }
+.plan-window.minimised .form-panel > :not(.plan-window-bar) { display: none; }
+.plan-window.minimised .plan-window-bar { margin: 0; }
+.plan-window.minimised .plan-window-bar h2 { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

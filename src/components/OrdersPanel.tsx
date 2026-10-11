@@ -8,6 +8,7 @@ import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, 
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
+import { useDateCheck } from "./DateCheck";
 import { batchUnits, fullPacks, isCounted, jobTotals, lastPackSize, leftOver } from "@/lib/services/jobQuantities";
 import { DateFilterPicker } from "./DateFilterPicker";
 import { matchesDateFilter } from "@/lib/services/dateFilter";
@@ -86,6 +87,7 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
   onClose: () => void; onDone: (message: string) => void;
 }) {
   const uoms = useUoms();
+  const checkDates = useDateCheck();
   // With Master Data, only its finished goods and customers are offered, each as the scheduler record it becomes.
   const fromMasterData = catalog?.status === "ok";
   const choices = catalog?.status === "ok" ? catalog.products.map((master) => productFor(master, products)) : products;
@@ -116,6 +118,7 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
   return <form key={version} className="form-panel orders-form" onSubmit={(event) => {
     event.preventDefault();
     if (fromMasterData && !known) { setErrors([`Customer ID ${customerCode.trim()} is not in Master Data. Choose a customer from the list.`]); return; }
+    checkDates([{ label: "PO received date", value: receivedDate, rule: "today" }, { label: "Expected customer delivery", value: deliveryDate, rule: "delivery", after: { label: "the PO received date", value: receivedDate } }], () => {
     const createdAt = new Date().toISOString();
     let number = nextOrderNumber(orders);
     const customer: Customer = known ?? { id: `customer-${crypto.randomUUID()}`, code: customerCode.trim(), name: customerName.trim(), active: "Active" };
@@ -132,6 +135,7 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
       onDone(`${built[0].poNumber} for ${built[0].customerName}: ${built.length} item${built.length === 1 ? "" : "s"} added as ${range}. Open it in the list to key in its job orders.`);
       setItems([draftItem()]); setPoNumber(""); setSoNumber(""); setDeliveryDate(""); setReceivedDate(localDateKey(new Date())); setCustomerCode(""); setCustomerName(""); setVersion((value) => value + 1);
     }
+    });
   }}>
     <div className="panel-title"><h2 id="new-order-title">New order</h2><button className="icon-button" type="button" aria-label="Close new order" title="Close" onClick={onClose}><X size={18} /></button></div>
     {fromMasterData
@@ -633,6 +637,7 @@ function OrderDetail({ printable, orders, order, product, jobOrders, transfers, 
   onSave: (order: PurchaseOrder) => string[]; onDelete: (id: string) => string[];
 }) {
   const [errors, setErrors] = useState<string[]>([]);
+  const checkDates = useDateCheck();
   const [saved, setSaved] = useState(false);
   // Quantity and weights are live here so the total kg follows what is keyed in.
   const [weights, setWeights] = useState({ quantity: String(order.quantity), unitWeightMg: order.unitWeightMg ? String(order.unitWeightMg) : "", unitsPerPack: order.unitsPerPack ? String(order.unitsPerPack) : "" });
@@ -654,11 +659,14 @@ function OrderDetail({ printable, orders, order, product, jobOrders, transfers, 
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const delivery = String(data.get("deliveryDate") ?? ""), received = String(data.get("receivedDate") ?? "");
+      // Only a date changed here is checked, so an older order does not ask again on every save.
+      checkDates([{ label: "PO received date", value: received, rule: "today", was: order.receivedDate }, { label: "Expected customer delivery", value: delivery, rule: "delivery", was: order.deliveryDate, after: { label: "the PO received date", value: received } }], () => {
       const so = String(data.get("so") ?? "").trim();
       const { deliveryDate: _d, receivedDate: _r, soNumber: _s, unitWeightMg: _w, unitsPerPack: _p, ...rest } = order;
       const weighed = draftWeights({ ...draftItem(), ...weights }, order.uom);
       const result = onSave({ ...rest, ...(delivery ? { deliveryDate: delivery } : {}), ...(received ? { receivedDate: received } : {}), ...(so ? { soNumber: so } : {}), ...weighed, customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), quantity: Number(weights.quantity), format: String(data.get("format")) as ProductFormat });
       setErrors(result); setSaved(!result.length);
+      });
     }}>
       <label>Customer name<input name="customer" required defaultValue={order.customerName} list={`customers-${order.id}`} /></label>
       <datalist id={`customers-${order.id}`}>{customers.map((name) => <option key={name} value={name} />)}</datalist>

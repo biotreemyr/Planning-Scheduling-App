@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Maximize2, Minus, Plus, X } from "lucide-react";
+import { useDateCheck } from "./DateCheck";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { priorities, type Machine, type PlanLine, type Product, type ScheduleEntry } from "@/lib/domain/types";
 import { batchKilograms } from "@/lib/services/measurements";
@@ -19,8 +20,26 @@ export type PlannedRow = { calendarId: string; lineId?: string; on: boolean; act
 export type PlanRequest = { mode: "new"; date: string; calendarId?: string; jobId?: string; nonce: number } | { mode: "edit"; jobId: string; nonce: number };
 export type JobPlan = { jobId: string; rows: PlannedRow[]; batchNumber: string; priority: PlanLine["priority"]; notes: string };
 
-const shift = (rows: PlanRow[], index: number, value: string, nextDates: string[]) =>
-  rows.map((row, position) => position < index ? row : { ...row, date: position === index ? value : nextDates[position - index] ?? row.date });
+// The next working day after a date (weekends skipped).
+function nextWorkday(date: string) {
+  const day = new Date(`${date}T12:00:00`);
+  do day.setDate(day.getDate() + 1); while (day.getDay() === 0 || day.getDay() === 6);
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+}
+/**
+ * New plans: from row `from` on, each ticked process follows the ticked one before it on the next
+ * working day, and an unticked process has no date and takes no day. Rows before `from` stay.
+ */
+export function reflow(rows: PlanRow[], from: number) {
+  let last = [...rows.slice(0, from)].reverse().find((row) => row.on && row.calendarId && row.date)?.date;
+  return rows.map((row, position) => {
+    if (position < from) return row;
+    if (!row.on || !row.calendarId) return row.locked ? row : { ...row, date: "" };
+    const date = (position === from && row.date) || row.locked ? row.date : last ? nextWorkday(last) : row.date;
+    last = date || last;
+    return { ...row, date };
+  });
+}
 
 /**
  * Plan a job order in one go: choose a job order not planned yet, key in its batch number and set
@@ -48,6 +67,26 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   const [priority, setPriority] = useState<PlanLine["priority"]>("Normal");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const checkDates = useDateCheck();
+  // A floating window rather than a modal, so the calendar behind stays in view and usable: dragged
+  // by its title bar, minimised to that bar, and placed where it was left.
+  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
+  const [minimised, setMinimised] = useState(false);
+  const dragging = useRef<{ dx: number; dy: number } | null>(null);
+  const keepInView = (left: number, top: number) => {
+    const width = dialog.current?.offsetWidth ?? 600;
+    // Fully on screen side to side, so its buttons stay in reach; the title bar always visible.
+    return { left: Math.max(8, Math.min(left, document.documentElement.clientWidth - width - 8)), top: Math.min(Math.max(8, top), window.innerHeight - 48) };
+  };
+  function startDrag(event: React.PointerEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest("button") || !dialog.current) return;
+    const box = dialog.current.getBoundingClientRect();
+    dragging.current = { dx: event.clientX - box.left, dy: event.clientY - box.top };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function drag(event: React.PointerEvent<HTMLDivElement>) {
+    if (dragging.current) setPlace(keepInView(event.clientX - dragging.current.dx, event.clientY - dragging.current.dy));
+  }
   const editing = request?.mode === "edit";
   const job = jobOrders.find((item) => item.id === jobId);
   const order = orders.find((item) => item.id === job?.orderId);
@@ -95,7 +134,9 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
 
   useEffect(() => {
     if (!request) return;
-    setError(""); setNotes("");
+    // A day clicked on the calendar while a plan is being keyed in brings the window back, keeping it.
+    if (request.mode !== "edit" && !request.jobId && dialog.current?.open && jobId) { setMinimised(false); return; }
+    setError(""); setNotes(""); setMinimised(false);
     if (request.mode === "edit") {
       const chosen = jobOrders.find((item) => item.id === request.jobId);
       if (!chosen) return;
@@ -104,9 +145,10 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       setBatchNumber(chosen.batchNumber ?? ""); setPriority(planned[0]?.priority ?? "Normal");
     } else {
       const chosen = request.jobId ? jobOrders.find((item) => item.id === request.jobId) : undefined;
-      setJobId(chosen?.id ?? ""); setRows(chosen ? rowsFor(chosen, request.date) : []); setStart(request.date); setBatchNumber(chosen?.batchNumber ?? ""); setPriority("Normal");
+      setJobId(chosen?.id ?? ""); setRows(chosen ? reflow(rowsFor(chosen, request.date), 0) : []); setStart(request.date); setBatchNumber(chosen?.batchNumber ?? ""); setPriority("Normal");
     }
-    dialog.current?.showModal();
+    if (!dialog.current?.open) dialog.current?.show();
+    if (!place) setPlace(keepInView((window.innerWidth - Math.min(720, window.innerWidth - 24)) / 2, 72));
     // Opens once per request; later data changes must not reset what is being typed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.nonce]);
@@ -114,7 +156,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   function choose(id: string) {
     const chosen = jobOrders.find((item) => item.id === id);
     setJobId(id); setError("");
-    setRows(chosen ? rowsFor(chosen, start) : []);
+    setRows(chosen ? reflow(rowsFor(chosen, start), 0) : []);
     setBatchNumber(chosen?.batchNumber ?? "");
   }
   const update = (index: number, change: Partial<PlanRow>) => setRows((current) => current.map((row, position) => position === index ? { ...row, ...change } : row));
@@ -122,7 +164,8 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   const kilograms = (quantity: number, uom: string) => batchKilograms(quantity, uom) ?? (job?.batchSizeKg && uom === job.uom && job.quantity ? Number((job.batchSizeKg * quantity / job.quantity).toPrecision(6)) : undefined);
   const ticked = rows.filter((row) => row.on && row.calendarId);
 
-  return <dialog ref={dialog} className={`activity-dialog${job ? " activity-dialog-wide" : ""}`} aria-labelledby="job-plan-title">
+  return <dialog ref={dialog} className={`activity-dialog plan-window${job ? " activity-dialog-wide" : ""}${minimised ? " minimised" : ""}`} aria-labelledby="job-plan-title"
+    style={place ? { left: place.left, top: place.top } : undefined} onKeyDown={(event) => { if (event.key === "Escape" && !minimised) { event.stopPropagation(); setMinimised(true); } }}>
     <form className="form-panel" onSubmit={(event) => {
       event.preventDefault();
       if (!job) { setError("Choose the job order to plan."); return; }
@@ -131,6 +174,8 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       if (unset) { setError(`${job.number} has no ${unset.planned ? measureName(unset.planned) : "quantity"} for ${unset.calendarId ? nameOf(unset.calendarId) : unset.label}. Key it in on the job order (Orders tab) first.`); return; }
       const bad = rows.find((row) => row.on && row.calendarId && !row.locked && !/^\d{4}-\d{2}-\d{2}$/.test(row.date));
       if (bad) { setError(`Choose a date for ${bad.calendarId ? nameOf(bad.calendarId) : bad.label}.`); return; }
+      // Each ticked process's date, against what it was planned for when editing.
+      checkDates(rows.filter((row) => row.on && row.calendarId && !row.locked).map((row) => ({ label: `${nameOf(row.calendarId!)} date`, value: row.date, rule: "plan" as const, was: lines.find((line) => line.id === row.lineId)?.plannedDate })), () => {
       const planned: PlannedRow[] = rows.filter((row) => row.calendarId && (row.on || row.lineId)).map((row) => {
         const quantity = Number(row.quantity);
         return { calendarId: row.calendarId!, lineId: row.lineId, on: row.on, activityType: nameOf(row.calendarId!), plannedDate: row.date, quantity, uom: row.uom, batchSizeKg: kilograms(quantity, row.uom), machineId: row.machineId };
@@ -139,8 +184,15 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       if ("error" in result) { setError(result.error); return; }
       dialog.current?.close();
       onDone(result.message, planned.filter((row) => row.on).map((row) => row.plannedDate).sort()[0] ?? start);
+      });
     }}>
-      <div className="panel-title"><h2 id="job-plan-title">{editing ? `Edit planning · ${job?.number ?? ""}` : "Production Planning"}</h2><button className="icon-button" type="button" aria-label="Close" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
+      <div className="panel-title plan-window-bar" title="Drag to move" onPointerDown={startDrag} onPointerMove={drag} onPointerUp={() => { dragging.current = null; }} onPointerCancel={() => { dragging.current = null; }}>
+        <h2 id="job-plan-title">{editing ? `Edit planning · ${job?.number ?? ""}` : "Production Planning"}{minimised && job && !editing ? ` · ${job.number}` : ""}</h2>
+        <span className="plan-window-buttons">
+          <button className="icon-button" type="button" aria-label={minimised ? "Restore" : "Minimise"} title={minimised ? "Restore" : "Minimise"} onClick={() => setMinimised(!minimised)}>{minimised ? <Maximize2 size={16} /> : <Minus size={18} />}</button>
+          <button className="icon-button" type="button" aria-label="Close" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button>
+        </span>
+      </div>
       {editing ? null : choices.length || job ? <label>Job order<select required value={jobId} onChange={(event) => choose(event.target.value)}>
         <option value="" disabled>Choose a job order to plan</option>
         {(job && !choices.includes(job) ? [job, ...choices] : choices).map((item) => { const itemOrder = orders.find((entry) => entry.id === item.orderId); return <option key={item.id} value={item.id}>{item.number} · {products.find((entry) => entry.id === itemOrder?.productId)?.name ?? "Unknown product"} · {item.quantity.toLocaleString()} {item.uom}{itemOrder ? ` · ${itemOrder.poNumber}` : ""}</option>; })}
@@ -152,14 +204,13 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
           <p className="orders-help">{format === "Other" ? "No fixed route for this dosage form: choose the process." : `${format}: ${rows.filter((row) => row.calendarId && row.key !== "single").map((row) => row.label).join(" → ")}.`} {editing ? "Correct any date or machine; untick to remove an activity, tick to add a missed process. Completed processes are locked." : "One working day each, starting from the first process's date; change any date and the later processes follow."} Theoretical quantities come from the job order; production keys in the actual quantity when it completes each process.</p>
           <div className="route-plan-scroll"><table className="route-plan-table"><thead><tr><th scope="col">Plan</th><th scope="col">Process</th><th scope="col">Date planned</th><th scope="col">Machine</th><th scope="col" className="numeric">Theoretical quantity</th></tr></thead>
             <tbody>{rows.map((row, index) => <tr key={row.key} className={row.calendarId ? undefined : "route-missing"}>
-              <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => update(index, { on: event.target.checked })} /></td>
+              <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => { const on = event.target.checked; setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, on } : item); return editing ? changed : reflow(changed, index); }); }} /></td>
               <td>{row.key === "single" ? <select aria-label="Process" value={row.calendarId ?? ""} onChange={(event) => update(index, { calendarId: event.target.value })}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
                 : <>{row.calendarId ? nameOf(row.calendarId) : row.label}{!row.calendarId ? <small>Not set up in this unit (or filtered out)</small> : row.locked ? <small>Completed: locked</small> : row.lineId && !row.on ? <small>Will be removed</small> : null}</>}</td>
-              <td>{row.calendarId ? <input type="date" aria-label={`${row.label} date`} disabled={row.locked || !row.on} value={row.date} onChange={(event) => {
+              <td>{row.calendarId ? <input type="date" aria-label={`${row.label} date`} disabled={row.locked || !row.on} value={row.on || row.locked ? row.date : ""} title={row.on ? undefined : "Not planned"} onChange={(event) => {
                 // Later processes follow on the working days after, so the route keeps its order.
                 const value = event.target.value;
-                const next = routeDrafts(format, calendars, nameOf, value, settingsOf).map((draft) => draft.date);
-                setRows((current) => editing ? current.map((item, position) => position === index ? { ...item, date: value } : item) : shift(current, index, value, next));
+                setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, date: value } : item); return editing ? changed : reflow(changed, index); });
               }} /> : "-"}</td>
               <td>{row.calendarId ? (() => {
                 const options = machinesFor(row.calendarId);

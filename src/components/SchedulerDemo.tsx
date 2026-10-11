@@ -6,6 +6,8 @@ import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { StatusBadge } from "@/components/StatusBadge";
 import PlanningCalendar from "@/components/PlanningCalendar";
 import { ToolbarMenu } from "@/components/ToolbarMenu";
+import { DateCheckProvider, useDateCheck } from "@/components/DateCheck";
+import { dateWarnings } from "@/lib/services/dateChecks";
 import { ActivityWorkspace } from "@/components/ActivityWorkspace";
 import { CalendarAdmin } from "@/components/CalendarAdmin";
 import { CatalogAdmin } from "@/components/CatalogAdmin";
@@ -660,7 +662,7 @@ function ReportsPanel({
 export type CoreIdentity = { id: string; name: string; permissions: string[] };
 
 export default function SchedulerDemo({ initial, writeToken, identity, catalog }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog }) {
-  return <MeasurementProvider initial={initial.snapshot.measurements}><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} catalog={catalog} /></MeasurementProvider>;
+  return <MeasurementProvider initial={initial.snapshot.measurements}><DateCheckProvider><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} catalog={catalog} /></DateCheckProvider></MeasurementProvider>;
 }
 
 function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog }) {
@@ -695,6 +697,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
   const [statusSection, setStatusSection] = useState<StatusSection>("testing");
   // What the last save from the activity panel did, shown once the panel closes.
   const [planNotice, setPlanNotice] = useState("");
+  const checkDates = useDateCheck();
   // "Edit job order planning" from the activity panel reopens the plan form for that job order.
   const [jobEdit, setJobEdit] = useState<{ jobId: string; nonce: number } | null>(null);
   const [products, setProducts] = useState<Product[]>(initial.snapshot.products);
@@ -843,7 +846,14 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
   }
   // Every date change (drag in calendar or list, or the activity's date field) goes through here,
   // so bookings, orders and reports follow. Process-flow problems are warned about, not blocked.
+  // A drop on a day before today is confirmed first; the move then happens and reports as usual.
   function moveLine(id: string, date: string) {
+    const line = allowedLines.find((item) => item.id === id);
+    const checks = [{ label: `${line?.activityType ?? "Activity"} date`, value: date, rule: "plan" as const, was: line?.plannedDate }];
+    if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, () => setPlanNotice(applyMove(id, date))); return ""; }
+    return applyMove(id, date);
+  }
+  function applyMove(id: string, date: string) {
     if (!canPlan || !allowedLines.some((item) => item.id === id)) return "You cannot move this activity.";
     const result = moveActivity(data.lines, data.entries, id, date, member.name);
     if ("error" in result) return result.error;
@@ -859,6 +869,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
   }
   // Dragging an activity's edge sets its last day; its bookings follow and a machine clash is reported.
   function resizeLine(id: string, endDate: string) {
+    const line = allowedLines.find((item) => item.id === id);
+    const checks = [{ label: `${line?.activityType ?? "Activity"} last day`, value: endDate, rule: "plan" as const, was: line ? lineEnd(line) : undefined }];
+    if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, () => setPlanNotice(applyResize(id, endDate))); return ""; }
+    return applyResize(id, endDate);
+  }
+  function applyResize(id: string, endDate: string) {
     if (!canPlan || !allowedLines.some((item) => item.id === id)) return "You cannot change this activity.";
     const result = resizeActivity(data.lines, data.entries, id, endDate, member.name);
     if ("error" in result) return result.error;
@@ -1123,6 +1139,9 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
     setData((current) => ({ ...current, transfers: current.transfers.map((item) => item.id === id && !item.receivedAt ? { ...item, receivedAt: new Date().toISOString(), receivedBy: member.name } : item) }));
   }
   function planWip(id: string, date: string) {
+    checkDates([{ label: "Planned date for the received WIP", value: date, rule: "plan" }], () => applyPlanWip(id, date));
+  }
+  function applyPlanWip(id: string, date: string) {
     if (!canCreate || !scope(data.transfers).some((item) => item.id === id)) return;
     if (validateActual({ actualQuantity: 0, productionDate: date, hasDeviation: false, deviation: "" }).length) return;
     setData((current) => {

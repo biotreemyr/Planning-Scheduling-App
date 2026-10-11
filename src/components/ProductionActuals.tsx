@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useDateCheck } from "./DateCheck";
 import { Pencil, X } from "lucide-react";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { productionPerformance, validateActual, type ProductionActual } from "@/lib/services/actuals";
@@ -49,6 +50,7 @@ function ActualForm({ line, actual, uom, productName, onClose, onSave }: {
   const [quantity, setQuantity] = useState(actual ? String(actual.actualQuantity) : "");
   const [hasDeviation, setHasDeviation] = useState(actual?.hasDeviation ?? false);
   const [errors, setErrors] = useState<string[]>([]);
+  const checkDates = useDateCheck();
   const planned = actual?.plannedQuantity ?? line.quantity;
   const performance = productionPerformance(planned, quantity.trim() ? Number(quantity) : undefined);
   return <form className="actual-entry form-panel" onSubmit={(event) => {
@@ -56,7 +58,8 @@ function ActualForm({ line, actual, uom, productName, onClose, onSave }: {
     const data = new FormData(event.currentTarget);
     const input: ActualInput = { planLineId: line.id, actualQuantity: quantity.trim() ? Number(quantity) : NaN, productionDate: String(data.get("productionDate")), hasDeviation, deviation: hasDeviation ? String(data.get("deviation") ?? "").trim() : "", correctiveAction: hasDeviation ? String(data.get("correctiveAction") ?? "").trim() : "" };
     const validation = validateActual(input);
-    setErrors(validation.length ? validation : onSave(input));
+    if (validation.length) { setErrors(validation); return; }
+    checkDates([{ label: "Production date", value: input.productionDate, rule: "today", was: actual?.productionDate }], () => setErrors(onSave(input)));
   }}>
     <div className="panel-title"><h3>{productName}</h3><button type="button" className="icon-button" aria-label="Close actual entry" title="Close actual entry" onClick={onClose}><X size={18} /></button></div>
     <div className="actual-entry-fields"><label>Production date<input type="date" name="productionDate" required defaultValue={actual?.productionDate ?? line.plannedDate} /></label><label>Cumulative actual quantity ({actual?.uom ?? uom})<input type="number" min="0" step="any" required value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label></div>
