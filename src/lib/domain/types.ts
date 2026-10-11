@@ -121,6 +121,10 @@ export type PlanLine = {
   status: PlanLineStatus;
   orderReference?: string;
   notes?: string;
+  // Who last changed the plan (date, quantity, machine...) and who last keyed in production, and when.
+  plannedBy?: string; plannedAt?: string; updatedBy?: string; updatedAt?: string;
+  // The machine planned, kept when production reported running on another one.
+  plannedMachineId?: string;
 };
 
 export type ScheduleEntry = {

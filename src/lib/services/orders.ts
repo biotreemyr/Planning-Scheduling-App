@@ -33,6 +33,8 @@ export type PurchaseOrder = {
   // Per-process expected completion dates from before delivery dates; no longer entered or shown.
   expectedDates: Record<string, string>;
   notes?: string; createdAt: string; createdBy: string;
+  // Who last edited it, and when.
+  updatedBy?: string; updatedAt?: string;
 };
 
 const samePo = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();

@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import PlanningCalendar from "@/components/PlanningCalendar";
 import { ToolbarMenu } from "@/components/ToolbarMenu";
 import { DateCheckProvider, useDateCheck } from "@/components/DateCheck";
+import { stampChanges } from "@/lib/services/stamps";
 import { dateWarnings } from "@/lib/services/dateChecks";
 import { ActivityWorkspace } from "@/components/ActivityWorkspace";
 import { CalendarAdmin } from "@/components/CalendarAdmin";
@@ -697,13 +698,21 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
   const [statusSection, setStatusSection] = useState<StatusSection>("testing");
   // What the last save from the activity panel did, shown once the panel closes.
   const [planNotice, setPlanNotice] = useState("");
+  // In the activity window: whether the selected day's production form is open, and the last result.
+  const [activityUpdating, setActivityUpdating] = useState(false);
+  const [activityNotice, setActivityNotice] = useState("");
+  const openActivity = (id: string, update = false) => { setSelectedActivity(id); setActivityUpdating(update); setActivityNotice(""); };
   const checkDates = useDateCheck();
   // "Edit job order planning" from the activity panel reopens the plan form for that job order.
   const [jobEdit, setJobEdit] = useState<{ jobId: string; nonce: number } | null>(null);
   const [products, setProducts] = useState<Product[]>(initial.snapshot.products);
   const [workCentres, setWorkCentres] = useState<WorkCentre[]>(initial.snapshot.workCentres);
   const [machines, setMachines] = useState<Machine[]>(initial.snapshot.machines);
-  const [data, setData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] }>(initial.snapshot.data);
+  const [data, setRawData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] }>(initial.snapshot.data);
+  type WorkspaceData = { lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] };
+  // Every change goes through here and is stamped with who made it and when (see stamps.ts).
+  const setData = (update: WorkspaceData | ((current: WorkspaceData) => WorkspaceData)) =>
+    setRawData((current) => stampChanges(current, typeof update === "function" ? update(current) : update, member.name, new Date().toISOString()));
   const { uoms, activities } = useSettings();
   const snapshot = { schemaVersion: 1, directory, products, workCentres, machines, measurements: { uoms, activities }, data } as WorkspaceSnapshot;
   const persistenceStatus = useWorkspacePersistence(initial, snapshot, writeToken);
@@ -1131,7 +1140,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
   }
   function applySnapshot(next: WorkspaceSnapshot) {
     if (!canManage) return;
-    setDirectory(next.directory); setProducts(next.products); setWorkCentres(next.workCentres); setMachines(next.machines); setData(next.data);
+    setDirectory(next.directory); setProducts(next.products); setWorkCentres(next.workCentres); setMachines(next.machines); setRawData(next.data);
     setUnitSelection(""); setProcessSelection(null); setSelectedActivity(null);
   }
   function receiveWip(id: string) {
@@ -1175,16 +1184,16 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={setSelectedActivity} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine} onResizeLine={resizeLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
-      {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
-        orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} canAssign={canAssign} onAssignMachine={assignMachine} onOpenLine={setSelectedActivity}
+      {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.jobOrderId ?? selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
+        orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} transfers={data.transfers} visibleCalendarIds={allowedCalendars.map((item) => item.id)} canAssign={canAssign} canUpdate={canProduce} updating={activityUpdating} notice={activityNotice} onAssignMachine={assignMachine} onOpenLine={openActivity}
         jobOrders={data.jobOrders}>
-        <ProductionUpdate line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
+        <ProductionUpdate key={selectedLine.id} line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
           machines={unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? "") && (machine.active === "Active" || data.entries.some((entry) => entry.planLineId === selectedLine.id && entry.machineId === machine.id)))}
           machineId={data.entries.find((entry) => entry.planLineId === selectedLine.id && entry.status !== "Cancelled")?.machineId ?? ""}
-          onSaved={(message) => { setSelectedActivity(null); setPlanNotice(`${products.find((item) => item.id === selectedLine.productId)?.name ?? "Activity"} · ${selectedLine.activityType ?? ""}: ${message}`); }} />
+          onSaved={(message) => { setActivityUpdating(false); setActivityNotice(`${selectedLine.activityType ?? "Activity"} ${formatDate(selectedLine.plannedDate)}: ${message}`); }} />
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
         <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements", ...(identity ? [] : ["Sample data"])].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>

@@ -35,7 +35,7 @@ export const workspaceSchema = z.object({
   machines: z.array(record.extend({ code: name, workCentreId: id, unitId: id, processIds: z.array(id).min(1), setupMinutes: number.int().nonnegative(), capacity: number.positive().optional(), capacityUom: text.optional(), capacityNotes: text.optional(), active })),
   measurements: settings,
   data: z.object({
-    lines: z.array(z.object({ id, calendarId: id, planId: id, productId: id, quantity: number.positive(), plannedDate: date, endDate: date.optional(),
+    lines: z.array(z.object({ id, plannedBy: text.optional(), plannedAt: timestamp.optional(), updatedBy: text.optional(), updatedAt: timestamp.optional(), plannedMachineId: id.optional(), calendarId: id, planId: id, productId: id, quantity: number.positive(), plannedDate: date, endDate: date.optional(),
       priority: z.enum(["Low", "Normal", "High", "Urgent"]), status: z.enum(["Unscheduled", "Partially Scheduled", "Fully Scheduled"]),
       startedAt: date.optional(), productionNotes: text.optional(),
       completedAt: timestamp.optional(), yieldQuantity: number.nonnegative().optional(), yieldUom: name.optional(),
@@ -51,11 +51,11 @@ export const workspaceSchema = z.object({
       orderReference: text.optional(), notes: text, createdAt: timestamp, createdBy: name, receivedAt: timestamp.optional(), receivedBy: name.optional(), plannedLineId: id.optional(),
       wipRoom: z.boolean().optional() })),
     // Added after the first pilot release; older snapshots load with no orders.
-    orders: z.array(z.object({ id, poNumber: name, customerName: text.optional(), customerId: id.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), unitId: id.optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date), deliveryDate: date.optional(), receivedDate: date.optional(), soNumber: z.string().trim().max(60).optional(), unitWeightMg: number.positive().optional(), unitsPerPack: number.int().positive().optional(),
+    orders: z.array(z.object({ id, updatedBy: text.optional(), updatedAt: timestamp.optional(), poNumber: name, customerName: text.optional(), customerId: id.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), unitId: id.optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date), deliveryDate: date.optional(), receivedDate: date.optional(), soNumber: z.string().trim().max(60).optional(), unitWeightMg: number.positive().optional(), unitsPerPack: number.int().positive().optional(),
       notes: text.optional(), createdAt: timestamp, createdBy: name })).default([]),
     // Customer master and job orders came later still; older snapshots load with none.
     customers: z.array(z.object({ id, code: name, name, contactNotes: text.optional(), active, masterDataId: z.string().uuid().optional() })).default([]),
-    jobOrders: z.array(z.object({ id, number: name, orderId: id, sequence: number.int().positive(), quantity: number.positive(), uom: name,
+    jobOrders: z.array(z.object({ id, updatedBy: text.optional(), updatedAt: timestamp.optional(), number: name, orderId: id, sequence: number.int().positive(), quantity: number.positive(), uom: name,
       batchSizeKg: number.positive().optional(), batchVolumeL: number.positive().optional(), packQuantity: number.positive().optional(), packUom: name.optional(), packSize: number.positive().optional(),
       boxQuantity: number.positive().optional(), packingNumber: z.string().trim().min(1).max(60).optional(),
       testedAt: timestamp.optional(), testedBy: text.optional(), testResult: z.enum(["Passed", "Failed", "Under investigation"]).optional(),

@@ -9,6 +9,7 @@ import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
 import { useDateCheck } from "./DateCheck";
+import { Who } from "./Who";
 import { batchUnits, fullPacks, isCounted, jobTotals, lastPackSize, leftOver } from "@/lib/services/jobQuantities";
 import { DateFilterPicker } from "./DateFilterPicker";
 import { matchesDateFilter } from "@/lib/services/dateFilter";
@@ -460,7 +461,7 @@ function JobOrders({ orders, order, product, format, jobOrders, transfers, lines
           </form>
         </td></tr>;
         return <tr key={job.id}>
-          <th scope="row"><strong>{job.number}</strong><small>Batch {job.sequence} of PO item</small></th>
+          <th scope="row"><strong>{job.number}</strong><small>Batch {job.sequence} of PO item</small><Who verb="Added" who={job.createdBy} at={job.createdAt} /><Who verb="Edited" who={job.updatedBy} at={job.updatedAt} /></th>
           <td className="numeric">{measure(processQuantity(job, "dispensing"))}</td>
           <td className="numeric">{measure(processQuantity(job, "tableting"))}</td>
           <td>{packingNumber(job)}</td>
@@ -647,6 +648,7 @@ function OrderDetail({ printable, orders, order, product, jobOrders, transfers, 
   return <div className="order-detail">
     <div className="order-detail-head">
       {printable ? <button type="button" className="calendar-button" onClick={onPrint}><Printer size={15} />Print this order</button> : null}
+      <span className="order-detail-who"><Who verb="Added" who={order.createdBy} at={order.createdAt} /><Who verb="Last edited" who={order.updatedBy} at={order.updatedAt} /></span>
     </div>
     {order.deliveryDate && lastDate > order.deliveryDate ? <p className="order-warning" role="alert">Production is scheduled until {displayDate(lastDate)}, after the expected customer delivery on {displayDate(order.deliveryDate)}.</p> : null}
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
