@@ -832,7 +832,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
     return [];
   }
   // Production's progress on an activity: the day it started and notes; its bookings go in progress.
-  function saveProgress(startedAt: string, notes: string, machineId?: string, progress?: Progress | null) {
+  function saveProgress(startedAt: string, notes: string, machineId?: string, progress?: Progress) {
     const line = selectedLine;
     if (!line || !canProduce) return ["Production access to this activity is required."];
     if (line.completedAt) return ["This activity is already complete."];
@@ -840,9 +840,9 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
     const machine = machineChange(line, machineId);
     if ("error" in machine) return [machine.error];
     setData((previous) => { const current = machine.entries ? { ...previous, entries: machine.entries } : previous; return { ...current,
-      // The amount run so far is kept as keyed in; left empty, it is cleared. Without one (calls from
-      // completion), what was saved stays.
-      lines: current.lines.map((item) => item.id !== line.id ? item : (({ startedAt: _s, productionNotes: _n, ...rest }) => ({ ...(progress === undefined ? rest : withoutProgress(rest)), ...(startedAt ? { startedAt } : {}), ...(notes ? { productionNotes: notes } : {}), ...(progress ? { progressQuantity: progress.quantity, progressUom: progress.uom, ...(progress.unitSize ? { progressUnitSize: progress.unitSize } : {}) } : {}) }))(item)),
+      // The amount run so far and the output's destination are kept as keyed in (an emptied amount is
+      // cleared). Without them (calls from completion), what was saved stays.
+      lines: current.lines.map((item) => item.id !== line.id ? item : (({ startedAt: _s, productionNotes: _n, ...rest }) => ({ ...(progress === undefined ? rest : withoutProgress(rest)), ...(startedAt ? { startedAt } : {}), ...(notes ? { productionNotes: notes } : {}), ...(progress?.quantity !== undefined ? { progressQuantity: progress.quantity, progressUom: progress.uom, ...(progress.unitSize ? { progressUnitSize: progress.unitSize } : {}) } : {}), ...(progress?.destination ? { progressDestination: progress.destination } : {}) }))(item)),
       entries: startedAt ? current.entries.map((entry) => entry.planLineId === line.id && (entry.status === "Draft" || entry.status === "Confirmed") ? { ...entry, status: "In Progress" as const, changedBy: member.name } : entry) : current.entries }; });
     return [];
   }
