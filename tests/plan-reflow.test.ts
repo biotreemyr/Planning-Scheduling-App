@@ -24,4 +24,12 @@ describe("planning dates when processes are unticked", () => {
     const locked = route().map((item, index) => index === 3 ? { ...item, locked: true, date: "2026-10-01" } : item);
     expect(reflow(locked, 0)[3].date).toBe("2026-10-01");
   });
+  it("starts with nothing ticked; ticking the front part dates it from the plan's day and leaves the rest off", () => {
+    const start = "2026-10-09";
+    let rows = reflow(route().map((item) => ({ ...item, on: false })), 0, start);
+    expect(dates(rows)).toEqual(["Dispensing -", "Blending -", "Granulation -", "Compression -", "Packing -"]);
+    rows = reflow(rows.map((item, index) => index === 0 ? { ...item, on: true } : item), 0, start);
+    rows = reflow(rows.map((item, index) => index === 1 ? { ...item, on: true } : item), 1, start);
+    expect(dates(rows)).toEqual(["Dispensing 2026-10-09", "Blending 2026-10-12", "Granulation -", "Compression -", "Packing -"]);
+  });
 });

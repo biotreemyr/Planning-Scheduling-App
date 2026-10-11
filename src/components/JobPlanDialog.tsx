@@ -28,14 +28,15 @@ function nextWorkday(date: string) {
 }
 /**
  * New plans: from row `from` on, each ticked process follows the ticked one before it on the next
- * working day, and an unticked process has no date and takes no day. Rows before `from` stay.
+ * working day, and an unticked process has no date and takes no day. Rows before `from` stay. The
+ * first ticked process with no date takes `start`, the day the plan was opened for.
  */
-export function reflow(rows: PlanRow[], from: number) {
+export function reflow(rows: PlanRow[], from: number, start = "") {
   let last = [...rows.slice(0, from)].reverse().find((row) => row.on && row.calendarId && row.date)?.date;
   return rows.map((row, position) => {
     if (position < from) return row;
     if (!row.on || !row.calendarId) return row.locked ? row : { ...row, date: "" };
-    const date = (position === from && row.date) || row.locked ? row.date : last ? nextWorkday(last) : row.date;
+    const date = (position === from && row.date) || row.locked ? row.date : last ? nextWorkday(last) : row.date || start;
     last = date || last;
     return { ...row, date };
   });
@@ -113,7 +114,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
     // No fixed route (format Other): one process, chosen in the row.
     const machineFor = (calendarId?: string) => { const options = machinesFor(calendarId); return options.length === 1 ? options[0].id : ""; };
     if (!drafts.length) return [{ key: "single", label: "Process", calendarId: calendars[0]?.id, date: from, quantity: String(chosen.quantity), uom: chosen.uom, on: true, machineId: machineFor(calendars[0]?.id) }];
-    return drafts.map((draft) => { const [quantity, uom] = defaults(chosen, draft.planned); return { key: draft.key, label: draft.label, calendarId: draft.calendarId, date: draft.date, quantity, uom, on: !!draft.calendarId, machineId: machineFor(draft.calendarId), planned: draft.planned }; });
+    return drafts.map((draft) => { const [quantity, uom] = defaults(chosen, draft.planned); return { key: draft.key, label: draft.label, calendarId: draft.calendarId, date: draft.date, quantity, uom, on: false, machineId: machineFor(draft.calendarId), planned: draft.planned }; });
   }
   // Edit mode: the route's rows filled from the job order's activities; other activities added after.
   function rowsFromPlan(chosen: JobOrder): PlanRow[] {
@@ -145,7 +146,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       setBatchNumber(chosen.batchNumber ?? ""); setPriority(planned[0]?.priority ?? "Normal");
     } else {
       const chosen = request.jobId ? jobOrders.find((item) => item.id === request.jobId) : undefined;
-      setJobId(chosen?.id ?? ""); setRows(chosen ? reflow(rowsFor(chosen, request.date), 0) : []); setStart(request.date); setBatchNumber(chosen?.batchNumber ?? ""); setPriority("Normal");
+      setJobId(chosen?.id ?? ""); setRows(chosen ? reflow(rowsFor(chosen, request.date), 0, request.date) : []); setStart(request.date); setBatchNumber(chosen?.batchNumber ?? ""); setPriority("Normal");
     }
     if (!dialog.current?.open) dialog.current?.show();
     if (!place) setPlace(keepInView((window.innerWidth - Math.min(720, window.innerWidth - 24)) / 2, 72));
@@ -156,7 +157,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   function choose(id: string) {
     const chosen = jobOrders.find((item) => item.id === id);
     setJobId(id); setError("");
-    setRows(chosen ? reflow(rowsFor(chosen, start), 0) : []);
+    setRows(chosen ? reflow(rowsFor(chosen, start), 0, start) : []);
     setBatchNumber(chosen?.batchNumber ?? "");
   }
   const update = (index: number, change: Partial<PlanRow>) => setRows((current) => current.map((row, position) => position === index ? { ...row, ...change } : row));
@@ -201,16 +202,16 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
         <p className="orders-help">{product?.name ?? "Unknown product"} · PO <strong>{poLabel(order, orders)}</strong>{order.customerName ? ` · ${order.customerName}` : ""} · {job.quantity.toLocaleString()} {job.uom}{job.batchSizeKg ? ` · ${job.batchSizeKg.toLocaleString()} kg` : ""}{job.packQuantity ? ` · ${job.packQuantity.toLocaleString()} ${job.packUom}` : ""}</p>
         <label>Batch number<input maxLength={60} autoComplete="off" value={batchNumber} onChange={(event) => setBatchNumber(event.target.value)} placeholder={`Batch number for ${job.number}`} /></label>
         <div className="route-plan">
-          <p className="orders-help">{format === "Other" ? "No fixed route for this dosage form: choose the process." : `${format}: ${rows.filter((row) => row.calendarId && row.key !== "single").map((row) => row.label).join(" → ")}.`} {editing ? "Correct any date or machine; untick to remove an activity, tick to add a missed process. Completed processes are locked." : "One working day each, starting from the first process's date; change any date and the later processes follow."} Theoretical quantities come from the job order; production keys in the actual quantity when it completes each process.</p>
+          <p className="orders-help">{format === "Other" ? "No fixed route for this dosage form: choose the process." : `${format}: ${rows.filter((row) => row.calendarId && row.key !== "single").map((row) => row.label).join(" → ")}.`} {editing ? "Correct any date or machine; untick to remove an activity, tick to add a missed process. Completed processes are locked." : "Tick each process to plan it now; an unticked process gets no date and stays off the calendar, to plan later. One working day each, from the first ticked process's date; change any date and the later ticked processes follow."} Theoretical quantities come from the job order; production keys in the actual quantity when it completes each process.</p>
           <div className="route-plan-scroll"><table className="route-plan-table"><thead><tr><th scope="col">Plan</th><th scope="col">Process</th><th scope="col">Date planned</th><th scope="col">Machine</th><th scope="col" className="numeric">Theoretical quantity</th></tr></thead>
             <tbody>{rows.map((row, index) => <tr key={row.key} className={row.calendarId ? undefined : "route-missing"}>
-              <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => { const on = event.target.checked; setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, on } : item); return editing ? changed : reflow(changed, index); }); }} /></td>
+              <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => { const on = event.target.checked; setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, on } : item); return editing ? changed : reflow(changed, index, start); }); }} /></td>
               <td>{row.key === "single" ? <select aria-label="Process" value={row.calendarId ?? ""} onChange={(event) => update(index, { calendarId: event.target.value })}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
                 : <>{row.calendarId ? nameOf(row.calendarId) : row.label}{!row.calendarId ? <small>Not set up in this unit (or filtered out)</small> : row.locked ? <small>Completed: locked</small> : row.lineId && !row.on ? <small>Will be removed</small> : null}</>}</td>
               <td>{row.calendarId ? <input type="date" aria-label={`${row.label} date`} disabled={row.locked || !row.on} value={row.on || row.locked ? row.date : ""} title={row.on ? undefined : "Not planned"} onChange={(event) => {
                 // Later processes follow on the working days after, so the route keeps its order.
                 const value = event.target.value;
-                setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, date: value } : item); return editing ? changed : reflow(changed, index); });
+                setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, date: value } : item); return editing ? changed : reflow(changed, index, start); });
               }} /> : "-"}</td>
               <td>{row.calendarId ? (() => {
                 const options = machinesFor(row.calendarId);
