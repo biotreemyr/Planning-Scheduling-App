@@ -6,11 +6,12 @@ import { canViewCalendar, type CalendarDirectory, type CalendarPerson } from "@/
 // machineId: the machine production ran it on, when chosen in the update ("" for none).
 // weighed: the output was weighed (kg, g) or measured (L, mL) and converted to a count with the size of
 // one unit; unitWeightMg then holds mg per unit for a weight, or mL per unit for a volume.
-// The amount run so far, saved with progress: as keyed in, with one unit's weight or volume when weighed.
-export type Progress = { quantity: number; uom: string; unitSize?: number };
+// Saved with progress: the amount run so far as keyed in (none when left empty), with one unit's weight
+// or volume when weighed, and where the output is to go.
+export type Progress = { quantity?: number; uom?: string; unitSize?: number; destination?: string };
 // An activity without its amount-so-far, once completed or when production clears it.
-export function withoutProgress<T extends { progressQuantity?: number; progressUom?: string; progressUnitSize?: number }>(line: T) {
-  const { progressQuantity: _q, progressUom: _u, progressUnitSize: _s, ...rest } = line;
+export function withoutProgress<T extends { progressQuantity?: number; progressUom?: string; progressUnitSize?: number; progressDestination?: string }>(line: T) {
+  const { progressQuantity: _q, progressUom: _u, progressUnitSize: _s, progressDestination: _d, ...rest } = line;
   return rest;
 }
 export type CompletionInput = { quantity: number; destinationId: string; notes: string; completedDate?: string; wipRoom?: boolean; uom?: string; machineId?: string;

@@ -37,7 +37,7 @@ export const workspaceSchema = z.object({
   data: z.object({
     lines: z.array(z.object({ id, plannedBy: text.optional(), plannedAt: timestamp.optional(), updatedBy: text.optional(), updatedAt: timestamp.optional(), plannedMachineId: id.optional(), calendarId: id, planId: id, productId: id, quantity: number.positive(), plannedDate: date, endDate: date.optional(),
       priority: z.enum(["Low", "Normal", "High", "Urgent"]), status: z.enum(["Unscheduled", "Partially Scheduled", "Fully Scheduled"]),
-      startedAt: date.optional(), productionNotes: text.optional(), progressQuantity: number.nonnegative().optional(), progressUom: name.optional(), progressUnitSize: number.positive().optional(),
+      startedAt: date.optional(), productionNotes: text.optional(), progressQuantity: number.nonnegative().optional(), progressUom: name.optional(), progressUnitSize: number.positive().optional(), progressDestination: text.optional(),
       completedAt: timestamp.optional(), yieldQuantity: number.nonnegative().optional(), yieldUom: name.optional(),
       weighedQuantity: number.nonnegative().optional(), weighedUom: name.optional(), actualUnitWeightMg: number.positive().optional(), actualUnitVolumeMl: number.positive().optional(), incomingWipId: id.optional(), uom: name.optional(),
       activityType: text.optional(), unitWeightMg: number.positive().optional(), batchSizeKg: number.nonnegative().optional(),

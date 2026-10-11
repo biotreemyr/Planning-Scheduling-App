@@ -32,7 +32,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   onSaved?: (message: string) => void;
   // The next process of this batch's route, offered first as the destination.
   nextCalendarId?: string;
-  onProgress: (startedAt: string, notes: string, machineId?: string, progress?: Progress | null) => string[];
+  onProgress: (startedAt: string, notes: string, machineId?: string, progress?: Progress) => string[];
   onComplete: (input: CompletionInput) => string[];
   // Present when a completed update may be corrected.
   onCorrect?: (input: CorrectionInput) => string[];
@@ -78,7 +78,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const wipFor = (outgoing?.wipRoom ? outgoing.calendarId : undefined) ?? nextCalendarId ?? unitOrder.slice(unitOrder.findIndex((calendar) => calendar.id === source?.id) + 1).find((calendar) => destinations.includes(calendar))?.id;
   const completedDay = line.completedAt ? localDay(line.completedAt) : "";
   const handedOver = !!outgoing && !!(outgoing.receivedAt || outgoing.plannedLineId);
-  const destinationValue = line.completedAt ? outgoing ? `${outgoing.wipRoom ? "wip" : "next"}:${outgoing.calendarId}` : "final" : nextCalendarId ? `next:${nextCalendarId}` : "final";
+  const destinationValue = line.completedAt ? outgoing ? `${outgoing.wipRoom ? "wip" : "next"}:${outgoing.calendarId}` : "final" : line.progressDestination ?? (nextCalendarId ? `next:${nextCalendarId}` : "final");
 
   if (line.completedAt && !correcting) return <section className="production-update"><h3>Production update</h3>
     <dl className="production-facts">
@@ -153,8 +153,8 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
         if (!done(onCorrect!({ ...output, startedAt }), "Production update corrected.").length) setCorrecting(false);
         return;
       }
-      // Save progress keeps the amount run so far as keyed in; an emptied box clears it.
-      if (!completing) { done(onProgress(startedAt, notes, machine, typed ? { quantity: Number(typed), uom: reported, ...(weighing && Number(unitMg) > 0 ? { unitSize: Number(unitMg) } : {}) } : null), "Progress saved."); return; }
+      // Save progress keeps the amount run so far as keyed in (an emptied box clears it) and the destination.
+      if (!completing) { done(onProgress(startedAt, notes, machine, { ...(typed ? { quantity: Number(typed), uom: reported, ...(weighing && Number(unitMg) > 0 ? { unitSize: Number(unitMg) } : {}) } : {}), destination: String(data.get("destination") ?? "final") }), "Progress saved."); return; }
       if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity to complete."]); return; }
       const progress = startedAt !== (line.startedAt ?? "") || notes !== (line.productionNotes ?? "") ? onProgress(startedAt || completedDate, notes) : [];
       if (progress.length) { setErrors(progress); return; }
@@ -162,7 +162,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       });
     }}>{content}</form>;
   const help = correcting ? handedOver ? `${processName(outgoing!.calendarId)} has already received this output, so its quantity and destination stay as they are. Dates and notes can still be corrected.` : "Correct anything keyed in by mistake. The handover to the next process follows the correction."
-    : `Save progress records the start date, the amount run so far and notes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`;
+    : `Save progress records the start date, the amount run so far, notes and where the output goes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`;
 
   // In the route table: one cell per Actual column, then the buttons.
   if (inRow) {

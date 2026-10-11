@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Maximize2, Minus, X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
 import { orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
@@ -74,7 +74,20 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
   const amount = (value: number) => value.toLocaleString("en-GB", { maximumFractionDigits: 3 });
   const machineName = (id?: string) => machines.find((machine) => machine.id === id)?.name ?? "";
   const COLUMNS = 13;
-  return <section className="production-route"><h3>Production route{line.orderReference ? ` · ${line.orderReference}` : ""}</h3>
+  // Who planned or updated a day shows in a small box right beside the cell pointed at.
+  const [tip, setTip] = useState<{ text: string; left: number; top: number } | null>(null);
+  const hover = (text?: string) => text ? {
+    onMouseEnter: (event: MouseEvent<HTMLElement>) => {
+      const box = event.currentTarget.getBoundingClientRect();
+      // Beside the cell on the right, or on its left when there is no room.
+      const left = box.right + 248 > window.innerWidth ? Math.max(8, box.left - 248) : box.right + 6;
+      setTip({ text, left, top: box.top + 4 });
+    },
+    onMouseLeave: () => setTip(null)
+  } : {};
+  const processOf = (calendarId?: string) => route.find((other) => other.calendar.id === calendarId)?.processName ?? "next process";
+  return <section className="production-route" onScrollCapture={() => setTip(null)}>
+    {tip ? <div className="who-tip" role="tooltip" style={{ left: tip.left, top: tip.top }}>{tip.text}</div> : null}<h3>Production route{line.orderReference ? ` · ${line.orderReference}` : ""}</h3>
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <div className="route-table-scroll"><table className="route-table">
       <thead>
@@ -95,20 +108,23 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
           // Before the day completes: the amount run so far, saved with progress.
           const soFar = item.completedAt ? undefined : item.progressQuantity, soFarUom = item.progressUom ?? item.uom;
           const outgoing = transfers.find((transfer) => transfer.sourceLineId === item.id);
-          const next = outgoing ? outgoing.wipRoom ? "WIP room" : route.find((other) => other.calendar.id === outgoing.calendarId)?.processName ?? "Next process" : item.completedAt ? "Final output" : "";
+          // Where the output went; before completion, where production chose to send it.
+          const [chosenKind, chosenCalendar] = (item.completedAt ? "" : item.progressDestination ?? "").split(":");
+          const next = outgoing ? outgoing.wipRoom ? `WIP room, for ${processOf(outgoing.calendarId)}` : processOf(outgoing.calendarId) : item.completedAt ? "Final output"
+            : chosenKind === "final" ? "Final output" : chosenKind === "wip" ? `WIP room, for ${processOf(chosenCalendar)}` : chosenKind === "next" ? processOf(chosenCalendar) : "";
           const current = item.id === line.id;
+          // Who planned shows beside the Planned cells, who last updated beside the Actual ones.
+          const plannedWho = hover(whoText("Planned", item.plannedBy, item.plannedAt));
+          const updatedWho = item.startedAt || item.completedAt || item.progressQuantity !== undefined || item.progressDestination ? whoText("Updated", item.updatedBy, item.updatedAt) : "";
           // Production can click anywhere on a day's Actual cells to key them in.
-          // Who planned and who last updated show when hovering over the data, not under it.
-          const plannedWho = whoText("Planned", item.plannedBy, item.plannedAt) || undefined;
-          const updatedWho = item.startedAt || item.completedAt || item.progressQuantity !== undefined ? whoText("Updated", item.updatedBy, item.updatedAt) : "";
-          const open = (className = "") => ({ className: `${className}${canUpdate ? " route-actual-open" : ""}`.trim() || undefined, title: [updatedWho, canUpdate ? item.completedAt ? "Click to correct this day" : "Click to update this day" : ""].filter(Boolean).join("\n") || undefined, ...(canUpdate ? { onClick: () => onOpenLine?.(item.id, true) } : {}) });
+          const open = (className = "") => ({ className: `${className}${canUpdate ? " route-actual-open" : ""}`.trim() || undefined, ...hover(updatedWho), ...(canUpdate ? { onClick: () => { setTip(null); onOpenLine?.(item.id, true); } } : {}) });
           const rows = [<tr key={item.id} className={[current ? "route-current" : "", item.completedAt ? "route-done" : ""].join(" ").trim() || undefined}>
             {index === 0 ? <><td rowSpan={step.lines.length} className="route-plan-mark" aria-label="Planned">✓</td>
               <th scope="row" rowSpan={step.lines.length}>{step.processName}{done ? <span className="badge success">Done</span> : null}</th></> : null}
-            <td><button type="button" className="route-day" aria-current={current || undefined} title={[plannedWho, "Open this day"].filter(Boolean).join("\n")} onClick={() => onOpenLine?.(item.id)}>{day(item.plannedDate)}{item.endDate ? ` – ${day(item.endDate)}` : ""}</button></td>
-            <td className="numeric" title={plannedWho}>{amount(item.quantity)} {item.uom ?? ""}</td>
-            <td className="route-equivalence" title={plannedWho}>{equivalence(item.quantity, item.uom, factors) || <span className="route-muted">-</span>}</td>
-            <td>{editable && onAssign && !item.completedAt ? <select aria-label={`Machine for ${step.processName} on ${day(item.plannedDate)}`} value={booked ?? ""} onChange={(event) => setMessages({ ...messages, [item.id]: onAssign([item.id], event.target.value) })}>
+            <td {...plannedWho}>{day(item.plannedDate)}{item.endDate ? ` – ${day(item.endDate)}` : ""}</td>
+            <td className="numeric" {...plannedWho}>{amount(item.quantity)} {item.uom ?? ""}</td>
+            <td className="route-equivalence" {...plannedWho}>{equivalence(item.quantity, item.uom, factors) || <span className="route-muted">-</span>}</td>
+            <td {...plannedWho}>{editable && onAssign && !item.completedAt ? <select aria-label={`Machine for ${step.processName} on ${day(item.plannedDate)}`} value={booked ?? ""} onChange={(event) => setMessages({ ...messages, [item.id]: onAssign([item.id], event.target.value) })}>
                 <option value="">Not assigned</option>{options.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select>
               : machineName(planned) || <span className="route-muted">Not assigned</span>}
               {(messages[item.id] ?? []).map((message) => <small role="alert" key={message}>{message}</small>)}</td>

@@ -96,6 +96,9 @@ export type PlanLine = {
   // The amount run so far, saved with progress before the day completes: as keyed in (a weight for
   // tablets or capsules weighed), with the weight or volume of one unit when weighed.
   progressQuantity?: number; progressUom?: string; progressUnitSize?: number;
+  // Where production chose to send the output, saved with progress: "next:<calendar>", "wip:<calendar>"
+  // or "final". The handover itself is made when the day completes.
+  progressDestination?: string;
   completedAt?: string;
   yieldQuantity?: number;
   // The unit the actual quantity was reported in, when it differs by process (kg at dispensing...).

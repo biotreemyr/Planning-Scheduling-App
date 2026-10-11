@@ -810,7 +810,6 @@
 .route-table .route-remarks { max-width: 180px; overflow-wrap: anywhere; }
 .route-table select { min-height: 30px; padding: 3px 6px; font-size: 12px; }
 .route-table td > .calendar-button, .route-table td > .primary-button { min-height: 30px; padding: 4px 10px; font-size: 12px; white-space: nowrap; }
-.route-table .route-day { padding: 0; border: 0; background: none; color: var(--blue); font: inherit; text-decoration: underline; cursor: pointer; }
 /* Updating a day on its own row: the Actual cells hold production's inputs. */
 .route-table .route-current > td.route-edit { background: #f6faf8; }
 .route-table .route-edit label { display: grid; gap: 2px; margin: 0 0 6px; font-size: 11px; color: var(--muted); font-weight: 600; }
@@ -834,7 +833,6 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .order-detail-who { display: flex; gap: 4px 14px; flex-wrap: wrap; }
 .order-detail-who small.who { margin: 0; }
 .route-table .route-remarks { min-width: 150px; overflow-wrap: break-word; }
-.route-table td:has(> small.who) { min-width: 120px; }
 /* The Activity window floats like Production Planning; minimised it keeps just its title bar. */
 .activity-dialog.floating-window.minimised { width: min(380px, calc(100vw - 24px)); padding: 10px 14px; overflow: hidden; }
 .floating-window.minimised > :not(.plan-window-bar), .floating-window.minimised .plan-window-bar :is(.eyebrow, .activity-order-ref, .calendar-button) { display: none; }
@@ -842,3 +840,9 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .floating-window.minimised .plan-window-bar h2 { margin: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .floating-window.minimised .plan-window-bar > div { min-width: 0; }
 .route-table .route-so-far { display: block; color: var(--muted); font-size: 11px; }
+/* One text size across the route table, the same as its Process column: headings, figures, inputs,
+   labels, buttons and notes alike. */
+.production-route .route-table { font-size: 14px; }
+.production-route .route-table :is(th, td, input, select, textarea, button, label, small, p, span, output) { font-size: inherit; }
+/* Who planned or updated a day, in a small box beside the cell pointed at. */
+.who-tip { position: fixed; z-index: 90; max-width: 240px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: #14241f; color: #fff; font-size: 14px; line-height: 1.35; box-shadow: 0 6px 18px #14241f40; pointer-events: none; }

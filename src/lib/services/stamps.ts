@@ -14,7 +14,7 @@ import type { PurchaseOrder } from "./orders";
  *               keep their own "by" as before.
  */
 const PLAN_KEYS: (keyof PlanLine)[] = ["plannedDate", "endDate", "quantity", "uom", "calendarId", "priority", "notes", "productId", "jobOrderId", "productionOrderId", "batchSizeKg", "unitWeightMg", "activityType", "orderReference"];
-const PRODUCTION_KEYS: (keyof PlanLine)[] = ["startedAt", "productionNotes", "progressQuantity", "progressUom", "progressUnitSize", "completedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "actualUnitVolumeMl"];
+const PRODUCTION_KEYS: (keyof PlanLine)[] = ["startedAt", "productionNotes", "progressQuantity", "progressUom", "progressUnitSize", "progressDestination", "completedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "actualUnitVolumeMl"];
 const OWN_STAMPS = new Set(["updatedBy", "updatedAt", "batchNumber", "batchNumberBy", "batchNumberAt", "testedAt", "testedBy", "testResult", "releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy"]);
 
 type Stampable = { lines: PlanLine[]; entries: ScheduleEntry[]; orders: PurchaseOrder[]; jobOrders: JobOrder[] };
