@@ -718,3 +718,33 @@
   .print-month-table article strong { font-size: 8.5pt; }
   .print-month-table article p { margin: 0.5mm 0 0; font-size: 7.5pt; }
 }
+
+/* Orders table sized to its data: short columns for dates and numbers, room for customer names, and
+   rows of about two lines (a name and its ID, a bar and its note) instead of three or four. */
+.workstation .orders-table { font-size: 13px; }
+.workstation .orders-table > tbody > tr > td, .workstation .orders-table > tbody > tr > th { padding: 6px 8px; line-height: 1.35; }
+.workstation .orders-table > thead > tr:first-child > th { padding: 6px 8px 2px; }
+.workstation .orders-table > thead > tr.orders-filter-row > th { padding: 2px 6px 6px; }
+.workstation .orders-filter-row input, .workstation .orders-filter-row select { min-height: 28px; padding: 3px 7px; font-size: 12px; min-width: 0; }
+.workstation .orders-table td small { margin-top: 1px; font-size: 11.5px; line-height: 1.3; }
+.workstation .orders-table > tbody > tr.order-row > td:first-child, .workstation .orders-table > thead > tr > th.order-toggle-column { width: 28px; }
+.workstation .orders-table .order-toggle { width: 24px; height: 24px; }
+.workstation .orders-table [data-col="number"] { width: 34px; }
+.workstation .orders-table [data-col="received"] { width: 104px; white-space: nowrap; }
+.workstation .orders-table [data-col="received"] .date-filter { min-width: 0; }
+.workstation .orders-table [data-col="received"] .date-filter-button { min-height: 28px; padding: 3px 6px; gap: 4px; font-size: 12px; }
+.workstation .orders-table [data-col="customer"] { min-width: 230px; }
+.workstation .orders-table td[data-col="po"], .workstation .orders-table td[data-col="so"] { white-space: nowrap; }
+.workstation .orders-table [data-col="po"], .workstation .orders-table [data-col="so"] { min-width: 96px; }
+.workstation .orders-table [data-col="format"] { width: 76px; }
+.workstation .orders-table td[data-col="quantity"] { white-space: nowrap; min-width: 0; }
+.workstation .orders-table [data-col="progress"] { min-width: 160px; max-width: 200px; }
+.workstation .orders-table td[data-col="progress"] small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.workstation .orders-table td[data-col="finished"], .workstation .orders-table td[data-col="expected"] { white-space: nowrap; }
+.workstation .orders-table td[data-col="expected"] .badge { margin-left: 4px; }
+.workstation .orders-table [data-col="status"] { min-width: 96px; }
+.workstation .orders-table .order-steps { gap: 2px; }
+.workstation .orders-table .order-steps i { width: 18px; height: 6px; }
+.workstation .orders-table [data-col="progress"] { min-width: 140px; max-width: 170px; }
+.workstation .orders-table [data-col="release"] { min-width: 112px; }
+.workstation .orders-table [data-col="status"] { min-width: 0; }
