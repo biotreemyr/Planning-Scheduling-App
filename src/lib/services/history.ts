@@ -94,6 +94,7 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
       ].filter(Boolean);
       if (fixed.length) changes.push({ kind: "Production", ...reference, text: `${what(row)} production update corrected: ${fixed.join("; ")}` });
     }
+    if (row.progressQuantity !== undefined && !row.completedAt && (old.progressQuantity !== row.progressQuantity || old.progressUom !== row.progressUom)) changes.push({ kind: "Production", ...reference, text: `${what(row)}: ${num(row.progressQuantity)} ${str(row.progressUom) || str(row.uom)} run so far` });
     if (row.productionNotes && old.productionNotes !== row.productionNotes) changes.push({ kind: "Production", ...reference, text: `Note on ${what(row)}: ${str(row.productionNotes)}` });
     const parts = [
       old.plannedDate !== row.plannedDate ? `moved ${day(old.plannedDate)} → ${day(row.plannedDate)}` : "",

@@ -93,6 +93,9 @@ export type PlanLine = {
   // Production's progress: the day work started (YYYY-MM-DD) and anything noted during it.
   startedAt?: string;
   productionNotes?: string;
+  // The amount run so far, saved with progress before the day completes: as keyed in (a weight for
+  // tablets or capsules weighed), with the weight or volume of one unit when weighed.
+  progressQuantity?: number; progressUom?: string; progressUnitSize?: number;
   completedAt?: string;
   yieldQuantity?: number;
   // The unit the actual quantity was reported in, when it differs by process (kg at dispensing...).

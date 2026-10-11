@@ -25,7 +25,7 @@ import { HistoryPanel } from "@/components/HistoryPanel";
 import { inUnit, type JobPlan } from "@/components/JobPlanDialog";
 import { calendarSettings, unitRoute, type ProcessSettings } from "@/lib/services/processSetup";
 import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
-import { validateCompletion, validateCorrection, type CompletionInput, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
+import { validateCompletion, validateCorrection, withoutProgress, type CompletionInput, type Progress, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
 import { validateActual, type ProductionActual } from "@/lib/services/actuals";
@@ -777,7 +777,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
       const actual: ProductionActual = { ...existingActual, planLineId: line.id, calendarId: line.calendarId, teamId: "", actualQuantity: input.quantity, plannedQuantity: line.quantity, uom, productionDate: input.completedDate || localDateKey(new Date(completedAt)), hasDeviation: existingActual?.hasDeviation ?? false, deviation: existingActual?.deviation ?? "", correctiveAction: existingActual?.correctiveAction ?? "", updatedAt: completedAt, updatedBy: member.name };
       return {
         ...current,
-        lines: current.lines.map((item) => item.id === line.id ? { ...item, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input), startedAt: item.startedAt ?? localDateKey(new Date(completedAt)) } : item),
+        lines: current.lines.map((item) => item.id === line.id ? { ...withoutProgress(item), completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input), startedAt: item.startedAt ?? localDateKey(new Date(completedAt)) } : item),
         entries: (machine.entries ?? current.entries).map((item) => item.planLineId === line.id && item.status !== "Cancelled" ? { ...item, status: "Completed" as const, changedBy: member.name } : item),
         actuals: [...current.actuals.filter((item) => item.planLineId !== line.id), actual],
         transfers: transfer ? [...current.transfers, transfer] : current.transfers
@@ -832,7 +832,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
     return [];
   }
   // Production's progress on an activity: the day it started and notes; its bookings go in progress.
-  function saveProgress(startedAt: string, notes: string, machineId?: string) {
+  function saveProgress(startedAt: string, notes: string, machineId?: string, progress?: Progress | null) {
     const line = selectedLine;
     if (!line || !canProduce) return ["Production access to this activity is required."];
     if (line.completedAt) return ["This activity is already complete."];
@@ -840,7 +840,9 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
     const machine = machineChange(line, machineId);
     if ("error" in machine) return [machine.error];
     setData((previous) => { const current = machine.entries ? { ...previous, entries: machine.entries } : previous; return { ...current,
-      lines: current.lines.map((item) => item.id !== line.id ? item : (({ startedAt: _s, productionNotes: _n, ...rest }) => ({ ...rest, ...(startedAt ? { startedAt } : {}), ...(notes ? { productionNotes: notes } : {}) }))(item)),
+      // The amount run so far is kept as keyed in; left empty, it is cleared. Without one (calls from
+      // completion), what was saved stays.
+      lines: current.lines.map((item) => item.id !== line.id ? item : (({ startedAt: _s, productionNotes: _n, ...rest }) => ({ ...(progress === undefined ? rest : withoutProgress(rest)), ...(startedAt ? { startedAt } : {}), ...(notes ? { productionNotes: notes } : {}), ...(progress ? { progressQuantity: progress.quantity, progressUom: progress.uom, ...(progress.unitSize ? { progressUnitSize: progress.unitSize } : {}) } : {}) }))(item)),
       entries: startedAt ? current.entries.map((entry) => entry.planLineId === line.id && (entry.status === "Draft" || entry.status === "Confirmed") ? { ...entry, status: "In Progress" as const, changedBy: member.name } : entry) : current.entries }; });
     return [];
   }

@@ -782,7 +782,7 @@
 .date-check-buttons { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Production Planning as a floating window: the calendar behind stays in view and usable. */
-.plan-window { position: fixed; margin: 0; right: auto; bottom: auto; z-index: 70; max-height: calc(100dvh - 24px); box-shadow: 0 14px 36px #14241f40; }
+.plan-window, .floating-window { position: fixed; margin: 0; right: auto; bottom: auto; z-index: 70; max-height: calc(100dvh - 24px); box-shadow: 0 14px 36px #14241f40; }
 .plan-window-bar { cursor: move; user-select: none; touch-action: none; }
 .plan-window-buttons { display: flex; gap: 6px; flex: none; }
 .plan-window.minimised { width: min(340px, calc(100vw - 24px)); overflow: hidden; }
@@ -793,7 +793,7 @@
 
 /* Activity window: the batch's route as planned beside actual, one row per planned day. */
 .activity-dialog.unified-activity.route-wide { width: min(1340px, calc(100vw - 24px)); }
-.route-table-scroll { overflow-x: auto; }
+.route-table-scroll { position: relative; overflow-x: auto; }
 .route-table { width: 100%; min-width: 1080px; border-collapse: collapse; font-size: 13px; }
 .route-table th, .route-table td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 .route-table thead th { background: var(--panel-soft); font-size: 12px; color: var(--muted); font-weight: 600; }
@@ -835,3 +835,10 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .order-detail-who small.who { margin: 0; }
 .route-table .route-remarks { min-width: 150px; overflow-wrap: break-word; }
 .route-table td:has(> small.who) { min-width: 120px; }
+/* The Activity window floats like Production Planning; minimised it keeps just its title bar. */
+.activity-dialog.floating-window.minimised { width: min(380px, calc(100vw - 24px)); padding: 10px 14px; overflow: hidden; }
+.floating-window.minimised > :not(.plan-window-bar), .floating-window.minimised .plan-window-bar :is(.eyebrow, .activity-order-ref, .calendar-button) { display: none; }
+.floating-window.minimised .plan-window-bar { margin: 0; align-items: center; }
+.floating-window.minimised .plan-window-bar h2 { margin: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.floating-window.minimised .plan-window-bar > div { min-width: 0; }
+.route-table .route-so-far { display: block; color: var(--muted); font-size: 11px; }
