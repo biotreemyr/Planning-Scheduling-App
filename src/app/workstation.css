@@ -461,6 +461,7 @@
   .print-orders-table thead th { background: #eef3f7; }
   .print-orders-table thead { display: table-header-group; }
   .print-orders-table tr { break-inside: avoid; }
+  .print-orders-table .print-col-product { width: 52mm; }
   .print-order-facts { margin: 0 0 3mm; font-size: 9pt; }
   .print-order-warnings { margin: 0 0 3mm; padding-left: 5mm; font-size: 8.5pt; }
 }
@@ -469,7 +470,8 @@
 /* Long headings such as "Expected completion" may wrap so the table fits beside the sidebar. */
 .orders-table > thead > tr:first-child > th { white-space: normal; line-height: 1.25; }
 .orders-table [data-col="progress"] { min-width: 170px; }
-.orders-table [data-col="product"] { min-width: 130px; }
+/* Product names run long ("Bio Activ Naclear N-Acetyl-L-Cysteine 600mg Capsule -18bp x10's"): room for them on two lines. */
+.orders-table [data-col="product"] { min-width: 260px; }
 .orders-table [data-col="format"] select { min-width: 70px; }
 .orders-table > thead > tr > th.order-toggle-column, .orders-table > tbody > tr.order-row > td:first-child { width: 32px; padding-left: 4px; padding-right: 0; }
 .orders-table td[data-col="quantity"] { white-space: normal; min-width: 84px; }
