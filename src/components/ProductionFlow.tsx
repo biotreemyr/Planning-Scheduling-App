@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useDateCheck } from "./DateCheck";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Machine, PlanLine, Product } from "@/lib/domain/types";
 import type { CompletionInput, CorrectionInput, WipTransfer } from "@/lib/services/productionFlow";
@@ -33,6 +34,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   onCorrect?: (input: CorrectionInput) => string[];
   outgoing?: WipTransfer;
 }) {
+  const checkDates = useDateCheck();
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState("");
   const [correcting, setCorrecting] = useState(false);
@@ -90,6 +92,9 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const startedAt = String(data.get("startedAt") ?? ""), completedDate = String(data.get("completedAt") ?? ""), notes = String(data.get("notes") ?? "").trim();
+      // Which button saved it, read now: the event is gone once the dates have been confirmed.
+      const completing = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "complete";
+      checkDates([{ label: "Date started", value: startedAt, rule: "today", was: line.startedAt?.slice(0, 10) }, ...(completing || correcting ? [{ label: "Date completed", value: completedDate, rule: "today" as const, was: line.completedAt?.slice(0, 10) }] : [])], () => {
       const typed = String(data.get("quantity") ?? "").trim();
       const [kind, destinationId = ""] = String(data.get("destination") ?? "final").split(":");
       const machine = String(data.get("machine") ?? "");
@@ -104,12 +109,12 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
         if (!done(onCorrect!({ ...output, startedAt }), "Production update corrected.").length) setCorrecting(false);
         return;
       }
-      const completing = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "complete";
       if (!completing) { done(onProgress(startedAt, notes, machine), "Progress saved."); return; }
       if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity to complete."]); return; }
       const progress = startedAt !== (line.startedAt ?? "") || notes !== (line.productionNotes ?? "") ? onProgress(startedAt || completedDate, notes) : [];
       if (progress.length) { setErrors(progress); return; }
       done(onComplete(output), "Production completed.");
+      });
     }}>
       <label>Date started<input name="startedAt" type="date" defaultValue={line.startedAt ?? ""} /></label>
       <label>Date completed<input name="completedAt" type="date" defaultValue={completedDay} max={today()} /></label>

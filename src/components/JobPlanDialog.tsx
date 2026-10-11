@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
+import { useDateCheck } from "./DateCheck";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { priorities, type Machine, type PlanLine, type Product, type ScheduleEntry } from "@/lib/domain/types";
 import { batchKilograms } from "@/lib/services/measurements";
@@ -48,6 +49,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   const [priority, setPriority] = useState<PlanLine["priority"]>("Normal");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const checkDates = useDateCheck();
   const editing = request?.mode === "edit";
   const job = jobOrders.find((item) => item.id === jobId);
   const order = orders.find((item) => item.id === job?.orderId);
@@ -131,6 +133,8 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       if (unset) { setError(`${job.number} has no ${unset.planned ? measureName(unset.planned) : "quantity"} for ${unset.calendarId ? nameOf(unset.calendarId) : unset.label}. Key it in on the job order (Orders tab) first.`); return; }
       const bad = rows.find((row) => row.on && row.calendarId && !row.locked && !/^\d{4}-\d{2}-\d{2}$/.test(row.date));
       if (bad) { setError(`Choose a date for ${bad.calendarId ? nameOf(bad.calendarId) : bad.label}.`); return; }
+      // Each ticked process's date, against what it was planned for when editing.
+      checkDates(rows.filter((row) => row.on && row.calendarId && !row.locked).map((row) => ({ label: `${nameOf(row.calendarId!)} date`, value: row.date, rule: "plan" as const, was: lines.find((line) => line.id === row.lineId)?.plannedDate })), () => {
       const planned: PlannedRow[] = rows.filter((row) => row.calendarId && (row.on || row.lineId)).map((row) => {
         const quantity = Number(row.quantity);
         return { calendarId: row.calendarId!, lineId: row.lineId, on: row.on, activityType: nameOf(row.calendarId!), plannedDate: row.date, quantity, uom: row.uom, batchSizeKg: kilograms(quantity, row.uom), machineId: row.machineId };
@@ -139,6 +143,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       if ("error" in result) { setError(result.error); return; }
       dialog.current?.close();
       onDone(result.message, planned.filter((row) => row.on).map((row) => row.plannedDate).sort()[0] ?? start);
+      });
     }}>
       <div className="panel-title"><h2 id="job-plan-title">{editing ? `Edit planning · ${job?.number ?? ""}` : "Production Planning"}</h2><button className="icon-button" type="button" aria-label="Close" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
       {editing ? null : choices.length || job ? <label>Job order<select required value={jobId} onChange={(event) => choose(event.target.value)}>
