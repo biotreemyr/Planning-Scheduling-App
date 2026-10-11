@@ -8,6 +8,7 @@ import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, 
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
+import { batchUnits, fullPacks, isCounted, jobTotals, lastPackSize, leftOver } from "@/lib/services/jobQuantities";
 import { DateFilterPicker } from "./DateFilterPicker";
 import { matchesDateFilter } from "@/lib/services/dateFilter";
 import { customerFor, productFor, type OrderCatalog } from "@/lib/services/masterData";
@@ -320,7 +321,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
                 <td><button type="button" className="icon-button order-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} ${row.order.poNumber} details`} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : row.order.id); }}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button></td>
                 {shown.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(row)}</td>)}
               </tr>
-              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail printable={printable} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} product={row.product} onPrint={() => setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 }))} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
+              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail printable={printable} orders={orders} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} product={row.product} onPrint={() => setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 }))} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
             </Fragment>;
           })}
         </tbody>
@@ -395,7 +396,7 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
 // every process makes. Planning them happens on the Planner Board.
 const FILL_UOMS = ["blisters", "bottles", "sachets"];
 const COUNT_UOMS = ["tablets", "capsules"];
-function JobOrders({ order, product, format, jobOrders, transfers, lines, actions, directory }: { directory: CalendarDirectory; order: PurchaseOrder; product?: Product; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
+function JobOrders({ orders, order, product, format, jobOrders, transfers, lines, actions, directory }: { directory: CalendarDirectory; orders: PurchaseOrder[]; order: PurchaseOrder; product?: Product; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
@@ -415,27 +416,18 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
   // The fields shared by adding and editing.
   function readJob(data: FormData) {
     const quantity = Number(data.get("quantity")), uom = String(data.get("uom") ?? order.uom);
-    const packQuantity = number(data.get("packQuantity")), packUom = String(data.get("packUom") ?? "").trim();
+    const packQuantity = number(data.get("packQuantity")), packUom = String(data.get("packUom") ?? "").trim(), packSize = number(data.get("packSize"));
     const size = number(data.get("batchSize")), sizeUom = String(data.get("batchSizeUom") ?? "kg");
     return { number: String(data.get("number") ?? "").trim(), quantity, uom, batchSizeKg: sizeUom === "kg" ? size : undefined, batchVolumeL: sizeUom === "L" ? size : undefined,
-      packQuantity, packUom: packUom || undefined, boxQuantity: number(data.get("boxQuantity")), packingNumber: String(data.get("packingNumber") ?? "").trim() || undefined };
+      packQuantity, packUom: packUom || undefined, packSize, boxQuantity: number(data.get("boxQuantity")), packingNumber: String(data.get("packingNumber") ?? "").trim() || undefined };
   }
-  const fields = (job?: JobOrder) => <>
-    <fieldset className="job-measure job-number"><legend>Job order no.</legend><input name="number" required maxLength={60} autoComplete="off" aria-label="Job order no." placeholder="e.g. JO0010" defaultValue={job?.number} /></fieldset>
-    <fieldset className="job-measure"><legend title="Batch size, for Dispensing">Batch size<span> · Dispensing</span></legend>
-      <input name="batchSize" type="number" min="0" step="any" aria-label="Batch size" defaultValue={job?.batchSizeKg ?? job?.batchVolumeL} placeholder={!job && product?.batchSizeKg ? "From the product if blank" : "e.g. 41.5"} />
-      <select name="batchSizeUom" aria-label="Batch size UOM" defaultValue={job?.batchVolumeL ? "L" : "kg"}><option>kg</option><option>L</option></select></fieldset>
-    <fieldset className="job-measure"><legend title={`Batch quantity, for ${countSteps || "production"}`}>Batch quantity<span> · {countSteps || "Production"}</span></legend>
-      <input name="quantity" type="number" min="0" step="any" required aria-label="Batch quantity" defaultValue={job ? job.quantity : remaining ? Math.min(remaining, allowable ?? remaining) : undefined} />
-      <select name="uom" aria-label="Batch quantity UOM" defaultValue={job?.uom ?? order.uom}>{options([order.uom, ...COUNT_UOMS], job?.uom).map((name) => <option key={name}>{name}</option>)}</select></fieldset>
-    <fieldset className="job-measure job-number"><legend title="Packing job order number; follows the job order number with PJO in front unless keyed in">Packing JO no.<span> · Packing</span></legend>
-      <input name="packingNumber" maxLength={60} autoComplete="off" aria-label="Packing job order no." defaultValue={job?.packingNumber} placeholder={job ? defaultPackingNumber(job.number) : "PJO + job order no."} /></fieldset>
-    <fieldset className="job-measure"><legend title="Pack quantity, for Filling">Pack quantity<span> · Filling</span></legend>
-      <input name="packQuantity" type="number" min="0" step="any" aria-label="Pack quantity" defaultValue={job?.packQuantity} />
-      <select name="packUom" aria-label="Pack quantity UOM" defaultValue={job?.packUom ?? (format === "Sachet" ? "sachets" : "bottles")}>{options(FILL_UOMS, job?.packUom).map((name) => <option key={name}>{name}</option>)}</select></fieldset>
-    <fieldset className="job-measure"><legend title="Total pack quantity, for Packing">Total packs<span> · Packing</span></legend>
-      <input name="boxQuantity" type="number" min="0" step="any" aria-label="Total pack quantity in boxes" defaultValue={job?.boxQuantity} /><span className="job-measure-unit">boxes</span></fieldset>
-  </>;
+  // The PO item's unit weight and units per box (else the product's last order), and units per
+  // blister/bottle from the product's last job order: what the figures are worked out from.
+  const factors = { unitWeightMg: order.unitWeightMg ?? lastOrderWeights(order.productId, orders).unitWeightMg, unitsPerBox: orderWeightKind(order.uom) === "pack" ? order.unitsPerPack ?? lastOrderWeights(order.productId, orders).unitsPerPack : undefined, packSize: lastPackSize(order.productId, orders, jobOrders) };
+  const countUom = isCounted(order.uom) ? order.uom : format === "Capsule" ? "capsules" : format === "Tablet" ? "tablets" : format === "Sachet" ? "sachets" : order.uom;
+  const fields = (job?: JobOrder) => <JobOrderFields job={job} order={order} format={format} countSteps={countSteps} factors={factors} countUom={countUom}
+    defaultQuantity={remaining && countUom === order.uom ? Math.min(remaining, allowable ?? remaining) : undefined} productKg={product?.batchSizeKg} options={options} />;
+  const sum = (totals: { quantity: number; uom: string }[]) => totals.length ? totals.map((total) => <span key={total.uom} className="job-total">{total.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {total.uom}</span>) : <span className="route-muted">-</span>;
   const measure = (value?: { quantity: number; uom: string }) => value ? `${value.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} ${value.uom}` : <span className="route-muted">Not keyed in</span>;
   return <section className="job-orders" aria-label={`Job orders for ${order.poNumber}`}>
     <details className="order-section">
@@ -454,7 +446,7 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
             const { batchSizeKg: _k, batchVolumeL: _l, packQuantity: _pq, packUom: _pu, packSize: _ps, boxQuantity: _b, packingNumber: _pn, ...rest } = job;
             const next: JobOrder = { ...rest, number: read.number, quantity: read.quantity, uom: read.uom,
               ...(read.batchSizeKg ? { batchSizeKg: read.batchSizeKg } : {}), ...(read.batchVolumeL ? { batchVolumeL: read.batchVolumeL } : {}), ...(read.packQuantity ? { packQuantity: read.packQuantity } : {}),
-              ...(read.packUom ? { packUom: read.packUom } : {}), ...(read.boxQuantity ? { boxQuantity: read.boxQuantity } : {}), ...(read.packingNumber ? { packingNumber: read.packingNumber } : {}) };
+              ...(read.packUom ? { packUom: read.packUom } : {}), ...(read.packSize ? { packSize: read.packSize } : {}), ...(read.boxQuantity ? { boxQuantity: read.boxQuantity } : {}), ...(read.packingNumber ? { packingNumber: read.packingNumber } : {}) };
             if (report(actions.onUpdate(next), `${next.number.trim()} saved.${planned.some((line) => !line.completedAt) ? " Its planned activities now carry the new quantities." : ""}`)) setEditing(null);
           }}>
             {fields(job)}
@@ -477,6 +469,13 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
           </span></td>
         </tr>;
       })}</tbody>
+      <tfoot><tr>
+        <th scope="row">Total <small>{jobs.length} job order{jobs.length === 1 ? "" : "s"}</small></th>
+        {(["dispensing", "tableting"] as const).map((step) => <td key={step} className="numeric">{sum(jobTotals(jobs, (job) => processQuantity(job, step)))}</td>)}
+        <td />
+        {(["filling", "packing"] as const).map((step) => <td key={step} className="numeric">{sum(jobTotals(jobs, (job) => processQuantity(job, step)))}</td>)}
+        <td colSpan={2} />
+      </tr></tfoot>
     </table></div> : <p className="order-empty">No job orders yet. Key in one for each batch of this PO item.</p>}
     {actions.canCreate ? <form key={addVersion} className="job-order-form" onSubmit={(event) => {
       event.preventDefault();
@@ -492,6 +491,72 @@ function JobOrders({ order, product, format, jobOrders, transfers, lines, action
     {notice && !errors.length ? <p role="status">{notice}</p> : null}
     </details>
   </section>;
+}
+
+type Factors = { unitWeightMg?: number; unitsPerBox?: number; packSize?: number };
+type FigureKey = "quantity" | "packQuantity" | "boxQuantity";
+const asNumber = (value: string) => value.trim() && Number(value) > 0 ? Number(value) : undefined;
+const shown = (value: number | undefined) => value === undefined ? "" : String(value);
+
+/**
+ * The job order's figures, worked out as they are keyed in: batch size (kg) gives the batch quantity
+ * from the unit weight, and the batch quantity gives the pack quantity (units per blister/bottle) and
+ * the boxes (units per box). A figure typed over stays as typed; clearing it works it out again.
+ */
+function JobOrderFields({ job, order, format, countSteps, factors, countUom, defaultQuantity, productKg, options }: {
+  job?: JobOrder; order: PurchaseOrder; format: ProductFormat; countSteps: string; factors: Factors; countUom: string;
+  defaultQuantity?: number; productKg?: number; options: (list: string[], current?: string) => string[];
+}) {
+  const [values, setValues] = useState({
+    batchSize: shown(job?.batchSizeKg ?? job?.batchVolumeL), batchSizeUom: job?.batchVolumeL ? "L" : "kg",
+    quantity: shown(job ? job.quantity : defaultQuantity), uom: job?.uom ?? countUom,
+    packQuantity: shown(job?.packQuantity), packUom: job?.packUom ?? (format === "Sachet" ? "sachets" : "blisters"),
+    packSize: shown(job?.packSize ?? (job ? undefined : factors.packSize)), boxQuantity: shown(job?.boxQuantity)
+  });
+  const derive = (current: typeof values) => {
+    const counted = isCounted(current.uom);
+    const quantity = counted && current.batchSizeUom === "kg" ? batchUnits(asNumber(current.batchSize), factors.unitWeightMg) : undefined;
+    return { quantity, units: counted ? quantity : undefined };
+  };
+  // A figure is worked out while it is blank or still what working it out gives; a new job order starts so.
+  const [auto, setAuto] = useState<Record<FigureKey, boolean>>(() => {
+    if (!job) return { quantity: true, packQuantity: true, boxQuantity: true };
+    const units = isCounted(job.uom) ? job.quantity : undefined;
+    return { quantity: job.batchSizeKg !== undefined && batchUnits(job.batchSizeKg, factors.unitWeightMg) === job.quantity,
+      packQuantity: !job.packQuantity || fullPacks(units, job.packSize) === job.packQuantity, boxQuantity: !job.boxQuantity || fullPacks(units, factors.unitsPerBox) === job.boxQuantity };
+  });
+  const worked = derive(values);
+  const quantity = auto.quantity && worked.quantity !== undefined ? String(worked.quantity) : values.quantity;
+  const units = isCounted(values.uom) ? asNumber(quantity) : undefined;
+  const packAuto = fullPacks(units, asNumber(values.packSize)), boxAuto = fullPacks(units, factors.unitsPerBox);
+  const packQuantity = auto.packQuantity && packAuto !== undefined ? String(packAuto) : values.packQuantity;
+  const boxQuantity = auto.boxQuantity && boxAuto !== undefined ? String(boxAuto) : values.boxQuantity;
+  const set = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
+  const type = (key: FigureKey, value: string) => { set(key, value); setAuto((current) => ({ ...current, [key]: !value.trim() })); };
+  const note = (on: boolean, text: string) => on ? <small className="job-auto-note" title="Worked out; type over it to change">{text}</small> : null;
+  const one = (uom: string) => uom.replace(/(x|ch|sh)es$/i, "$1").replace(/s$/i, "");
+  const over = (perPack: number | undefined, packs: string) => units && perPack && asNumber(packs) ? leftOver(units, perPack, Number(packs)) : 0;
+  return <>
+    <fieldset className="job-measure job-number"><legend>Job order no.</legend><input name="number" required maxLength={60} autoComplete="off" aria-label="Job order no." placeholder="e.g. JO0010" defaultValue={job?.number} /></fieldset>
+    <fieldset className="job-measure"><legend title="Batch size, for Dispensing">Batch size<span> · Dispensing</span></legend>
+      <input name="batchSize" type="number" min="0" step="any" aria-label="Batch size" value={values.batchSize} onChange={(event) => set("batchSize", event.target.value)} placeholder={!job && productKg ? "From the product if blank" : "e.g. 41.5"} />
+      <select name="batchSizeUom" aria-label="Batch size UOM" value={values.batchSizeUom} onChange={(event) => set("batchSizeUom", event.target.value)}><option>kg</option><option>L</option></select>
+      {values.batchSizeUom === "kg" && isCounted(values.uom) && !factors.unitWeightMg ? <small className="route-muted">Add the unit weight on the PO item to work out the {values.uom}</small> : null}</fieldset>
+    <fieldset className="job-measure"><legend title={`Batch quantity, for ${countSteps || "production"}`}>Batch quantity<span> · {countSteps || "Production"}</span></legend>
+      <input name="quantity" type="number" min="0" step="any" required aria-label="Batch quantity" value={quantity} onChange={(event) => type("quantity", event.target.value)} />
+      <select name="uom" aria-label="Batch quantity UOM" value={values.uom} onChange={(event) => set("uom", event.target.value)}>{options([order.uom, countUom, ...COUNT_UOMS, "sachets"], values.uom).map((name) => <option key={name}>{name}</option>)}</select>
+      {note(auto.quantity && worked.quantity !== undefined, `≈ ${values.batchSize} kg ÷ ${factors.unitWeightMg} mg`)}</fieldset>
+    <fieldset className="job-measure job-number"><legend title="Packing job order number; follows the job order number with PJO in front unless keyed in">Packing JO no.<span> · Packing</span></legend>
+      <input name="packingNumber" maxLength={60} autoComplete="off" aria-label="Packing job order no." defaultValue={job?.packingNumber} placeholder={job ? defaultPackingNumber(job.number) : "PJO + job order no."} /></fieldset>
+    <fieldset className="job-measure job-pack"><legend title="Pack quantity, for Filling">Pack quantity<span> · Filling</span></legend>
+      <input name="packQuantity" type="number" min="0" step="any" aria-label="Pack quantity" value={packQuantity} onChange={(event) => type("packQuantity", event.target.value)} />
+      <select name="packUom" aria-label="Pack quantity UOM" value={values.packUom} onChange={(event) => set("packUom", event.target.value)}>{options(FILL_UOMS, values.packUom).map((name) => <option key={name}>{name}</option>)}</select>
+      <label className="job-pack-size">of<input name="packSize" type="number" min="0" step="any" aria-label={`${values.uom} per ${one(values.packUom)}`} placeholder="e.g. 10" value={values.packSize} onChange={(event) => set("packSize", event.target.value)} />{values.uom} per {one(values.packUom)}</label>
+      {note(auto.packQuantity && packAuto !== undefined, `${units?.toLocaleString()} ÷ ${values.packSize}${over(asNumber(values.packSize), packQuantity) ? ` · ${over(asNumber(values.packSize), packQuantity).toLocaleString()} ${values.uom} over` : ""}`)}</fieldset>
+    <fieldset className="job-measure"><legend title="Total pack quantity, for Packing">Total packs<span> · Packing</span></legend>
+      <input name="boxQuantity" type="number" min="0" step="any" aria-label="Total pack quantity in boxes" value={boxQuantity} onChange={(event) => type("boxQuantity", event.target.value)} /><span className="job-measure-unit">boxes</span>
+      {note(auto.boxQuantity && boxAuto !== undefined, `${units?.toLocaleString()} ÷ ${factors.unitsPerBox} per box${over(factors.unitsPerBox, boxQuantity) ? ` · ${over(factors.unitsPerBox, boxQuantity).toLocaleString()} ${values.uom} over` : ""}`)}</fieldset>
+  </>;
 }
 
 const shortDate = (value: string) => formatDate(value.slice(0, 10));
@@ -559,7 +624,8 @@ function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: Purc
   </table></div>;
 }
 
-function OrderDetail({ printable, order, product, jobOrders, transfers, jobActions, format, warnings, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete, onPrint }: {
+function OrderDetail({ printable, orders, order, product, jobOrders, transfers, jobActions, format, warnings, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete, onPrint }: {
+  orders: PurchaseOrder[];
   product?: Product; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions;
   format: ProductFormat; warnings: FlowWarning[];
   onPrint: () => void;
@@ -583,7 +649,7 @@ function OrderDetail({ printable, order, product, jobOrders, transfers, jobActio
       <summary className="order-section-summary"><h3>Progress</h3><span className="route-muted">Planning · Production · QC testing · QA release</span></summary>
       <OrderFlow order={order} jobOrders={jobOrders} lines={lines} transfers={transfers} matrix={matrix} />
     </details>
-    {jobActions ? <JobOrders directory={directory} order={order} product={product} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
+    {jobActions ? <JobOrders directory={directory} orders={orders} order={order} product={product} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
