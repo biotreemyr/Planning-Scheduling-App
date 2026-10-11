@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Maximize2, Minus, Plus, X } from "lucide-react";
+import { useFloatingWindow } from "./useFloatingWindow";
 import { useDateCheck } from "./DateCheck";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { priorities, type Machine, type PlanLine, type Product, type ScheduleEntry } from "@/lib/domain/types";
@@ -69,25 +70,8 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const checkDates = useDateCheck();
-  // A floating window rather than a modal, so the calendar behind stays in view and usable: dragged
-  // by its title bar, minimised to that bar, and placed where it was left.
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
-  const [minimised, setMinimised] = useState(false);
-  const dragging = useRef<{ dx: number; dy: number } | null>(null);
-  const keepInView = (left: number, top: number) => {
-    const width = dialog.current?.offsetWidth ?? 600;
-    // Fully on screen side to side, so its buttons stay in reach; the title bar always visible.
-    return { left: Math.max(8, Math.min(left, document.documentElement.clientWidth - width - 8)), top: Math.min(Math.max(8, top), window.innerHeight - 48) };
-  };
-  function startDrag(event: React.PointerEvent<HTMLDivElement>) {
-    if ((event.target as HTMLElement).closest("button") || !dialog.current) return;
-    const box = dialog.current.getBoundingClientRect();
-    dragging.current = { dx: event.clientX - box.left, dy: event.clientY - box.top };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-  function drag(event: React.PointerEvent<HTMLDivElement>) {
-    if (dragging.current) setPlace(keepInView(event.clientX - dragging.current.dx, event.clientY - dragging.current.dy));
-  }
+  // A floating window: dragged by its title bar, minimised to it, left where it was put.
+  const { minimised, setMinimised, barProps, open, style } = useFloatingWindow(dialog);
   const editing = request?.mode === "edit";
   const job = jobOrders.find((item) => item.id === jobId);
   const order = orders.find((item) => item.id === job?.orderId);
@@ -149,7 +133,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       setJobId(chosen?.id ?? ""); setRows(chosen ? reflow(rowsFor(chosen, request.date), 0, request.date) : []); setStart(request.date); setBatchNumber(chosen?.batchNumber ?? ""); setPriority("Normal");
     }
     if (!dialog.current?.open) dialog.current?.show();
-    if (!place) setPlace(keepInView((window.innerWidth - Math.min(720, window.innerWidth - 24)) / 2, 72));
+    open(720);
     // Opens once per request; later data changes must not reset what is being typed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.nonce]);
@@ -166,7 +150,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   const ticked = rows.filter((row) => row.on && row.calendarId);
 
   return <dialog ref={dialog} className={`activity-dialog plan-window${job ? " activity-dialog-wide" : ""}${minimised ? " minimised" : ""}`} aria-labelledby="job-plan-title"
-    style={place ? { left: place.left, top: place.top } : undefined} onKeyDown={(event) => { if (event.key === "Escape" && !minimised) { event.stopPropagation(); setMinimised(true); } }}>
+    style={style} onKeyDown={(event) => { if (event.key === "Escape" && !minimised) { event.stopPropagation(); setMinimised(true); } }}>
     <form className="form-panel" onSubmit={(event) => {
       event.preventDefault();
       if (!job) { setError("Choose the job order to plan."); return; }
@@ -187,7 +171,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       onDone(result.message, planned.filter((row) => row.on).map((row) => row.plannedDate).sort()[0] ?? start);
       });
     }}>
-      <div className="panel-title plan-window-bar" title="Drag to move" onPointerDown={startDrag} onPointerMove={drag} onPointerUp={() => { dragging.current = null; }} onPointerCancel={() => { dragging.current = null; }}>
+      <div className="panel-title plan-window-bar" {...barProps}>
         <h2 id="job-plan-title">{editing ? `Edit planning · ${job?.number ?? ""}` : "Production Planning"}{minimised && job && !editing ? ` · ${job.number}` : ""}</h2>
         <span className="plan-window-buttons">
           <button className="icon-button" type="button" aria-label={minimised ? "Restore" : "Minimise"} title={minimised ? "Restore" : "Minimise"} onClick={() => setMinimised(!minimised)}>{minimised ? <Maximize2 size={16} /> : <Minus size={18} />}</button>

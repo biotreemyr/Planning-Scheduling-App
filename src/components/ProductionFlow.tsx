@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import { useDateCheck } from "./DateCheck";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Machine, PlanLine, Product } from "@/lib/domain/types";
-import type { CompletionInput, CorrectionInput, WipTransfer } from "@/lib/services/productionFlow";
+import type { CompletionInput, CorrectionInput, Progress, WipTransfer } from "@/lib/services/productionFlow";
 import { stepOf } from "@/lib/services/processRules";
 import { REPORT_UOMS, calendarSettings } from "@/lib/services/processSetup";
 import { countFromWeight, unitSizeUom } from "@/lib/services/measurements";
@@ -32,7 +32,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   onSaved?: (message: string) => void;
   // The next process of this batch's route, offered first as the destination.
   nextCalendarId?: string;
-  onProgress: (startedAt: string, notes: string, machineId?: string) => string[];
+  onProgress: (startedAt: string, notes: string, machineId?: string, progress?: Progress | null) => string[];
   onComplete: (input: CompletionInput) => string[];
   // Present when a completed update may be corrected.
   onCorrect?: (input: CorrectionInput) => string[];
@@ -51,15 +51,15 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const reportUoms = [...new Set([...REPORT_UOMS[settings.report], ...(settings.report === "measure" && !REPORT_UOMS.measure.includes(uom) && uom ? [uom] : [])])];
   const doneUom = line.yieldUom ?? uom;
   const counting = settings.report === "count";
-  const defaultUom = counting ? line.weighedUom ?? "kg" : line.completedAt ? doneUom : reportUoms.includes(uom) ? uom : reportUoms[0] ?? uom;
+  const defaultUom = line.completedAt ? counting ? line.weighedUom ?? "kg" : doneUom : line.progressUom ?? (counting ? "kg" : reportUoms.includes(uom) ? uom : reportUoms[0] ?? uom);
   // Compression, coating and capsulation count tablets or capsules; output weighed in kg or g is
   // converted with the weight of one compressed/coated tablet or filled capsule.
   const step = stepOf(processName(line.calendarId));
   const countUom = !counting ? undefined : ["tablets", "capsules"].includes(uom) ? uom : step === "capsulation" ? "capsules" : "tablets";
   const unitName = step === "capsulation" ? "Filled capsule" : step === "coating" ? "Coated tablet" : step === "tableting" ? "Compressed tablet" : countUom === "capsules" ? "Capsule" : "Tablet";
   const [chosenUom, setChosenUom] = useState(defaultUom);
-  const [quantityText, setQuantityText] = useState(line.completedAt ? String((counting ? line.weighedQuantity : line.yieldQuantity) ?? "") : "");
-  const [unitMg, setUnitMg] = useState(String(line.actualUnitWeightMg ?? line.actualUnitVolumeMl ?? line.unitWeightMg ?? ""));
+  const [quantityText, setQuantityText] = useState(String((line.completedAt ? counting ? line.weighedQuantity : line.yieldQuantity : line.progressQuantity) ?? ""));
+  const [unitMg, setUnitMg] = useState(String(line.actualUnitWeightMg ?? line.actualUnitVolumeMl ?? line.progressUnitSize ?? line.unitWeightMg ?? ""));
   // A weight (kg, g) asks for mg per unit; a volume (L, mL) for mL per unit.
   const sizeUom = unitSizeUom(chosenUom);
   const weighing = !!countUom && !!sizeUom;
@@ -153,7 +153,8 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
         if (!done(onCorrect!({ ...output, startedAt }), "Production update corrected.").length) setCorrecting(false);
         return;
       }
-      if (!completing) { done(onProgress(startedAt, notes, machine), "Progress saved."); return; }
+      // Save progress keeps the amount run so far as keyed in; an emptied box clears it.
+      if (!completing) { done(onProgress(startedAt, notes, machine, typed ? { quantity: Number(typed), uom: reported, ...(weighing && Number(unitMg) > 0 ? { unitSize: Number(unitMg) } : {}) } : null), "Progress saved."); return; }
       if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity to complete."]); return; }
       const progress = startedAt !== (line.startedAt ?? "") || notes !== (line.productionNotes ?? "") ? onProgress(startedAt || completedDate, notes) : [];
       if (progress.length) { setErrors(progress); return; }
@@ -161,7 +162,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       });
     }}>{content}</form>;
   const help = correcting ? handedOver ? `${processName(outgoing!.calendarId)} has already received this output, so its quantity and destination stay as they are. Dates and notes can still be corrected.` : "Correct anything keyed in by mistake. The handover to the next process follows the correction."
-    : `Save progress records the start date and notes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`;
+    : `Save progress records the start date, the amount run so far and notes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`;
 
   // In the route table: one cell per Actual column, then the buttons.
   if (inRow) {

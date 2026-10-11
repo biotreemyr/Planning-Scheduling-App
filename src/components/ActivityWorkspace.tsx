@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { X } from "lucide-react";
+import { Maximize2, Minus, X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
 import { orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
 import type { FlowWarning, ProductFormat } from "@/lib/services/processRules";
 import { OrderBadge } from "./OrderBadge";
 import type { JobOrder } from "@/lib/services/jobOrders";
 import { formatDate } from "@/lib/services/dates";
-import { Who } from "./Who";
+import { whoText } from "./Who";
+import { useFloatingWindow } from "./useFloatingWindow";
 import { equivalence, factorsFor, type Factors } from "@/lib/services/equivalence";
 import type { WipTransfer } from "@/lib/services/productionFlow";
 
@@ -33,11 +34,18 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, c
   const order = orders.find((item) => item.id === line.productionOrderId);
   const numbers = orderNumbers(orders);
   const job = jobOrders.find((item) => item.id === line.jobOrderId);
-  useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className="activity-dialog unified-activity route-wide" aria-labelledby="activity-workspace-title" onClose={onClose}>
-    <header className="panel-title"><div><p className="eyebrow">Activity workspace</p><h2 id="activity-workspace-title">{product?.name}</h2>
+  // A floating window like Production Planning: dragged by its title bar, minimised to it, so the
+  // calendar behind stays in reach.
+  const { minimised, setMinimised, barProps, open, style } = useFloatingWindow(dialog);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { dialog.current?.show(); open(1340); }, []);
+  return <dialog ref={dialog} className={`activity-dialog unified-activity route-wide floating-window${minimised ? " minimised" : ""}`} style={style} aria-labelledby="activity-workspace-title" onClose={onClose}
+    onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); dialog.current?.close(); } }}>
+    <header className="panel-title plan-window-bar" {...barProps}><div><p className="eyebrow">Activity workspace</p><h2 id="activity-workspace-title">{product?.name}{minimised ? ` · ${job?.number ?? line.activityType ?? ""}` : ""}</h2>
       <p className="activity-order-ref">{order?.customerName ? <span>Customer: <strong>{order.customerName}</strong></span> : null}<span>{order ? <OrderBadge number={numbers.get(order.id)} poNumber={order.poNumber} /> : null}PO number: <strong>{order ? poLabel(order, orders) : "Not linked"}</strong></span>{job ? <span>Job order: <strong>{job.number}</strong></span> : line.orderReference ? <span>{line.orderReference}</span> : null}{job ? <span>Batch no.: <strong>{job.batchNumber ?? "Not entered"}</strong></span> : null}{order ? <span>Order quantity: {order.quantity.toLocaleString()} {order.uom}</span> : null}</p>
-      {job && onEditJobPlanning ? <button type="button" className="calendar-button" onClick={() => { dialog.current?.close(); onEditJobPlanning(); }}>Edit job order planning</button> : null}</div><button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></header>
+      {job && onEditJobPlanning ? <button type="button" className="calendar-button" onClick={() => { dialog.current?.close(); onEditJobPlanning(); }}>Edit job order planning</button> : null}</div><span className="plan-window-buttons">
+      <button className="icon-button" type="button" aria-label={minimised ? "Restore" : "Minimise"} title={minimised ? "Restore" : "Minimise"} onClick={() => setMinimised(!minimised)}>{minimised ? <Maximize2 size={16} /> : <Minus size={18} />}</button>
+      <button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></span></header>
     {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
     {route.length ? <ProductionRoute line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} transfers={transfers} visibleCalendarIds={visibleCalendarIds} factors={factorsFor(order, job, format === "Capsule" ? "capsules" : format === "Sachet" ? "sachets" : "tablets")}
       editable={canAssign} canUpdate={canUpdate} updating={updating} update={children} onAssign={onAssignMachine} onOpenLine={onOpenLine} /> : children?.(false)}
@@ -84,25 +92,30 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
           const options = machines.filter((machine) => machine.processIds?.includes(step.calendar.processId) && (machine.active === "Active" || machine.id === booked));
           const planned = item.plannedMachineId ?? booked;
           const reported = item.completedAt ? item.yieldQuantity : undefined, reportedUom = item.yieldUom ?? item.uom;
+          // Before the day completes: the amount run so far, saved with progress.
+          const soFar = item.completedAt ? undefined : item.progressQuantity, soFarUom = item.progressUom ?? item.uom;
           const outgoing = transfers.find((transfer) => transfer.sourceLineId === item.id);
           const next = outgoing ? outgoing.wipRoom ? "WIP room" : route.find((other) => other.calendar.id === outgoing.calendarId)?.processName ?? "Next process" : item.completedAt ? "Final output" : "";
           const current = item.id === line.id;
           // Production can click anywhere on a day's Actual cells to key them in.
-          const open = (className = "") => canUpdate ? { className: `${className} route-actual-open`.trim(), title: item.completedAt ? "Correct this day" : "Update this day", onClick: () => onOpenLine?.(item.id, true) } : { className: className || undefined };
+          // Who planned and who last updated show when hovering over the data, not under it.
+          const plannedWho = whoText("Planned", item.plannedBy, item.plannedAt) || undefined;
+          const updatedWho = item.startedAt || item.completedAt || item.progressQuantity !== undefined ? whoText("Updated", item.updatedBy, item.updatedAt) : "";
+          const open = (className = "") => ({ className: `${className}${canUpdate ? " route-actual-open" : ""}`.trim() || undefined, title: [updatedWho, canUpdate ? item.completedAt ? "Click to correct this day" : "Click to update this day" : ""].filter(Boolean).join("\n") || undefined, ...(canUpdate ? { onClick: () => onOpenLine?.(item.id, true) } : {}) });
           const rows = [<tr key={item.id} className={[current ? "route-current" : "", item.completedAt ? "route-done" : ""].join(" ").trim() || undefined}>
             {index === 0 ? <><td rowSpan={step.lines.length} className="route-plan-mark" aria-label="Planned">✓</td>
               <th scope="row" rowSpan={step.lines.length}>{step.processName}{done ? <span className="badge success">Done</span> : null}</th></> : null}
-            <td><button type="button" className="route-day" aria-current={current || undefined} title="Open this day" onClick={() => onOpenLine?.(item.id)}>{day(item.plannedDate)}{item.endDate ? ` – ${day(item.endDate)}` : ""}</button><Who verb="Planned" who={item.plannedBy} at={item.plannedAt} /></td>
-            <td className="numeric">{amount(item.quantity)} {item.uom ?? ""}</td>
-            <td className="route-equivalence">{equivalence(item.quantity, item.uom, factors) || <span className="route-muted">-</span>}</td>
+            <td><button type="button" className="route-day" aria-current={current || undefined} title={[plannedWho, "Open this day"].filter(Boolean).join("\n")} onClick={() => onOpenLine?.(item.id)}>{day(item.plannedDate)}{item.endDate ? ` – ${day(item.endDate)}` : ""}</button></td>
+            <td className="numeric" title={plannedWho}>{amount(item.quantity)} {item.uom ?? ""}</td>
+            <td className="route-equivalence" title={plannedWho}>{equivalence(item.quantity, item.uom, factors) || <span className="route-muted">-</span>}</td>
             <td>{editable && onAssign && !item.completedAt ? <select aria-label={`Machine for ${step.processName} on ${day(item.plannedDate)}`} value={booked ?? ""} onChange={(event) => setMessages({ ...messages, [item.id]: onAssign([item.id], event.target.value) })}>
                 <option value="">Not assigned</option>{options.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select>
               : machineName(planned) || <span className="route-muted">Not assigned</span>}
               {(messages[item.id] ?? []).map((message) => <small role="alert" key={message}>{message}</small>)}</td>
             {current && updating && update ? update(true, (quantity, uom) => equivalence(quantity, uom, factors)) : <>
-              <td {...open()}>{item.completedAt ? day(item.completedAt) : item.startedAt ? <>Started {day(item.startedAt)}</> : <span className="route-muted">-</span>}<Who verb="Updated" who={item.updatedBy} at={item.updatedAt} /></td>
-              <td {...open("numeric")}>{reported !== undefined ? `${amount(reported)} ${reportedUom ?? ""}` : <span className="route-muted">-</span>}</td>
-              <td {...open("route-equivalence")}>{reported !== undefined ? equivalence(reported, reportedUom, factors) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
+              <td {...open()}>{item.completedAt ? day(item.completedAt) : item.startedAt ? <>Started {day(item.startedAt)}</> : <span className="route-muted">-</span>}</td>
+              <td {...open("numeric")}>{reported !== undefined ? `${amount(reported)} ${reportedUom ?? ""}` : soFar !== undefined ? <>{amount(soFar)} {soFarUom}<small className="route-so-far">so far</small></> : <span className="route-muted">-</span>}</td>
+              <td {...open("route-equivalence")}>{(reported !== undefined ? equivalence(reported, reportedUom, factors) : soFar !== undefined ? equivalence(soFar, soFarUom, factors) : "") || <span className="route-muted">-</span>}</td>
               <td {...open()}>{item.completedAt || item.startedAt ? machineName(booked) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
               <td {...open("route-remarks")}>{item.productionNotes || <span className="route-muted">-</span>}</td>
               <td {...open()}>{next || <span className="route-muted">-</span>}</td>
