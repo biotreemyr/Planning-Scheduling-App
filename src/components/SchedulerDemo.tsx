@@ -919,12 +919,15 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
   function addOrders(items: PurchaseOrder[], customer: Customer, taken: Product[] = []) {
     if (!canCreateOrders) return ["Your access does not include creating orders."];
     const known = data.customers.find((item) => item.id === customer.id);
+    // An R&D, trial or pilot order may have no customer ID: it keeps the name only and adds no customer record.
+    const listed = !!customer.code.trim();
     const withTaken = [...products.filter((product) => !taken.some((item) => item.id === product.id)), ...taken];
-    const customerErrors = known ? [] : validateCustomer(customer, data.customers);
+    const customerErrors = known || !listed ? [] : validateCustomer(customer, data.customers);
     if (customerErrors.length) return customerErrors;
     const accepted: PurchaseOrder[] = [];
     const errors = items.flatMap((order, index) => {
-      const linked = { ...order, poNumber: order.poNumber.trim(), customerId: customer.id, customerName: customer.name.trim() };
+      const { customerId: _c, ...rest } = order;
+      const linked = { ...rest, poNumber: order.poNumber.trim(), ...(known || listed ? { customerId: customer.id } : {}), customerName: customer.name.trim() };
       const problems = validateOrder(linked, [...data.orders, ...accepted], withTaken);
       if (!problems.length) accepted.push(linked);
       return items.length > 1 ? problems.map((problem) => `Item ${index + 1}: ${problem}`) : problems;
@@ -932,7 +935,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
     if (errors.length) return errors;
     if (taken.length) setProducts((current) => [...current.map((product) => taken.find((item) => item.id === product.id) ?? product), ...taken.filter((item) => !current.some((product) => product.id === item.id))]);
     // A customer taken from Master Data may be the scheduler's own, linked now: it replaces the old record.
-    setData((current) => ({ ...current, customers: known ? current.customers.map((item) => item.id === customer.id ? customer : item) : [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }], orders: [...current.orders, ...accepted] }));
+    setData((current) => ({ ...current, customers: known ? current.customers.map((item) => item.id === customer.id ? customer : item) : listed ? [...current.customers, { ...customer, code: customer.code.trim(), name: customer.name.trim() }] : current.customers, orders: [...current.orders, ...accepted] }));
     return [];
   }
   // The plan form. New: one activity per ticked process of the job order's route. Edit: rows with an

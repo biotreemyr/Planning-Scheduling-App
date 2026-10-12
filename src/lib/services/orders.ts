@@ -42,6 +42,11 @@ export type PurchaseOrder = {
 export const ORDER_CATEGORIES = ["R&D", "Trial", "Pilot batch"] as const;
 export type OrderCategory = typeof ORDER_CATEGORIES[number];
 export const isNonProduction = (order?: Pick<PurchaseOrder, "category">) => !!order?.category;
+// The next free RND-0001 style code for an R&D product keyed in on an order.
+export function nextRndCode(products: Pick<Product, "sku">[]) {
+  const taken = new Set(products.map((product) => product.sku.trim().toLowerCase()));
+  for (let next = 1; ; next++) { const code = `RND-${String(next).padStart(4, "0")}`; if (!taken.has(code.toLowerCase())) return code; }
+}
 
 const samePo = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 export const poItem = (order: Pick<PurchaseOrder, "item">) => order.item ?? 1;

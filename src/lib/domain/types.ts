@@ -37,6 +37,8 @@ export type Product = {
   batchSizeKg?: number;
   // Bio Tree Master Data's ID for this product, once an order has used it from there.
   masterDataId?: string;
+  // On the R&D product list (Admin, R&D products): offered to R&D, trial and pilot orders only, never from Master Data.
+  rnd?: boolean;
 };
 
 export type WorkCentre = {

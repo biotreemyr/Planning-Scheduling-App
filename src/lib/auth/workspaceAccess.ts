@@ -52,11 +52,14 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   const configuration = (["directory", "products", "workCentres", "machines", "measurements"] as const).filter((key) => !isDeepStrictEqual(before[key], after[key]));
   const products = diff(before.products, after.products);
   const fromMasterData = [...products.added.map((item) => ({ before: undefined, after: item })), ...products.changed].filter((change) => productFromMasterData(change.before, change.after, lists));
-  const onlyFromMasterData = configuration.length === 1 && configuration[0] === "products" && !products.removed.length && fromMasterData.length === products.added.length + products.changed.length;
-  if (onlyFromMasterData) need(can.createOrders, "add products from Master Data");
+  // A product keyed in on an R&D, trial or pilot order is added to the R&D list as part of creating the order.
+  const newRnd = products.added.filter((item) => item.rnd && !item.masterDataId && !fromMasterData.some((change) => change.after === item));
+  const onlyFromMasterData = configuration.length === 1 && configuration[0] === "products" && !products.removed.length && fromMasterData.length + newRnd.length === products.added.length + products.changed.length;
+  if (onlyFromMasterData) need(can.createOrders, newRnd.length ? "add R&D products" : "add products from Master Data");
   else if (configuration.length) need(can.manage, "change units, people, products, machines or measurements");
   if (configuration.length) summary.push(`configuration: ${configuration.join(", ")}`);
   count("products taken from Master Data", fromMasterData.length);
+  count("R&D products added", newRnd.length);
 
   const orders = diff(before.data.orders, after.data.orders);
   if (orders.added.length) need(can.createOrders, "add orders");
