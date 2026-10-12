@@ -6,7 +6,7 @@ import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
 import { localDateKey } from "@/lib/services/calendarPrint";
-import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
+import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, isNonProduction, ORDER_CATEGORIES, type OrderCategory, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
 import { useDateCheck } from "./DateCheck";
 import { Who } from "./Who";
@@ -33,7 +33,9 @@ export type JobActions = {
   onDelete: (id: string) => string[];
 };
 
-export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, transfers = [], lines, products, catalog, directory, visibleCalendarIds, creatable, editable, printable = true, userName, onSave, onAdd, onDelete, flow = [] }: {
+export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, transfers = [], lines, products, catalog, directory, visibleCalendarIds, creatable, editable, printable = true, userName, onSave, onAdd, onDelete, flow = [], nonProduction = false }: {
+  // nonProduction: the R&D, trial and pilot batch tab, which lists only those orders; Orders lists the rest.
+  nonProduction?: boolean;
   orders: PurchaseOrder[]; customers?: Customer[]; jobOrders?: JobOrder[]; jobActions?: JobActions;
   // WIP handovers, to tell final output from output sent on to another process.
   transfers?: { sourceLineId: string }[];
@@ -43,7 +45,8 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
   // creatable: may key in new POs; editable: may change or delete them; printable: may print.
   creatable?: boolean; editable: boolean; printable?: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer, taken?: Product[]) => string[]; onDelete: (id: string) => string[];
 }) {
-  const customerNames = [...new Set(orders.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
+  const listed = orders.filter((order) => isNonProduction(order) === nonProduction);
+  const customerNames = [...new Set(listed.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
   // New order opens in a pop-up from the orders header, so the page shows just the orders.
   const dialog = useRef<HTMLDialogElement>(null);
   const [formVersion, setFormVersion] = useState(0);
@@ -52,11 +55,11 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
   const newOrderButton = canAdd ? <button type="button" className="primary-button" onClick={() => { setFormVersion((value) => value + 1); setAdded(""); dialog.current?.showModal(); }}><Plus size={17} />New order</button> : null;
   return <section className="orders-layout">
     {canAdd ? <dialog ref={dialog} className="activity-dialog order-dialog" aria-labelledby="new-order-title">
-      <NewOrderForm key={formVersion} orders={orders} customers={customers} products={products} catalog={catalog} units={directory.units} directory={directory} userName={userName} onAdd={onAdd}
+      <NewOrderForm key={formVersion} nonProduction={nonProduction} orders={orders} customers={customers} products={products} catalog={catalog} units={directory.units} directory={directory} userName={userName} onAdd={onAdd}
         onClose={() => dialog.current?.close()} onDone={(message) => { setAdded(message); dialog.current?.close(); }} />
     </dialog> : null}
     {added ? <p role="status" className="calendar-notice">{added}</p> : null}
-    <OrdersTable action={newOrderButton} printable={printable} orders={orders} customerRecords={customers} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
+    <OrdersTable nonProduction={nonProduction} action={newOrderButton} printable={printable} orders={listed} customerRecords={customers} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
   </section>;
 }
 
@@ -82,8 +85,8 @@ function draftWeights(item: DraftItem, uom: string): Pick<PurchaseOrder, "unitWe
 
 // One PO keyed in once: customer and PO number, then as many product line items as it lists.
 // Typing an existing PO number of the same customer adds further items to that PO.
-function NewOrderForm({ orders, products, catalog, customers, units, directory, userName, onAdd, onClose, onDone }: {
-  directory: CalendarDirectory; catalog?: OrderCatalog;
+function NewOrderForm({ nonProduction, orders, products, catalog, customers, units, directory, userName, onAdd, onClose, onDone }: {
+  directory: CalendarDirectory; catalog?: OrderCatalog; nonProduction: boolean;
   orders: PurchaseOrder[]; products: Product[]; customers: Customer[]; units: CalendarDirectory["units"]; userName: string; onAdd: (items: PurchaseOrder[], customer: Customer, taken?: Product[]) => string[];
   onClose: () => void; onDone: (message: string) => void;
 }) {
@@ -95,6 +98,7 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
   const customerChoices = catalog?.status === "ok" ? catalog.customers.map((master) => customerFor(master, customers)) : customers.filter((item) => item.active === "Active");
   const [items, setItems] = useState<DraftItem[]>(() => [draftItem()]);
   const [poNumber, setPoNumber] = useState("");
+  const [category, setCategory] = useState<OrderCategory>("R&D");
   const [soNumber, setSoNumber] = useState("");
   const [customerCode, setCustomerCode] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -127,7 +131,7 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
       id: `order-${crypto.randomUUID()}`, number: number++, item: firstItem + index, format: formatOf(item), ...(units.length === 1 ? { unitId: units[0].id } : {}),
       customerId: customer.id, customerName: customer.name, poNumber: poNumber.trim(), ...(soNumber.trim() ? { soNumber: soNumber.trim() } : {}), productId: item.productId,
       quantity: Number(item.quantity), uom: uomOf(item), ...draftWeights(item, uomOf(item)),
-      expectedDates: {}, receivedDate, ...(deliveryDate ? { deliveryDate } : {}), createdAt, createdBy: userName
+      expectedDates: {}, receivedDate, ...(deliveryDate ? { deliveryDate } : {}), ...(nonProduction ? { category } : {}), createdAt, createdBy: userName
     }));
     const result = onAdd(built, customer, choices.filter((product) => product.masterDataId && built.some((order) => order.productId === product.id)));
     setErrors(result);
@@ -138,7 +142,8 @@ function NewOrderForm({ orders, products, catalog, customers, units, directory, 
     }
     });
   }}>
-    <div className="panel-title"><h2 id="new-order-title">New order</h2><button className="icon-button" type="button" aria-label="Close new order" title="Close" onClick={onClose}><X size={18} /></button></div>
+    <div className="panel-title"><h2 id="new-order-title">{nonProduction ? "New R&D, trial or pilot order" : "New order"}</h2><button className="icon-button" type="button" aria-label="Close new order" title="Close" onClick={onClose}><X size={18} /></button></div>
+    {nonProduction ? <label>Type<select name="category" value={category} onChange={(event) => setCategory(event.target.value as OrderCategory)}>{ORDER_CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></label> : null}
     {fromMasterData
       ? <RecordPicker key={customerPickerVersion} label="Customer ID" name="customerId" noun="customer" records={customerChoices} columns={customerColumns} display={(item) => item.code}
           value={known?.id} placeholder="Type or choose, e.g. 305-P0001" onText={setCustomerCode} />
@@ -215,13 +220,14 @@ type Column = {
 const COLUMN_STORAGE = "scheduler.orderColumns";
 
 
-function OrdersTable({ action, printable, orders, customerRecords, jobOrders, transfers, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
-  customerRecords: Customer[]; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions; action?: ReactNode;
+function OrdersTable({ nonProduction, action, printable, orders, customerRecords, jobOrders, transfers, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
+  customerRecords: Customer[]; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions; action?: ReactNode; nonProduction: boolean;
   flow: FlowWarning[];
   orders: PurchaseOrder[]; lines: PlanLine[]; products: Product[]; directory: CalendarDirectory; visibleCalendarIds: string[];
   editable: boolean; printable: boolean; customers: string[]; onSave: (order: PurchaseOrder) => string[]; onDelete: (id: string) => string[];
 }) {
   const today = localDateKey(new Date());
+  const title = nonProduction ? "R&D, trial & pilot batches" : "Customer orders";
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<{ key: string; ascending: boolean }>({ key: "number", ascending: true });
   const [month, setMonth] = useState("");
@@ -240,6 +246,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
   }
   const columns: Column[] = [
     { key: "number", label: "#", required: true, sort: (row) => row.number, cell: (row) => <span className="order-number-cell" style={{ "--order-color": orderColor(row.number) } as React.CSSProperties}><OrderBadge number={row.number} poNumber={row.order.poNumber} /></span> },
+    ...(nonProduction ? [{ key: "category", label: "Type", sort: (row: Row) => row.order.category ?? "", cell: (row: Row) => <span className="badge neutral">{row.order.category}</span>, filter: { kind: "select" as const, options: [...ORDER_CATEGORIES], value: (row: Row) => row.order.category ?? "" } }] : []),
     { key: "received", label: "PO received", sort: (row) => row.order.receivedDate ?? "", cell: (row) => row.order.receivedDate ? displayDate(row.order.receivedDate) : <span className="route-muted">Not set</span>, filter: { kind: "date", date: (row) => row.order.receivedDate } },
     { key: "customer", label: "Customer", sort: (row) => row.order.customerName ?? "", cell: (row) => { const record = customerRecords.find((item) => item.id === row.order.customerId); return row.order.customerName ? <>{row.order.customerName}{record ? <small>ID {record.code}</small> : null}</> : <span className="route-muted">Not set</span>; }, filter: { kind: "text", text: (row) => `${row.order.customerName ?? ""} ${customerRecords.find((item) => item.id === row.order.customerId)?.code ?? ""}` } },
     { key: "po", label: "PO number", required: true, sort: (row) => `${row.order.poNumber}#${String(poItem(row.order)).padStart(4, "0")}`, cell: (row) => <><strong>{row.order.poNumber}</strong>{poItems(row.order.poNumber, orders).length > 1 ? <small>Item {poItem(row.order)} of {poItems(row.order.poNumber, orders).length}</small> : null}</>, filter: { kind: "text", text: (row) => row.order.poNumber } },
@@ -279,7 +286,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
   const filtering = !!month || Object.values(filters).some((value) => value.trim());
   return <div className="workspace-panel orders-list">
     <div className="orders-toolbar">
-      <h2>Customer orders <span className="badge neutral">{orders.length}</span></h2>
+      <h2>{title} <span className="badge neutral">{orders.length}</span></h2>
       <fieldset className="orders-month"><legend>Month</legend>
         <select aria-label="Month based on" value={basis} onChange={(event) => setBasis(event.target.value as MonthBasis)}>
           <option value="scheduled">Scheduled in</option><option value="expected">Expected delivery in</option><option value="received">PO received in</option><option value="created">Order created in</option>
@@ -295,7 +302,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
       <span className="result-count" aria-live="polite">{table.length} of {orders.length} orders</span>
       {action}
     </div>
-    <div className="orders-table-scroll" tabIndex={0} role="region" aria-label="Customer orders">
+    <div className="orders-table-scroll" tabIndex={0} role="region" aria-label={title}>
       <table className="orders-table">
         <thead>
           <tr>
@@ -333,7 +340,7 @@ function OrdersTable({ action, printable, orders, customerRecords, jobOrders, tr
       </table>
       <datalist id="order-filter-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
     </div>
-    <OrdersPrint orders={orders} rows={print.orderId ? all.filter((row) => row.order.id === print.orderId) : table} detail={!!print.orderId} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} filtered={table.length !== orders.length} />
+    <OrdersPrint title={title} orders={orders} rows={print.orderId ? all.filter((row) => row.order.id === print.orderId) : table} detail={!!print.orderId} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} filtered={table.length !== orders.length} />
   </div>;
 }
 
@@ -353,12 +360,12 @@ const progressText = (progress: OrderProgress) => !progress.processCount ? "Not 
   : `${progress.batchesFinished}/${progress.batchCount} batches finished${progress.nextStep ? ` · ${progress.nextStep.batch} at ${progress.nextStep.processName}` : ""}`;
 
 // Print sheet for the Orders tab: the order list as shown, or one order with its batch grid.
-function OrdersPrint({ rows, orders, detail, lines, directory, visibleCalendarIds, filtered }: { rows: Row[]; orders: PurchaseOrder[]; detail: boolean; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; filtered: boolean }) {
+function OrdersPrint({ title, rows, orders, detail, lines, directory, visibleCalendarIds, filtered }: { title: string; rows: Row[]; orders: PurchaseOrder[]; detail: boolean; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; filtered: boolean }) {
   if (typeof document === "undefined") return null;
   const printed = formatDateTime(new Date());
   return createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
     {detail && rows[0] ? <OrderPrintDetail row={rows[0]} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} printed={printed} /> : <>
-      <header><h1>Customer orders</h1><p>{rows.length} order{rows.length === 1 ? "" : "s"}{filtered ? " (filtered)" : ""} · printed {printed}</p></header>
+      <header><h1>{title}</h1><p>{rows.length} order{rows.length === 1 ? "" : "s"}{filtered ? " (filtered)" : ""} · printed {printed}</p></header>
       <table className="print-orders-table">
         <thead><tr><th>#</th><th>PO received</th><th>Customer</th><th>PO number</th><th>SO number</th><th className="print-col-product">Product</th><th>Dosage form</th><th>Order qty</th><th>Total kg</th><th>Progress</th><th>Finished</th><th>Testing / release</th><th>Expected delivery</th><th>Status</th></tr></thead>
         <tbody>{rows.map((row) => <tr key={row.order.id}>
@@ -666,12 +673,14 @@ function OrderDetail({ printable, orders, order, product, jobOrders, transfers, 
       const so = String(data.get("so") ?? "").trim();
       const { deliveryDate: _d, receivedDate: _r, soNumber: _s, unitWeightMg: _w, unitsPerPack: _p, ...rest } = order;
       const weighed = draftWeights({ ...draftItem(), ...weights }, order.uom);
-      const result = onSave({ ...rest, ...(delivery ? { deliveryDate: delivery } : {}), ...(received ? { receivedDate: received } : {}), ...(so ? { soNumber: so } : {}), ...weighed, customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), quantity: Number(weights.quantity), format: String(data.get("format")) as ProductFormat });
+      const category = data.get("category") as OrderCategory | null;
+      const result = onSave({ ...rest, ...(category ? { category } : {}), ...(delivery ? { deliveryDate: delivery } : {}), ...(received ? { receivedDate: received } : {}), ...(so ? { soNumber: so } : {}), ...weighed, customerName: String(data.get("customer")).trim(), poNumber: String(data.get("po")).trim(), quantity: Number(weights.quantity), format: String(data.get("format")) as ProductFormat });
       setErrors(result); setSaved(!result.length);
       });
     }}>
       <label>Customer name<input name="customer" required defaultValue={order.customerName} list={`customers-${order.id}`} /></label>
       <datalist id={`customers-${order.id}`}>{customers.map((name) => <option key={name} value={name} />)}</datalist>
+      {order.category ? <label>Type<select name="category" defaultValue={order.category}>{ORDER_CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></label> : null}
       <label>PO number<input name="po" required defaultValue={order.poNumber} /></label>
       <label>SO number<input name="so" maxLength={60} placeholder="Optional" defaultValue={order.soNumber ?? ""} /></label>
       <label>PO received date<input name="receivedDate" type="date" max={localDateKey(new Date())} defaultValue={order.receivedDate ?? ""} /></label>

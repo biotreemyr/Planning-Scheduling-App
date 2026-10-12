@@ -30,12 +30,18 @@ export type PurchaseOrder = {
   // those are in one pack (box, bottle...). Total kg is worked out from these and the quantity.
   unitWeightMg?: number;
   unitsPerPack?: number;
+  // R&D, trial or pilot batch work kept apart from normal production; without it the order is production.
+  category?: OrderCategory;
   // Per-process expected completion dates from before delivery dates; no longer entered or shown.
   expectedDates: Record<string, string>;
   notes?: string; createdAt: string; createdBy: string;
   // Who last edited it, and when.
   updatedBy?: string; updatedAt?: string;
 };
+
+export const ORDER_CATEGORIES = ["R&D", "Trial", "Pilot batch"] as const;
+export type OrderCategory = typeof ORDER_CATEGORIES[number];
+export const isNonProduction = (order?: Pick<PurchaseOrder, "category">) => !!order?.category;
 
 const samePo = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 export const poItem = (order: Pick<PurchaseOrder, "item">) => order.item ?? 1;
