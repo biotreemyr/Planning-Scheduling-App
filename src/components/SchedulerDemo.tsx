@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowUpDown, CalendarDays, CheckCircle2, ClipboardList, Copy, Factory, FileText, LayoutGrid, Plus, Search, SlidersHorizontal, Users, XCircle, History } from "lucide-react";
+import { AlertTriangle, ArrowUpDown, CalendarDays, CheckCircle2, ClipboardList, Copy, Factory, FileText, FlaskConical, LayoutGrid, Plus, Search, SlidersHorizontal, Users, XCircle, History } from "lucide-react";
 import { FormEvent, Fragment, useMemo, useState, type ReactNode } from "react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -24,7 +24,7 @@ import { StatusPanel, type StatusSection } from "@/components/StatusPanel";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { inUnit, type JobPlan } from "@/components/JobPlanDialog";
 import { calendarSettings, unitRoute, type ProcessSettings } from "@/lib/services/processSetup";
-import { batchRoute, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
+import { batchRoute, isNonProduction, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
 import { validateCompletion, validateCorrection, withoutProgress, type CompletionInput, type Progress, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
@@ -51,12 +51,13 @@ import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from 
 import { formatDate, formatDateTime } from "@/lib/services/dates";
 import type { OrderCatalog } from "@/lib/services/masterData";
 
-type Tab = "planner" | "orders" | "status" | "master" | "reports" | "audit";
+type Tab = "planner" | "orders" | "trials" | "status" | "master" | "reports" | "audit";
 type PlanningView = "calendar" | "list";
 
 const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: "planner", label: "Planner Board", icon: CalendarDays },
   { id: "orders", label: "Orders", icon: FileText },
+  { id: "trials", label: "R&D, Trial & Pilot", icon: FlaskConical },
   { id: "status", label: "QA/QC", icon: CheckCircle2 },
   { id: "master", label: "Admin", icon: LayoutGrid },
   { id: "reports", label: "Reports", icon: ClipboardList },
@@ -107,7 +108,7 @@ function AppHeader({
         <p>Production workspace</p>
       </div>
       <nav className="tab-list" aria-label="Scheduler sections">
-        {tabs.filter((tab) => (showReports || tab.id !== "reports") && (showAdmin || tab.id !== "master") && (showOrders || tab.id !== "orders") && (showStatus || tab.id !== "status")).map((tab) => {
+        {tabs.filter((tab) => (showReports || tab.id !== "reports") && (showAdmin || tab.id !== "master") && (showOrders || (tab.id !== "orders" && tab.id !== "trials")) && (showStatus || tab.id !== "status")).map((tab) => {
           const Icon = tab.icon;
           return <Fragment key={tab.id}>
             <button
@@ -718,7 +719,10 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
   const persistenceStatus = useWorkspacePersistence(initial, snapshot, writeToken);
   const scope = <T extends { calendarId?: string },>(records: T[]) => visibleCalendars.flatMap((item) => scopeCalendarRecords(records, member, item, directory));
   const entries = scope(data.entries);
-  const planLines = syncPlanLineStatuses(scope(data.lines), entries);
+  // Production, non-production (R&D, trial, pilot batch) or both, by the order an activity belongs to.
+  const [streams, setStreams] = useState({ production: true, nonProduction: true });
+  const inStream = (orderId?: string) => isNonProduction(data.orders.find((order) => order.id === orderId)) ? streams.nonProduction : streams.production;
+  const planLines = syncPlanLineStatuses(scope(data.lines), entries).filter((line) => inStream(line.productionOrderId));
   // The activity panel can step along a batch's route into processes that are filtered out of view.
   const allowedLines = syncPlanLineStatuses(allowedCalendars.flatMap((item) => scopeCalendarRecords(data.lines, member, item, directory)), data.entries);
   const selectedLine = allowedLines.find((line) => line.id === selectedActivity);
@@ -1169,6 +1173,10 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
   // The unit picker shows only when there is more than one unit to choose from (BTP alone today).
   const filterControls = <div className="calendar-filters">
     {availableUnits.length > 1 ? <label>Unit<select value={unit?.id ?? ""} disabled={!unit} onChange={(event) => { setUnitSelection(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{!unit ? <option value="">No unit assigned</option> : availableUnits.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
+    <fieldset className="stream-ticks"><legend className="admin-sr-only">Show orders</legend>
+      <label><input type="checkbox" checked={streams.production} onChange={(event) => setStreams({ ...streams, production: event.target.checked })} />Production</label>
+      <label><input type="checkbox" checked={streams.nonProduction} onChange={(event) => setStreams({ ...streams, nonProduction: event.target.checked })} />Non-production</label>
+    </fieldset>
     {/* Which processes the calendar and list show, in route order, tucked in a menu. */}
     <ToolbarMenu label="Processes" badge={visibleCalendars.length === unitCalendars.length ? "All" : `${visibleCalendars.length} of ${unitCalendars.length}`} active={visibleCalendars.length !== unitCalendars.length}>
       <fieldset className="process-ticks"><legend>Show processes</legend>
@@ -1186,7 +1194,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
       {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine} onResizeLine={resizeLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.jobOrderId ?? selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
@@ -1220,6 +1228,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
         section={statusSection} onSection={setStatusSection} onTest={testJob} onRelease={releaseJob} onReject={rejectJob} /> : null}
       {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
+      {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "audit" ? <HistoryPanel refreshKey={activeTab} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
