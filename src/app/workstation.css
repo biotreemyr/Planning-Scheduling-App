@@ -19,7 +19,7 @@
 .release-table .release-version small { display: block; max-width: 220px; margin-top: 4px; white-space: normal; opacity: .75; }
 .release-table tr.release-first > * { border-top: 2px solid var(--line); }
 .workstation .release-table, .release-table { min-width: 0; }
-.release-table td:last-child { line-height: 1.5; white-space: normal; min-width: 220px; }
+.release-table td:last-child { white-space: normal; min-width: 220px; }
 .workstation .release-table td, .workstation .release-table th, .release-table td { vertical-align: top; }
 @media (max-width: 640px) { .release-table .release-version small { display: none; } }
 .workstation-content { margin-left: 220px; padding: 0 28px 32px; }
@@ -557,6 +557,14 @@
 .history-table td { vertical-align: top; }
 .history-table .history-when { white-space: nowrap; }
 .history-link { padding: 0; min-height: 0; border: 0; background: none; color: #1971c2; font: inherit; text-decoration: underline; cursor: pointer; text-align: left; }
+/* Audit trail and What's new: the page itself scrolls (no box of its own), long lists page, and each change reads in smaller type. */
+.history-panel .orders-table-scroll { max-height: none; }
+.workstation .history-table td:last-child { font-size: 12px; line-height: 1.5; }
+.table-pager { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 16px; margin-top: 12px; font-size: 13px; }
+.table-pager .result-count { margin-right: auto; }
+.table-pager label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+.table-pager select { width: auto; }
+.table-pager-buttons { display: inline-flex; align-items: center; gap: 10px; }
 
 /* Job order quantities: job order no., one group per process measure and the packing job order no., six equal columns on one
    line; each heading stays on one line (the full text is in its tooltip). */

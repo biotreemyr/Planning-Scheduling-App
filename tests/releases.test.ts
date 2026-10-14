@@ -30,3 +30,16 @@ describe("What's new tab", () => {
     expect(html).toContain("3 of 3 changes");
   });
 });
+
+describe("long lists", () => {
+  it("show 25 changes per page with page controls", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { createElement } = await import("react");
+    const { ReleaseNotes } = await import("../src/components/ReleaseNotes");
+    const notes = "## [1.0.0] - 2026-10-14\n### Added\n" + Array.from({ length: 30 }, (_, index) => `- Change ${index + 1}`).join("\n");
+    const html = renderToStaticMarkup(createElement(ReleaseNotes, { releases: parseChangelog(notes) }));
+    expect(html.match(/<tr/g)?.length).toBe(26);
+    expect(html).toContain("Showing 1–25 of 30");
+    expect(html).toContain("Page 1 of 2");
+  });
+});

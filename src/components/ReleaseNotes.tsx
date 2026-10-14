@@ -3,6 +3,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import type { Release } from "@/lib/services/releases";
 import { formatDate } from "@/lib/services/dates";
+import { usePager } from "./Pager";
 
 // Keep a Changelog's kinds of change, each with its own badge colour.
 const TYPE_BADGE: Record<string, string> = { Added: "success", Changed: "info", Fixed: "warning", Removed: "danger", Deprecated: "neutral", Security: "danger" };
@@ -17,9 +18,10 @@ export function ReleaseNotes({ releases }: { releases: Release[] }) {
   const rows = releases.flatMap((release) => release.sections.flatMap((section) => section.items.map((item, index) => ({ key: `${release.version}-${section.title}-${index}`, release, type: section.title, text: item }))));
   const types = [...new Set(rows.map((row) => row.type))];
   const shown = rows.filter((row) => (!type || row.type === type) && (!version || row.release.version === version) && `${row.release.version} ${row.type} ${plain(row.text)}`.toLowerCase().includes(query.trim().toLowerCase()));
-  // The version and date show once, beside the first of that version's changes.
-  const firstOf = new Set(releases.map((release) => shown.find((row) => row.release === release)?.key));
-  const spanOf = (release: Release) => shown.filter((row) => row.release === release).length;
+  const { rows: page, pager } = usePager(shown, `${query}|${type}|${version}`);
+  // The version and date show once on each page, beside the first of that version's changes.
+  const firstOf = new Set(releases.map((release) => page.find((row) => row.release === release)?.key));
+  const spanOf = (release: Release) => page.filter((row) => row.release === release).length;
   const filtering = !!(query || type || version);
   return <section className="workspace-panel history-panel release-notes">
     <div className="panel-title"><h2>Releases <span className="badge neutral">{releases.length}</span></h2>
@@ -38,7 +40,7 @@ export function ReleaseNotes({ releases }: { releases: Release[] }) {
         <thead><tr><th scope="col">Version</th><th scope="col">Released</th><th scope="col">Type</th><th scope="col">Change</th></tr></thead>
         <tbody>
           {!shown.length ? <tr><td colSpan={4} className="empty-state">{rows.length ? "No changes match these filters." : "No release notes yet."}</td></tr> : null}
-          {shown.map((row) => <tr key={row.key} className={firstOf.has(row.key) ? "release-first" : undefined}>
+          {page.map((row) => <tr key={row.key} className={firstOf.has(row.key) ? "release-first" : undefined}>
             {firstOf.has(row.key) ? <>
               <th scope="rowgroup" rowSpan={spanOf(row.release)} className="release-version">
                 <span className="release-number">v{row.release.version}</span>
@@ -53,6 +55,7 @@ export function ReleaseNotes({ releases }: { releases: Release[] }) {
         </tbody>
       </table>
     </div>
+    {pager}
   </section>;
 }
 

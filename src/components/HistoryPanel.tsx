@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { FileSpreadsheet, RotateCw, X } from "lucide-react";
 import type { HistoryEntry, HistoryKind } from "@/lib/services/history";
 import { formatDateTime } from "@/lib/services/dates";
+import { usePager } from "./Pager";
 
 type Row = { key: string; at: string; by: string; kind: HistoryKind; po: string; job: string; batch: string; product: string; text: string };
 const KINDS: HistoryKind[] = ["PO", "Customer", "Job order", "Planning", "Production", "Transfer", "Machine booking", "Setup"];
@@ -38,6 +39,8 @@ export function HistoryPanel({ refreshKey }: { refreshKey: string }) {
   const shown = rows.filter((row) => (!kind || row.kind === kind) && (!month || row.at.slice(0, 7) === month)
     && words.every((word) => `${row.po} ${row.job} ${row.batch} ${row.product} ${row.text} ${row.by}`.toLowerCase().includes(word)));
   const filtering = !!(query || kind || month);
+  // Excel still downloads every change shown; the table pages through them.
+  const { rows: page, pager } = usePager(shown, `${query}|${kind}|${month}`);
 
   async function download() {
     const excel = await import("exceljs");
@@ -81,7 +84,7 @@ export function HistoryPanel({ refreshKey }: { refreshKey: string }) {
         <thead><tr><th scope="col">Date &amp; time</th><th scope="col">By</th><th scope="col">Type</th><th scope="col">PO number</th><th scope="col">Job order</th><th scope="col">Batch no.</th><th scope="col">Change</th></tr></thead>
         <tbody>
           {!shown.length ? <tr><td colSpan={7} className="empty-state">{rows.length ? "No changes match these filters." : "No changes saved yet."}</td></tr> : null}
-          {shown.map((row) => <tr key={row.key}>
+          {page.map((row) => <tr key={row.key}>
             <td className="history-when">{when(row.at)}</td><td>{row.by}</td><td><span className="badge neutral">{row.kind}</span></td>
             <td>{row.po ? <button type="button" className="history-link" onClick={() => setQuery(row.po)}>{row.po}</button> : "-"}</td>
             <td>{row.job ? <button type="button" className="history-link" onClick={() => setQuery(row.job)}>{row.job}</button> : "-"}</td>
@@ -91,5 +94,6 @@ export function HistoryPanel({ refreshKey }: { refreshKey: string }) {
         </tbody>
       </table>
     </div> : null}
+    {entries ? pager : null}
   </section>;
 }
