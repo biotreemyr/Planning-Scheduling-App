@@ -23,12 +23,21 @@ export async function loadMasterLists(env: NodeJS.ProcessEnv = process.env): Pro
   if (!env.MASTER_DATA_DATABASE_URL) return null;
   const company = (env.MASTER_DATA_COMPANY || "btp").trim().toLowerCase();
   const pool = getPool(env.MASTER_DATA_DATABASE_URL);
-  const [products, customers] = await Promise.all([
-    pool.query(`SELECT id::text AS id, code, name, coalesce(source->>'UOM', '') AS uom
-                  FROM products WHERE company_key = $1 AND is_active AND for_production AND code LIKE 'FG-%' ORDER BY code`, [company]),
-    pool.query(`SELECT id::text AS id, code, name FROM customers WHERE company_key = $1 AND is_active AND for_production ORDER BY code`, [company])
-  ]);
-  return { products: products.rows, customers: customers.rows };
+  const lists = async (production: string) => {
+    const [products, customers] = await Promise.all([
+      pool.query(`SELECT id::text AS id, code, name, coalesce(source->>'UOM', '') AS uom
+                    FROM products WHERE company_key = $1 AND is_active${production} AND code LIKE 'FG-%' ORDER BY code`, [company]),
+      pool.query(`SELECT id::text AS id, code, name FROM customers WHERE company_key = $1 AND is_active${production} ORDER BY code`, [company])
+    ]);
+    return { products: products.rows, customers: customers.rows };
+  };
+  try {
+    return await lists(" AND for_production");
+  } catch (error) {
+    // A Master Data database without the switch yet (undefined column) offers every active record, as before.
+    if ((error as { code?: string }).code === "42703") return lists("");
+    throw error;
+  }
 }
 
 /** For the page: undefined when Master Data is not configured, so the order form keeps its own lists. */
