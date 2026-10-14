@@ -59,9 +59,9 @@ export function poLabel(order: PurchaseOrder, orders: PurchaseOrder[]) {
   return count > 1 ? `${order.poNumber} · item ${poItem(order)} of ${count}` : order.poNumber;
 }
 
-export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName" | "number" | "item" | "unitId">, orders: PurchaseOrder[], products: Product[]) {
+export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "productId" | "quantity" | "customerName" | "number" | "item" | "unitId" | "category">, orders: PurchaseOrder[], products: Product[]) {
   const errors: string[] = [];
-  if (order.number !== undefined && orders.some((item) => item.id !== order.id && item.number === order.number)) errors.push("This order number is already in use.");
+  if (order.number !== undefined && orders.some((item) => item.id !== order.id && item.number === order.number && isNonProduction(item) === isNonProduction(order))) errors.push("This order number is already in use.");
   if (!order.customerName?.trim()) errors.push("Enter the customer name.");
   const po = order.poNumber.trim();
   const others = poItems(po, orders).filter((item) => item.id !== order.id);
@@ -80,16 +80,23 @@ export function validateOrder(order: Pick<PurchaseOrder, "id" | "poNumber" | "pr
 export const ORDER_COLORS = ["#2b8a3e", "#1971c2", "#e8590c", "#7048e8", "#15aabf", "#d6336c", "#fab005", "#ced4da"] as const;
 export const orderColor = (number: number) => ORDER_COLORS[(Math.max(1, Math.trunc(number)) - 1) % ORDER_COLORS.length];
 
-// Each order's running number. Orders saved before numbering existed are numbered after the
-// highest stored number, oldest first, so existing numbers never shift.
+// Each order's running number, counted separately for production orders and for R&D, trial and
+// pilot orders, so each starts at 1. Orders saved before numbering existed are numbered after the
+// highest stored number of their kind, oldest first, so existing numbers never shift.
 export function orderNumbers(orders: PurchaseOrder[]) {
   const numbers = new Map<string, number>();
-  let next = Math.max(0, ...orders.map((order) => order.number ?? 0));
-  for (const order of orders) if (order.number) numbers.set(order.id, order.number);
-  for (const order of [...orders].filter((item) => !item.number).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.poNumber.localeCompare(b.poNumber))) numbers.set(order.id, ++next);
+  for (const kind of [false, true]) {
+    const group = orders.filter((order) => isNonProduction(order) === kind);
+    let next = Math.max(0, ...group.map((order) => order.number ?? 0));
+    for (const order of group) if (order.number) numbers.set(order.id, order.number);
+    for (const order of [...group].filter((item) => !item.number).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.poNumber.localeCompare(b.poNumber))) numbers.set(order.id, ++next);
+  }
   return numbers;
 }
-export const nextOrderNumber = (orders: PurchaseOrder[]) => Math.max(0, ...orderNumbers(orders).values()) + 1;
+export const nextOrderNumber = (orders: PurchaseOrder[], nonProduction = false) => {
+  const numbers = orderNumbers(orders);
+  return Math.max(0, ...orders.filter((order) => isNonProduction(order) === nonProduction).map((order) => numbers.get(order.id) ?? 0)) + 1;
+};
 
 export type OrderProcessRow = {
   calendar: UnitCalendar; processName: string; unitName: string;

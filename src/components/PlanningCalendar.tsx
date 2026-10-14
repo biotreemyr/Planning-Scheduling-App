@@ -9,7 +9,7 @@ import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { priorities } from "@/lib/domain/types";
 import type { PlanLine, Product, Machine, ScheduleEntry } from "@/lib/domain/types";
 import { StatusBadge } from "./StatusBadge";
-import { ORDER_COLORS, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
+import { ORDER_COLORS, isNonProduction, orderColor, orderNumbers, poLabel, type PurchaseOrder } from "@/lib/services/orders";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
 import { lineEnd } from "@/lib/services/scheduling";
 import type { ProcessSettings } from "@/lib/services/processSetup";
@@ -101,8 +101,8 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
         month: { startDayOfWeek: 1 },
         week: { startDayOfWeek: 1, taskView: false, eventView: ["allday"] },
         template: { allday: (event) => {
-          const { number, priority, completed, warn } = (event.raw ?? {}) as { number?: number; priority?: string; completed?: boolean; warn?: string };
-          const badge = number ? `<span class="order-badge">${number}</span>` : "";
+          const { number, trial, priority, completed, warn } = (event.raw ?? {}) as { number?: number; trial?: boolean; priority?: string; completed?: boolean; warn?: string };
+          const badge = number ? `<span class="order-badge${trial ? " trial" : ""}">${number}</span>` : "";
           const mark = priority === "High" || priority === "Urgent" ? `<span class="priority-mark ${priority.toLowerCase()}" title="${priority} priority">!</span>` : "";
           return `<button type="button" class="calendar-plan-event${number ? "" : " no-order"}" data-plan-id="${escapeHtml(event.id)}">${badge}${mark}${warn ? `<span class="flow-mark" title="${escapeHtml(warn)}">⚠</span>` : ""}${completed ? "✓ " : ""}${escapeHtml(event.title)}</button>`;
         } }
@@ -136,7 +136,7 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
       const color = number ? orderColor(number) : NO_ORDER;
       return {
         id: line.id, calendarId: "planning", category: "allday", isAllday: true,
-        raw: { number, priority: line.priority, completed: !!line.completedAt, warn: warnings?.get(line.id)?.join("\n") },
+        raw: { number, trial: isNonProduction(orders.find((order) => order.id === line.productionOrderId)), priority: line.priority, completed: !!line.completedAt, warn: warnings?.get(line.id)?.join("\n") },
         // Process, then product, batch number, job order number and this process's quantity (actual once done).
         title: (() => { const facts = activityFacts(line, jobOrders, item?.uom); return `${line.activityType ? `${line.activityType}: ` : ""}${[item?.name ?? "Unknown product", facts.batchNumber, facts.jobNumber, facts.quantity].filter(Boolean).join(" · ")}`; })(),
         start: line.plannedDate, end: lineEnd(line), isReadOnly: !canPlan || !!line.completedAt,
@@ -230,6 +230,7 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
       onPlan={onPlanJob} onDone={(message, firstDate) => { calendar.current?.clearGridSelections(); setNotice(message); if (firstDate) setDate(firstDate); }} />
     <div className="order-legend" aria-label="Legend">
       <span><span className="order-badge">1</span>Order number · tab colour</span>
+      <span><span className="order-badge trial">1</span>R&amp;D, trial or pilot order</span>
       <span>{ORDER_COLORS.map((color, index) => <i key={color} className="order-legend-swatch" style={{ background: color }} title={`Orders ${index + 1}, ${index + 9}, ${index + 17}…`} />)} repeat every 8</span>
       <span><span className="priority-mark high">!</span>High</span><span><span className="priority-mark urgent">!</span>Urgent</span>
       <span><i className="order-legend-swatch no-order" />No PO linked</span><span>✓ Completed</span>

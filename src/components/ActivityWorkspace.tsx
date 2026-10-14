@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Maximize2, Minus, X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
-import { orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
+import { isNonProduction, orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
 import type { FlowWarning, ProductFormat } from "@/lib/services/processRules";
 import { OrderBadge } from "./OrderBadge";
 import type { JobOrder } from "@/lib/services/jobOrders";
@@ -42,7 +42,7 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, c
   return <dialog ref={dialog} className={`activity-dialog unified-activity route-wide floating-window${minimised ? " minimised" : ""}`} style={style} aria-labelledby="activity-workspace-title" onClose={onClose}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); dialog.current?.close(); } }}>
     <header className="panel-title plan-window-bar" {...barProps}><div><p className="eyebrow">Activity workspace</p><h2 id="activity-workspace-title">{product?.name}{minimised ? ` · ${job?.number ?? line.activityType ?? ""}` : ""}</h2>
-      <p className="activity-order-ref">{order?.customerName ? <span>Customer: <strong>{order.customerName}</strong></span> : null}<span>{order ? <OrderBadge number={numbers.get(order.id)} poNumber={order.poNumber} /> : null}PO number: <strong>{order ? poLabel(order, orders) : "Not linked"}</strong></span>{job ? <span>Job order: <strong>{job.number}</strong></span> : line.orderReference ? <span>{line.orderReference}</span> : null}{job ? <span>Batch no.: <strong>{job.batchNumber ?? "Not entered"}</strong></span> : null}{order ? <span>Order quantity: {order.quantity.toLocaleString()} {order.uom}</span> : null}</p>
+      <p className="activity-order-ref">{order?.customerName ? <span>Customer: <strong>{order.customerName}</strong></span> : null}<span>{order ? <OrderBadge number={numbers.get(order.id)} poNumber={order.poNumber} trial={isNonProduction(order)} /> : null}PO number: <strong>{order ? poLabel(order, orders) : "Not linked"}</strong></span>{job ? <span>Job order: <strong>{job.number}</strong></span> : line.orderReference ? <span>{line.orderReference}</span> : null}{job ? <span>Batch no.: <strong>{job.batchNumber ?? "Not entered"}</strong></span> : null}{order ? <span>Order quantity: {order.quantity.toLocaleString()} {order.uom}</span> : null}</p>
       {job && onEditJobPlanning ? <button type="button" className="calendar-button" onClick={() => { dialog.current?.close(); onEditJobPlanning(); }}>Edit job order planning</button> : null}</div><span className="plan-window-buttons">
       <button className="icon-button" type="button" aria-label={minimised ? "Restore" : "Minimise"} title={minimised ? "Restore" : "Minimise"} onClick={() => setMinimised(!minimised)}>{minimised ? <Maximize2 size={16} /> : <Minus size={18} />}</button>
       <button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></span></header>

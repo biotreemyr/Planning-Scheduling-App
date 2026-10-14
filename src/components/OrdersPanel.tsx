@@ -135,7 +135,7 @@ function NewOrderForm({ nonProduction, orders, products, catalog, customers, uni
     if (fromMasterData && !known) { setErrors([`Customer ID ${customerCode.trim()} is not in Master Data. Choose a customer from the list.`]); return; }
     checkDates([{ label: words.received, value: receivedDate, rule: "today" }, { label: words.delivery, value: deliveryDate, rule: "delivery", after: { label: `the ${words.received.toLowerCase()}`, value: receivedDate } }], () => {
     const createdAt = new Date().toISOString();
-    let number = nextOrderNumber(orders);
+    let number = nextOrderNumber(orders, nonProduction);
     // A customer with no ID is not added to the customer list; the order keeps just the name.
     const customer: Customer = known ?? knownByName ?? { id: customerCode.trim() ? `customer-${crypto.randomUUID()}` : "", code: customerCode.trim(), name: customerName.trim(), active: "Active" };
     // An R&D product keyed in that is not on the list yet is added to it, with the next RND code.
@@ -278,7 +278,7 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
     try { localStorage.setItem(COLUMN_STORAGE, JSON.stringify(next)); } catch { /* not persisted */ }
   }
   const columns: Column[] = [
-    { key: "number", label: "#", required: true, sort: (row) => row.number, cell: (row) => <span className="order-number-cell" style={{ "--order-color": orderColor(row.number) } as React.CSSProperties}><OrderBadge number={row.number} poNumber={row.order.poNumber} /></span> },
+    { key: "number", label: "#", required: true, sort: (row) => row.number, cell: (row) => <span className="order-number-cell" style={{ "--order-color": orderColor(row.number) } as React.CSSProperties}><OrderBadge number={row.number} poNumber={row.order.poNumber} trial={isNonProduction(row.order)} /></span> },
     ...(nonProduction ? [{ key: "category", label: "Type", sort: (row: Row) => row.order.category ?? "", cell: (row: Row) => <span className="badge neutral">{row.order.category}</span>, filter: { kind: "select" as const, options: [...ORDER_CATEGORIES], value: (row: Row) => row.order.category ?? "" } }] : []),
     { key: "received", label: nonProduction ? "Received" : "PO received", sort: (row) => row.order.receivedDate ?? "", cell: (row) => row.order.receivedDate ? displayDate(row.order.receivedDate) : <span className="route-muted">Not set</span>, filter: { kind: "date", date: (row) => row.order.receivedDate } },
     { key: "customer", label: "Customer", sort: (row) => row.order.customerName ?? "", cell: (row) => { const record = customerRecords.find((item) => item.id === row.order.customerId); return row.order.customerName ? <>{row.order.customerName}{record ? <small>ID {record.code}</small> : null}</> : <span className="route-muted">Not set</span>; }, filter: { kind: "text", text: (row) => `${row.order.customerName ?? ""} ${customerRecords.find((item) => item.id === row.order.customerId)?.code ?? ""}` } },
