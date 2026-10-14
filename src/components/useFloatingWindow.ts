@@ -31,5 +31,7 @@ export function useFloatingWindow(dialog: RefObject<HTMLDialogElement | null>) {
   };
   // First opening: centred for the window's width, near the top; later it stays where it was left.
   const open = (width: number) => { if (!place) setPlace(keepInView((window.innerWidth - Math.min(width, window.innerWidth - 24)) / 2, 72)); };
-  return { minimised, setMinimised, barProps, open, style: place ? { left: place.left, top: place.top } : undefined };
+  // It ends 12px above the bottom of the screen wherever it is placed, so a long window scrolls inside
+  // itself and its Save button can always be reached.
+  return { minimised, setMinimised, barProps, open, style: place ? { left: place.left, top: place.top, maxHeight: `max(120px, calc(100dvh - ${place.top + 12}px))` } : undefined };
 }
