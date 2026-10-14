@@ -6,7 +6,7 @@ import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { canMovePlan, monthDates } from "@/lib/services/planningMonth";
-import { orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
+import { isNonProduction, orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
 import { OrderBadge, PriorityMark } from "./OrderBadge";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
 import { lineDays, lineEnd } from "@/lib/services/scheduling";
@@ -242,7 +242,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                           else if (event.key === "Escape") setMoving(null);
                         }}><GripVertical size={14} /></button> : null}
                       <button className="plan-list-product" type="button" title={`${line.completedAt ? "Completed: " : ""}${name}\n${batch}\n${detail}${order ? `\nPO ${order.poNumber}` : ""}${warnings?.get(line.id) ? `\n⚠ ${warnings.get(line.id)!.join("\n⚠ ")}` : ""}`} onClick={() => { if (!suppressClick.current) onSelect(line.id); }}>
-                        <strong><OrderBadge number={number} poNumber={order?.poNumber} /><PriorityMark priority={line.priority} />{warnings?.get(line.id) ? <span className="flow-mark" aria-label="Process-flow warning">⚠</span> : null}{line.completedAt ? <CheckCircle2 size={12} aria-label="Completed" /> : null}{name}</strong>
+                        <strong><OrderBadge number={number} poNumber={order?.poNumber} trial={isNonProduction(order)} /><PriorityMark priority={line.priority} />{warnings?.get(line.id) ? <span className="flow-mark" aria-label="Process-flow warning">⚠</span> : null}{line.completedAt ? <CheckCircle2 size={12} aria-label="Completed" /> : null}{name}</strong>
                         {batch ? <span className="plan-list-batch">{batch}</span> : null}
                         <small>{detail}</small>
                       </button>
