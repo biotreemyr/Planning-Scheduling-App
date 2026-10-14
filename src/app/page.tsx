@@ -9,6 +9,12 @@ import { localPersistenceAllowed } from "@/lib/persistence/access";
 import { db, writeToken } from "@/lib/persistence/database";
 import { workspaceRepository } from "@/lib/persistence/repository";
 import { loadOrderCatalog } from "@/lib/masterdata/catalog";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { parseChangelog } from "@/lib/services/releases";
+
+// Release notes for What's new, read from CHANGELOG.md; the workspace still opens without them.
+const loadReleases = () => readFile(path.join(process.cwd(), "CHANGELOG.md"), "utf8").then(parseChangelog, () => []);
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +23,8 @@ export default async function Home() {
     if (getAuthMode() === "demo") {
       if (!localPersistenceAllowed((await headers()).get("host"), process.env)) return <AccessMessage title="Local pilot only" message="Open this workspace on localhost. Verified dashboard login is required for shared deployment." />;
       if (!process.env.DATABASE_URL) return <AccessMessage title="Database setup required" message="Configure PostgreSQL and apply database migrations before using the workspace." />;
-      const [initial, catalog] = await Promise.all([workspaceRepository(db).load(), loadOrderCatalog()]);
-      return <SchedulerDemo initial={initial} writeToken={writeToken()} catalog={catalog} />;
+      const [initial, catalog, releases] = await Promise.all([workspaceRepository(db).load(), loadOrderCatalog(), loadReleases()]);
+      return <SchedulerDemo initial={initial} writeToken={writeToken()} catalog={catalog} releases={releases} />;
     }
   } catch {
     return <AccessMessage title="Scheduler unavailable" message="The database or authentication configuration is unavailable. No data has been reset. Contact your administrator." />;
@@ -42,9 +48,9 @@ export default async function Home() {
   // The verified Core user replaces the demo's person picker; every save is rechecked on the server.
   try {
     if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
-    const [initial, catalog] = await Promise.all([workspaceRepository(db).load(), loadOrderCatalog()]);
+    const [initial, catalog, releases] = await Promise.all([workspaceRepository(db).load(), loadOrderCatalog(), loadReleases()]);
     const identity = { id: user.id, name: user.name ?? "Bio Tree user", permissions: effectivePermissions(user.apps.find((app) => app.appKey === APP_KEY)?.permissions ?? []) };
-    return <SchedulerDemo initial={initial} writeToken={writeToken()} identity={identity} catalog={catalog} />;
+    return <SchedulerDemo initial={initial} writeToken={writeToken()} identity={identity} catalog={catalog} releases={releases} />;
   } catch {
     return <AccessMessage title="Scheduler unavailable" message="The scheduling database could not be reached. No data has been changed. Contact your administrator." />;
   }
