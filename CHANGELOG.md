@@ -7,6 +7,12 @@ Write entries for the people who use the app: what they can now do, or what work
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-14
+
+### Changed
+- **What's new** is laid out like the Audit trail: one table of changes with coloured types, a search box, and Type and Version filters.
+- **What's new** and the **Audit trail** show changes in smaller type, scroll with the page, and split long lists into pages (25, 50 or 100 per page).
+
 ## [1.0.1] - 2026-10-14
 
 ### Fixed
