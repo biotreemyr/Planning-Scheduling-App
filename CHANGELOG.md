@@ -7,6 +7,9 @@ Write entries for the people who use the app: what they can now do, or what work
 
 ## [Unreleased]
 
+### Changed
+- **New orders** no longer offer customers and products switched off for production in Master Data (for example an accounting-only customer). Existing orders keep theirs.
+
 ## [1.1.0] - 2026-10-14
 
 ### Changed
