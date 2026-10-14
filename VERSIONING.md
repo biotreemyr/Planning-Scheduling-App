@@ -41,13 +41,65 @@ Rules:
    - Good: "Orders can be filtered by expected delivery month."
    - Not useful: "Refactored OrdersTable filter state."
 
+## Writing a CHANGELOG entry
+
+Every entry has the same shape, so the **What's new** tab can show it as a table and anyone can follow it.
+
+### Format
+
+```markdown
+## [Unreleased]
+
+## [X.Y.Z] - YYYY-MM-DD
+One-line summary of the release (optional).
+
+### Added
+- **Screen or feature** what people can now do, in one or two sentences.
+
+### Changed
+- **Screen or feature** what now works differently. What happens to existing records.
+
+### Fixed
+- **Screen or feature** what was wrong and now works.
+
+### Removed
+- **Screen or feature** what is gone, and what to use instead.
+```
+
+### Rules
+
+- **Version heading:** `## [X.Y.Z] - YYYY-MM-DD`, with the version in square brackets and the date as year-month-day. What's new shows the date as DD/MM/YYYY.
+- **Keep `## [Unreleased]` at the top**, empty after a release, ready for the next change.
+- **Types:** only **Added**, **Changed**, **Fixed** and **Removed**, in that order, and only the ones the release has. In What's new each type gets its own colour: Added green, Changed blue, Fixed amber, Removed red.
+- **One line per change**, starting with `- `. Open with the screen or feature people know, in bold (`**New orders**`, `**Job order planning**`, `**What's new**`). Then say in plain words what they can now do, or what works differently.
+- **Say what happens to existing records** when a change could affect them ("Existing orders keep theirs.").
+- **Give an example** when the reason isn't obvious ("for example an accounting-only customer").
+- **No code words:** no file, function, column or branch names, and no pull request numbers. Those belong in the pull request.
+
+### Example: v1.1.1
+
+```markdown
+## [1.1.1] - 2026-10-14
+
+### Changed
+- **New orders** no longer offer customers and products switched off for production in Master Data (for example an accounting-only customer). Existing orders keep theirs.
+```
+
+It opens with the feature in bold ("New orders"), says what changed in plain words, gives an example, and says what happens to existing records.
+
+### Before releasing
+
+- Read every line under Unreleased as a staff member would, and fix anything unclear.
+- Check every change in the release, including ones from other people or sessions, for anything it relies on that isn't live yet, such as another app's database change. In v1.1.1, the Master Data switch wasn't live yet, so the scheduler was made to work without it until it is.
+- All tests pass on `main`. One test checks that `package.json`'s version matches the newest release here.
+
 ## Releasing a version
 
 1. Choose the number from the table above, based on what is under Unreleased.
 2. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and add a new empty `## [Unreleased]` above it. A one-line summary under the version heading is optional.
 3. Set `"version"` in `package.json` to `X.Y.Z`.
 4. Merge that through a pull request into `main`.
-5. Tag and publish it: `git tag vX.Y.Z && git push origin vX.Y.Z`, then `gh release create vX.Y.Z --title "vX.Y.Z" --notes "<that version's notes>"`.
+5. Tag and publish it from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`, then `gh release create vX.Y.Z --title "vX.Y.Z" --notes-file <that version's notes> --latest`. The notes are that version's section of `CHANGELOG.md`, word for word.
 6. Deploy the tag (below).
 7. Tell staff it is out. The **What's new** tab has the notes to share.
 
