@@ -7,6 +7,9 @@ Write entries for the people who use the app: what they can now do, or what work
 
 ## [Unreleased]
 
+### Fixed
+- **Job order planning** and the **activity window** always fit on the screen and scroll inside, so the Save button can be reached without dragging the window up.
+
 ## [1.0.0] - 2026-10-14
 
 First live version. Planning, orders and production records start from here; earlier test data has been cleared.
