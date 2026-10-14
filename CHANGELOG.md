@@ -4,6 +4,7 @@ What changed in each version of the Bio Tree Production Scheduler. Everyone can 
 How versions are numbered and released: see [VERSIONING.md](VERSIONING.md).
 
 Write entries for the people who use the app: what they can now do, or what works differently. Newest version first.
+Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSIONING.md#writing-a-changelog-entry).
 
 ## [Unreleased]
 
