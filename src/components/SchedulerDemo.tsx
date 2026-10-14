@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowUpDown, CalendarDays, CheckCircle2, ClipboardList, Copy, Factory, FileText, FlaskConical, LayoutGrid, Plus, Search, SlidersHorizontal, Users, XCircle, History } from "lucide-react";
+import { AlertTriangle, ArrowUpDown, CalendarDays, CheckCircle2, ClipboardList, Copy, Factory, FileText, FlaskConical, Sparkles, LayoutGrid, Plus, Search, SlidersHorizontal, Users, XCircle, History } from "lucide-react";
 import { FormEvent, Fragment, useMemo, useState, type ReactNode } from "react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -48,10 +48,12 @@ import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/serv
 import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
 import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
+import type { Release } from "@/lib/services/releases";
+import { ReleaseNotes } from "./ReleaseNotes";
 import { formatDate, formatDateTime } from "@/lib/services/dates";
 import type { OrderCatalog } from "@/lib/services/masterData";
 
-type Tab = "planner" | "orders" | "trials" | "status" | "master" | "reports" | "audit";
+type Tab = "planner" | "orders" | "trials" | "status" | "master" | "reports" | "audit" | "news";
 type PlanningView = "calendar" | "list";
 
 const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
@@ -61,7 +63,8 @@ const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: "status", label: "QA/QC", icon: CheckCircle2 },
   { id: "master", label: "Admin", icon: LayoutGrid },
   { id: "reports", label: "Reports", icon: ClipboardList },
-  { id: "audit", label: "Audit trail", icon: History }
+  { id: "audit", label: "Audit trail", icon: History },
+  { id: "news", label: "What's new", icon: Sparkles }
 ];
 
 const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
@@ -88,7 +91,8 @@ function AppHeader({
   showStatus,
   statusSections,
   statusSection,
-  onStatusSection
+  onStatusSection,
+  version
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
@@ -100,6 +104,8 @@ function AppHeader({
   showOrders: boolean; showStatus: boolean;
   // QA/QC's sections (Testing, Release) the person may open, listed under it while it is open.
   statusSections: { id: StatusSection; label: string }[]; statusSection: StatusSection; onStatusSection: (section: StatusSection) => void;
+  // The released version in use, from CHANGELOG.md; it opens What's new.
+  version?: string;
 }) {
   return (
     <aside className="app-header">
@@ -131,7 +137,7 @@ function AppHeader({
         <AlertTriangle size={16} />
         <span>{conflictCount} conflict{conflictCount === 1 ? "" : "s"}</span>
       </button>
-      <div className="sidebar-footer">Bio Tree Biotechnology<p>Planning & production</p></div>
+      <div className="sidebar-footer">Bio Tree Biotechnology<p>Planning & production</p>{version ? <button type="button" className="app-version" title="What's new in this version" onClick={() => onTabChange("news")}>v{version}</button> : null}</div>
     </aside>
   );
 }
@@ -663,11 +669,11 @@ function ReportsPanel({
 // A person verified by Bio Tree Core. Their permissions come from Core; the server rechecks every save.
 export type CoreIdentity = { id: string; name: string; permissions: string[] };
 
-export default function SchedulerDemo({ initial, writeToken, identity, catalog }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog }) {
-  return <MeasurementProvider initial={initial.snapshot.measurements}><DateCheckProvider><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} catalog={catalog} /></DateCheckProvider></MeasurementProvider>;
+export default function SchedulerDemo({ initial, writeToken, identity, catalog, releases = [] }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; releases?: Release[] }) {
+  return <MeasurementProvider initial={initial.snapshot.measurements}><DateCheckProvider><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} catalog={catalog} releases={releases} /></DateCheckProvider></MeasurementProvider>;
 }
 
-function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog }) {
+function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; releases: Release[] }) {
   const [directory, setDirectory] = useState<CalendarDirectory>(initial.snapshot.directory);
   const [memberId, setMemberId] = useState(initial.snapshot.directory.people.find((person) => person.role === "admin")!.id);
   // In Core mode the signed-in user replaces the demo person picker. Core has no unit model
@@ -1189,12 +1195,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
     </ToolbarMenu>
   </div>;
   return <main className="workstation">
-    <AppHeader activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
+    <AppHeader version={releases[0]?.version} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
       statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }] : [])]}
       statusSection={statusSection} onStatusSection={setStatusSection} />
     <div className="workstation-content">
       <header className="workstation-topbar"><div className="topbar-title"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>{persistenceStatus}</div>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
-      {!unit && activeTab !== "master" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
+      {!unit && activeTab !== "master" && activeTab !== "news" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
       {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
@@ -1233,6 +1239,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog }: { initial: Wo
       {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "audit" ? <HistoryPanel refreshKey={activeTab} /> : null}
+      {activeTab === "news" ? <ReleaseNotes releases={releases} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />

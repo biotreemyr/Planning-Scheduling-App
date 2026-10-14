@@ -11,6 +11,15 @@
 .workstation .alert-pill { min-height: 44px; padding: 10px; border-radius: 6px; width: 100%; font-size: 13px; }
 .sidebar-footer { margin-top: auto; border-top: 1px solid var(--line); padding: 20px 10px 0; font-size: 12px; font-weight: 600; }
 .sidebar-footer p { font-size: 12px; margin: 5px 0; font-weight: 400; }
+.app-version { display: inline-block; margin-top: 4px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.app-version:hover, .app-version:focus-visible { border-color: currentColor; }
+.release-notes { display: grid; gap: 16px; max-width: 900px; }
+.release-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.release-head h2 { margin: 0; }
+.release-head time { margin-left: auto; font-size: 13px; opacity: .75; }
+.release-summary { margin: 8px 0 0; }
+.release-section h3 { margin: 14px 0 6px; font-size: 14px; }
+.release-section ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; line-height: 1.5; }
 .workstation-content { margin-left: 220px; padding: 0 28px 32px; }
 .workstation-topbar { min-height: 66px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); gap: 12px; }
 .workspace-context { display: flex; align-items: center; gap: 8px; }
