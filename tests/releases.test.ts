@@ -17,3 +17,16 @@ describe("release notes", () => {
     expect(parseChangelog(readFileSync("CHANGELOG.md", "utf8"))[0]?.version).toBe(version);
   });
 });
+
+describe("What's new tab", () => {
+  it("lists every change with its version once, and marks the newest version current", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { createElement } = await import("react");
+    const { ReleaseNotes } = await import("../src/components/ReleaseNotes");
+    const html = renderToStaticMarkup(createElement(ReleaseNotes, { releases: parseChangelog("## [1.0.1] - 2026-10-14\n### Fixed\n- A fix\n## [1.0.0] - 2026-10-14\n### Added\n- One\n- Two") }));
+    expect(html.match(/<tr/g)?.length).toBe(4);
+    expect(html.match(/class="release-number"/g)?.length).toBe(2);
+    expect(html.match(/>Current</g)?.length).toBe(1);
+    expect(html).toContain("3 of 3 changes");
+  });
+});

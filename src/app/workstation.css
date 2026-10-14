@@ -13,13 +13,15 @@
 .sidebar-footer p { font-size: 12px; margin: 5px 0; font-weight: 400; }
 .app-version { display: inline-block; margin-top: 4px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
 .app-version:hover, .app-version:focus-visible { border-color: currentColor; }
-.release-notes { display: grid; gap: 16px; max-width: 900px; }
-.release-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.release-head h2 { margin: 0; }
-.release-head time { margin-left: auto; font-size: 13px; opacity: .75; }
-.release-summary { margin: 8px 0 0; }
-.release-section h3 { margin: 14px 0 6px; font-size: 14px; }
-.release-section ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; line-height: 1.5; }
+.release-current { margin: 0; font-size: 13px; }
+.release-table .release-version { text-align: left; font-weight: 400; white-space: nowrap; vertical-align: top; }
+.release-table .release-number { display: inline-block; margin-right: 6px; font-size: 15px; font-weight: 700; }
+.release-table .release-version small { display: block; max-width: 220px; margin-top: 4px; white-space: normal; opacity: .75; }
+.release-table tr.release-first > * { border-top: 2px solid var(--line); }
+.workstation .release-table, .release-table { min-width: 0; }
+.release-table td:last-child { line-height: 1.5; white-space: normal; min-width: 220px; }
+.workstation .release-table td, .workstation .release-table th, .release-table td { vertical-align: top; }
+@media (max-width: 640px) { .release-table .release-version small { display: none; } }
 .workstation-content { margin-left: 220px; padding: 0 28px 32px; }
 .workstation-topbar { min-height: 66px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); gap: 12px; }
 .workspace-context { display: flex; align-items: center; gap: 8px; }

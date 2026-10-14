@@ -7,6 +7,9 @@ Write entries for the people who use the app: what they can now do, or what work
 
 ## [Unreleased]
 
+### Changed
+- **What's new** is laid out like the Audit trail: one table of changes with coloured types, a search box, and Type and Version filters.
+
 ## [1.0.1] - 2026-10-14
 
 ### Fixed
