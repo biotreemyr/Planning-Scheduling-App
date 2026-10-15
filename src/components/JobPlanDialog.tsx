@@ -4,6 +4,8 @@ import { Maximize2, Minus, Plus, X } from "lucide-react";
 import { useFloatingWindow } from "./useFloatingWindow";
 import { useDateCheck } from "./DateCheck";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
+import { MachinePicker } from "./MachinePicker";
+import { bookedMachineIds } from "@/lib/services/machines";
 import { priorities, type Machine, type PlanLine, type Product, type ScheduleEntry } from "@/lib/domain/types";
 import { batchKilograms } from "@/lib/services/measurements";
 import { poLabel, type PurchaseOrder } from "@/lib/services/orders";
@@ -14,10 +16,10 @@ import { defaultSettings, type PlannedSource, type ProcessSettings } from "@/lib
 
 // One row per process of the job order's route. In edit mode a row may already have its activity.
 // Quantity and UOM are the job order's theoretical figure for the process (blank when not keyed in).
-export type PlanRow = { key: string; label: string; calendarId?: string; date: string; quantity: string; uom: string; on: boolean; lineId?: string; locked?: boolean; machineId: string; planned?: PlannedSource };
+export type PlanRow = { key: string; label: string; calendarId?: string; date: string; quantity: string; uom: string; on: boolean; lineId?: string; locked?: boolean; machineIds: string[]; planned?: PlannedSource };
 // What planning sends back: the rows to plan (or keep), with the activity type and kilograms worked out.
-// machineId "" means no machine booked for that process yet.
-export type PlannedRow = { calendarId: string; lineId?: string; on: boolean; activityType: string; plannedDate: string; quantity: number; uom: string; batchSizeKg?: number; machineId: string };
+// machineIds empty means no machine booked for that process yet; a bottle line books several.
+export type PlannedRow = { calendarId: string; lineId?: string; on: boolean; activityType: string; plannedDate: string; quantity: number; uom: string; batchSizeKg?: number; machineIds: string[] };
 export type PlanRequest = { mode: "new"; date: string; calendarId?: string; jobId?: string; nonce: number } | { mode: "edit"; jobId: string; nonce: number };
 export type JobPlan = { jobId: string; rows: PlannedRow[]; batchNumber: string; priority: PlanLine["priority"]; notes: string };
 
@@ -82,7 +84,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   const unitId = calendars[0]?.unitId;
   const choices = jobOrders.filter((item) => !linesForJob(item.id, lines).length && inUnit(item, orders, unitId));
   const machinesFor = (calendarId?: string) => { const calendar = calendars.find((item) => item.id === calendarId); return calendar ? machines.filter((machine) => machine.active === "Active" && machine.unitId === calendar.unitId && machine.processIds?.includes(calendar.processId)) : []; };
-  const bookedMachine = (lineId?: string) => entries.find((entry) => entry.planLineId === lineId && entry.status !== "Cancelled")?.machineId ?? "";
+  const bookedMachine = (lineId?: string) => bookedMachineIds(entries, lineId);
 
   // Each process carries the job order's theoretical quantity for it: dispensing the batch size,
   // compression, coating and capsulation the batch quantity, filling the packs, packing the boxes.
@@ -96,9 +98,9 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
     const chosenFormat = chosenOrder ? chosenOrder.format ?? inferFormat(products.find((item) => item.id === chosenOrder.productId)) : "Other";
     const drafts = routeDrafts(chosenFormat, calendars, nameOf, from, settingsOf);
     // No fixed route (format Other): one process, chosen in the row.
-    const machineFor = (calendarId?: string) => { const options = machinesFor(calendarId); return options.length === 1 ? options[0].id : ""; };
-    if (!drafts.length) return [{ key: "single", label: "Process", calendarId: calendars[0]?.id, date: from, quantity: String(chosen.quantity), uom: chosen.uom, on: true, machineId: machineFor(calendars[0]?.id) }];
-    return drafts.map((draft) => { const [quantity, uom] = defaults(chosen, draft.planned); return { key: draft.key, label: draft.label, calendarId: draft.calendarId, date: draft.date, quantity, uom, on: false, machineId: machineFor(draft.calendarId), planned: draft.planned }; });
+    const machineFor = (calendarId?: string) => { const options = machinesFor(calendarId); return options.length === 1 ? [options[0].id] : []; };
+    if (!drafts.length) return [{ key: "single", label: "Process", calendarId: calendars[0]?.id, date: from, quantity: String(chosen.quantity), uom: chosen.uom, on: true, machineIds: machineFor(calendars[0]?.id) }];
+    return drafts.map((draft) => { const [quantity, uom] = defaults(chosen, draft.planned); return { key: draft.key, label: draft.label, calendarId: draft.calendarId, date: draft.date, quantity, uom, on: false, machineIds: machineFor(draft.calendarId), planned: draft.planned }; });
   }
   // Edit mode: the route's rows filled from the job order's activities; other activities added after.
   function rowsFromPlan(chosen: JobOrder): PlanRow[] {
@@ -107,7 +109,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
     const used = new Set<string>();
     // Open activities show the job order's figure (saving brings them in line); completed ones what they ran.
     const fromLine = (line: PlanLine, row?: PlanRow): PlanRow => ({ key: row?.key ?? line.id, label: row?.label ?? nameOf(line.calendarId ?? ""), calendarId: line.calendarId, date: line.plannedDate,
-      quantity: line.completedAt || !row ? String(line.quantity) : row.quantity, uom: line.completedAt || !row ? line.uom ?? chosen.uom : row.uom, on: true, lineId: line.id, locked: !!line.completedAt, machineId: bookedMachine(line.id) });
+      quantity: line.completedAt || !row ? String(line.quantity) : row.quantity, uom: line.completedAt || !row ? line.uom ?? chosen.uom : row.uom, on: true, lineId: line.id, locked: !!line.completedAt, machineIds: bookedMachine(line.id) });
     const merged = base.map((row) => {
       const line = planned.find((item) => item.calendarId === row.calendarId && !used.has(item.id));
       if (!line) return { ...row, on: false };
@@ -163,7 +165,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       checkDates(rows.filter((row) => row.on && row.calendarId && !row.locked).map((row) => ({ label: `${nameOf(row.calendarId!)} date`, value: row.date, rule: "plan" as const, was: lines.find((line) => line.id === row.lineId)?.plannedDate })), () => {
       const planned: PlannedRow[] = rows.filter((row) => row.calendarId && (row.on || row.lineId)).map((row) => {
         const quantity = Number(row.quantity);
-        return { calendarId: row.calendarId!, lineId: row.lineId, on: row.on, activityType: nameOf(row.calendarId!), plannedDate: row.date, quantity, uom: row.uom, batchSizeKg: kilograms(quantity, row.uom), machineId: row.machineId };
+        return { calendarId: row.calendarId!, lineId: row.lineId, on: row.on, activityType: nameOf(row.calendarId!), plannedDate: row.date, quantity, uom: row.uom, batchSizeKg: kilograms(quantity, row.uom), machineIds: row.machineIds };
       });
       const result = onPlan({ jobId: job.id, rows: planned, batchNumber, priority, notes }, editing ? "edit" : "new");
       if ("error" in result) { setError(result.error); return; }
@@ -199,11 +201,10 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
               }} /> : "-"}</td>
               <td>{row.calendarId ? (() => {
                 const options = machinesFor(row.calendarId);
-                const current = row.machineId && !options.some((machine) => machine.id === row.machineId) ? machines.find((machine) => machine.id === row.machineId) : undefined;
-                return <select aria-label={`${row.label} machine`} disabled={row.locked || !row.on} value={row.machineId} onChange={(event) => update(index, { machineId: event.target.value })}>
-                  <option value="">{options.length ? "Choose later" : "No machine set up"}</option>
-                  {[...(current ? [current] : []), ...options].map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
-                </select>;
+                // A machine already booked stays listed even if it is no longer active.
+                const kept = machines.filter((machine) => row.machineIds.includes(machine.id) && !options.includes(machine));
+                return <MachinePicker label={`${row.label} machines`} machines={[...kept, ...options]} value={row.machineIds} empty="Choose later"
+                  disabled={row.locked || !row.on} onChange={(ids) => update(index, { machineIds: ids })} />;
               })() : null}</td>
               <td className="numeric">{row.calendarId ? row.quantity ? <output aria-label={`${row.label} theoretical quantity`}>{Number(row.quantity).toLocaleString("en-MY", { maximumFractionDigits: 3 })} {row.uom}</output>
                 : <small className="order-warning">No {row.planned ? measureName(row.planned) : "quantity"} on the job order</small> : null}</td>

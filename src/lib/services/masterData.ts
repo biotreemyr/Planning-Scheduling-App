@@ -11,6 +11,13 @@ export type MasterLists = { products: MasterProduct[]; customers: MasterCustomer
 /** What the order form may offer: Master Data's lists, or word that they could not be read. */
 export type OrderCatalog = ({ status: "ok" } & MasterLists) | { status: "unavailable" };
 
+/**
+ * Production Equipment from QA's equipment master list, as Master Data holds it. The scheduler's
+ * machines are chosen from it and show its Equipment ID and name; `active` follows Master Data.
+ */
+export type MasterEquipment = { id: string; code: string; name: string; processType: string; active: boolean };
+export type EquipmentCatalog = { status: "ok"; equipment: MasterEquipment[] } | { status: "unavailable" };
+
 // SQL Account's unit codes in the scheduler's units of measure; anything else is kept as written.
 // Bulk capsules and tablets are counted singly; powders, like packed goods, are ordered in boxes.
 const UOMS: Record<string, string> = { CPS: "capsules", TBT: "tablets", POW: "boxes", BOXES: "boxes", BOTTLE: "bottles" };

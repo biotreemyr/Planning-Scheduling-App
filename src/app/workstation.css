@@ -869,3 +869,19 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .production-route .route-table :is(th, td, input, select, textarea, button, label, small, p, span, output) { font-size: inherit; }
 /* Who planned or updated a day, in a small box beside the cell pointed at. */
 .who-tip { position: fixed; z-index: 90; max-width: 240px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: #14241f; color: #fff; font-size: 14px; line-height: 1.35; box-shadow: 0 6px 18px #14241f40; pointer-events: none; }
+
+/* Machine picker: one or more machines per activity, each as Equipment ID and name. */
+.machine-picker { position: relative; min-width: 180px; max-width: 320px; }
+.machine-picker > summary { display: block; list-style: none; cursor: pointer; padding: 6px 28px 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; position: relative; }
+.machine-picker > summary::-webkit-details-marker { display: none; }
+.machine-picker > summary::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); opacity: .6; }
+.machine-picker.disabled > summary { cursor: default; opacity: .6; }
+.machine-picker-list { position: absolute; z-index: 80; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content; max-width: min(440px, 90vw); max-height: 280px; overflow: auto; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel, #fff); box-shadow: 0 10px 28px #14241f33; display: grid; gap: 2px; }
+.machine-picker-list label { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.machine-picker-list label:hover { background: var(--panel-soft, #f0f4f7); }
+.machine-picker-id { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-weight: 600; font-size: 12px; white-space: nowrap; }
+.machine-picker-list input[type="checkbox"] { width: auto !important; min-width: 0 !important; min-height: 0 !important; margin: 0; }
+.picker-field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.route-table .route-edit .picker-field { gap: 2px; margin: 0 0 6px; font-size: 11px; font-weight: 600; }
+.route-table .route-edit .machine-picker { max-width: none; min-width: 0; }
+.route-table .route-edit .machine-picker > summary { padding-block: 4px; font-size: 12px; font-weight: 400; color: var(--ink); }

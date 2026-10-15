@@ -1,6 +1,6 @@
 import "server-only";
 import { Pool } from "pg";
-import type { MasterLists, OrderCatalog } from "@/lib/services/masterData";
+import type { EquipmentCatalog, MasterEquipment, MasterLists, OrderCatalog } from "@/lib/services/masterData";
 
 /**
  * Read-only view of Bio Tree Master Data (master-data/docs/CONSUMING.md), read live like Core: a
@@ -45,6 +45,35 @@ export async function loadOrderCatalog(): Promise<OrderCatalog | undefined> {
   try {
     const lists = await loadMasterLists();
     return lists ? { status: "ok", ...lists } : undefined;
+  } catch {
+    return { status: "unavailable" };
+  }
+}
+
+/**
+ * The company's Production Equipment (department "Production Equipment" on QA's master list), for
+ * Admin to choose machines from. Inactive and switched-off equipment is included, marked inactive, so
+ * a machine already set up still shows its current state.
+ */
+export async function loadMasterEquipment(env: NodeJS.ProcessEnv = process.env): Promise<MasterEquipment[] | null> {
+  if (!env.MASTER_DATA_DATABASE_URL) return null;
+  const company = (env.MASTER_DATA_COMPANY || "btp").trim().toLowerCase();
+  const pool = getPool(env.MASTER_DATA_DATABASE_URL);
+  const read = (production: string) => pool.query(`SELECT id::text AS id, code, name, coalesce(source->>'Process Type', '') AS "processType", (is_active${production}) AS active
+      FROM equipment WHERE company_key = $1 AND lower(trim(source->>'Department')) = 'production equipment' ORDER BY code`, [company]);
+  try {
+    return (await read(" AND for_production")).rows;
+  } catch (error) {
+    if ((error as { code?: string }).code === "42703") return (await read("")).rows;
+    throw error;
+  }
+}
+
+/** For the page: undefined when Master Data is not configured; unavailable when it cannot be read. */
+export async function loadEquipmentCatalog(): Promise<EquipmentCatalog | undefined> {
+  try {
+    const equipment = await loadMasterEquipment();
+    return equipment ? { status: "ok", equipment } : undefined;
   } catch {
     return { status: "unavailable" };
   }

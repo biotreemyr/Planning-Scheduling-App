@@ -26,7 +26,7 @@ describe("who changed what", () => {
     const rebooked = stampChanges(data, { ...data, entries: [{ ...entry, machineId: "m2" }] }, "Planner B", at);
     expect(rebooked.lines[0]).toMatchObject({ plannedBy: "Planner B" });
     const ranElsewhere = stampChanges(data, { ...data, lines: [{ ...line, completedAt: at, yieldQuantity: 41 }], entries: [{ ...entry, machineId: "m2", status: "Completed" }] }, "Operator D", at);
-    expect(ranElsewhere.lines[0]).toMatchObject({ updatedBy: "Operator D", plannedMachineId: "m1" });
+    expect(ranElsewhere.lines[0]).toMatchObject({ updatedBy: "Operator D", plannedMachineIds: ["m1"] });
     expect(ranElsewhere.lines[0].plannedBy).toBeUndefined();
   });
   it("records who edited an order or a job order, but not for steps that keep their own name", () => {

@@ -1,4 +1,6 @@
 "use client";
+import { machineLabels } from "@/lib/services/machines";
+import { MachinePicker } from "./MachinePicker";
 import { useState, type ReactNode } from "react";
 import { useDateCheck } from "./DateCheck";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
@@ -20,19 +22,19 @@ const localDay = (value: string) => { const date = new Date(value); return `${da
  * actual quantity, notes on any issue, and where the output goes: the next process of the job's
  * route, the WIP room (held for that process), or nowhere when it is the final output.
  */
-export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineId = "", inRow = false, onCancel, equivalence }: {
+export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineIds = [], inRow = false, onCancel, equivalence }: {
   line: PlanLine; uom: string; directory: CalendarDirectory; editable: boolean;
   // Keyed in on the activity's own row of the route table: renders that row's Actual cells and buttons.
   inRow?: boolean; onCancel?: () => void;
   // In the row, what the typed quantity comes to in other units (kg, tablets, boxes).
   equivalence?: (quantity: number, uom: string) => string;
   // Machines set up for this process, and the one the activity is booked on ("" for none).
-  machines?: Machine[]; machineId?: string;
+  machines?: Machine[]; machineIds?: string[];
   // Called after a successful save, to close the activity and say what was saved.
   onSaved?: (message: string) => void;
   // The next process of this batch's route, offered first as the destination.
   nextCalendarId?: string;
-  onProgress: (startedAt: string, notes: string, machineId?: string, progress?: Progress) => string[];
+  onProgress: (startedAt: string, notes: string, machineIds?: string[], progress?: Progress) => string[];
   onComplete: (input: CompletionInput) => string[];
   // Present when a completed update may be corrected.
   onCorrect?: (input: CorrectionInput) => string[];
@@ -85,7 +87,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       <div><dt>Started</dt><dd>{line.startedAt ? display(line.startedAt) : "-"}</dd></div>
       <div><dt>Completed</dt><dd>{display(completedDay)}</dd></div>
       <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {doneUom}{line.weighedQuantity !== undefined ? <small> · {line.actualUnitVolumeMl ? "measured" : "weighed"} {line.weighedQuantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {line.weighedUom} at {(line.actualUnitVolumeMl ?? line.actualUnitWeightMg)?.toLocaleString()} {line.actualUnitVolumeMl ? "mL" : "mg"} each</small> : null}{doneUom === uom && line.quantity > 0 ? <small> ({((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1)}% of plan)</small> : <small> (planned {line.quantity.toLocaleString()} {uom})</small>}</dd></div>
-      <div><dt>Machine</dt><dd>{machines.find((machine) => machine.id === machineId)?.name ?? "Not assigned"}</dd></div>
+      <div><dt>Machine</dt><dd>{machineLabels(machines, machineIds) || "Not assigned"}</dd></div>
       <div><dt>Output</dt><dd>{outgoing ? `${outgoing.wipRoom ? "WIP room, for " : "Transferred to "}${processName(outgoing.calendarId)} · ${outgoing.receivedAt ? `received by ${outgoing.receivedBy}` : "awaiting receipt"}` : "Final output - no transfer"}</dd></div>
     </dl>
     {line.productionNotes ? <p><strong>Notes:</strong> {line.productionNotes}</p> : null}
@@ -110,10 +112,8 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const weighedNote = weighing ? <p className="weighed-count" role="status">{actualEdited && counted !== undefined && actualShown !== String(counted)
     ? <>Calculated from the {sizeUom === "mL" ? "volume" : "weight"}: {counted.toLocaleString()} {countUom} · <button type="button" className="link-button" onClick={() => setActualEdited(false)}>Use calculated</button></>
     : <span className="route-muted">Actual quantity is worked out from the {sizeUom === "mL" ? "volume" : "weight"}; change it if needed.</span>}</p> : null;
-  const machineField = <label>Machine<select form={formId} name="machine" defaultValue={machineId}>
-    <option value="">{machines.length ? "Not assigned" : "No machine set up"}</option>
-    {machines.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-  </select></label>;
+  // Not a <label>: a label around the picker would tick its first machine when its title is clicked.
+  const machineField = <div className="picker-field"><span>Machine</span><MachinePicker label="Machines" machines={machines} defaultValue={machineIds} name="machine" form={formId} /></div>;
   const notesField = <label className="production-notes">{inRow ? "Remarks" : "Notes"}<textarea form={formId} name="notes" defaultValue={line.productionNotes ?? ""} placeholder="Anything that happened during production: issues, stoppages, deviations" /></label>;
   const destination = <label className="production-destination">{inRow ? "Send to" : "After completion, send to"}<select form={formId} name="destination" defaultValue={destinationValue} disabled={handedOver}>
     {wipFor ? <option value={`wip:${wipFor}`}>WIP room</option> : null}
@@ -141,12 +141,12 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       checkDates([{ label: "Date started", value: startedAt, rule: "today", was: line.startedAt?.slice(0, 10) }, ...(completing || correcting ? [{ label: "Date completed", value: completedDate, rule: "today" as const, was: line.completedAt?.slice(0, 10) }] : [])], () => {
       const typed = String(data.get("quantity") ?? "").trim();
       const [kind, destinationId = ""] = String(data.get("destination") ?? "final").split(":");
-      const machine = String(data.get("machine") ?? "");
+      const machine = data.getAll("machine").map(String);
       const reported = String(data.get("yieldUom") ?? "") || uom;
       if ((typed || correcting) && weighing && !(Number(unitMg) > 0)) { setErrors([`Enter the ${unitLabel.toLowerCase()} in ${sizeUom} to convert ${reported} to ${countUom}.`]); return; }
       const weighed = typed && weighing ? { quantity: Number(typed), uom: reported, unitWeightMg: Number(unitMg) } : undefined;
       const quantityText = weighed ? actualShown.trim() : typed;
-      const output = { quantity: Number(quantityText), uom: weighed ? countUom! : reported, ...(weighed ? { weighed } : {}), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineId: machine };
+      const output = { quantity: Number(quantityText), uom: weighed ? countUom! : reported, ...(weighed ? { weighed } : {}), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineIds: machine };
       const done = (result: string[], message: string) => { setErrors(result); if (!result.length) { if (onSaved) onSaved(message); else setSaved(message); } return result; };
       if (correcting) {
         if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity."]); return; }
