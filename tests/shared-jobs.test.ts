@@ -94,3 +94,27 @@ describe("release and closing", () => {
     expect(readyToClose(closed, [released])).toBe(false);
   });
 });
+
+describe("who may change a shared batch", () => {
+  it("lets only QA (release) confirm the formula and release to POs, and only orders editors share the batch", async () => {
+    const { newWorkspace } = await import("../src/lib/domain/workspace");
+    const { addSampleData } = await import("../src/lib/domain/sampleData");
+    const { capabilitiesFromPermissions } = await import("../src/lib/auth/capabilities");
+    const { reviewWorkspaceChange } = await import("../src/lib/auth/workspaceAccess");
+    const base = addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state!;
+    const [first, second] = base.data.orders;
+    base.data.jobOrders.push({ id: "job-s", number: "JO0070", orderId: first.id, sequence: 9, quantity: 100, uom: first.uom, createdAt: "2026-10-07T00:00:00Z", createdBy: "Aida" });
+    const role = (...keys: string[]) => capabilitiesFromPermissions(keys.map((key) => `scheduler.${key}`));
+    const qa = role("release.view", "release.edit"), planner = role("orders.view", "orders.edit");
+    const change = (edit: (job: JobOrder) => void) => { const next = structuredClone(base); edit(next.data.jobOrders.at(-1)!); return next; };
+    const shared = change((job) => { job.shares = [{ orderId: second.id, quantity: 40 }]; });
+    expect(reviewWorkspaceChange(base, shared, planner).allowed).toBe(true);
+    expect(reviewWorkspaceChange(base, shared, qa).denied).toEqual(["edit job orders"]);
+    const confirmed = change((job) => { job.formulaConfirmedAt = "2026-10-16T00:00:00.000Z"; job.formulaConfirmedBy = "QA"; });
+    expect(reviewWorkspaceChange(base, confirmed, qa).allowed).toBe(true);
+    expect(reviewWorkspaceChange(base, confirmed, planner).denied).toEqual(["confirm a shared batch's formula"]);
+    const released = change((job) => { job.poReleases = [{ orderId: first.id, quantity: 100, uom: first.uom, releasedAt: "2026-10-20T00:00:00.000Z", releasedBy: "QA" }]; });
+    expect(reviewWorkspaceChange(base, released, qa).allowed).toBe(true);
+    expect(reviewWorkspaceChange(base, released, planner).denied).toEqual(["release or reject batches"]);
+  });
+});

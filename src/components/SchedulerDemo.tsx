@@ -43,7 +43,7 @@ import type {
 import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
-import { formulaPending, jobForOrder, sharesProblem } from "@/lib/services/sharedJobs";
+import { closeOrder, formulaPending, jobForOrder, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
@@ -96,7 +96,8 @@ function AppHeader({
   statusSections,
   statusSection,
   onStatusSection,
-  version
+  version,
+  badges = {}
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
@@ -112,6 +113,8 @@ function AppHeader({
   statusSections: { id: StatusSection; label: string }[]; statusSection: StatusSection; onStatusSection: (section: StatusSection) => void;
   // The released version in use, from CHANGELOG.md; it opens What's new.
   version?: string;
+  // Work waiting in a tab, e.g. POs ready for planning to close.
+  badges?: Partial<Record<Tab, number>>;
 }) {
   return (
     <aside className="app-header">
@@ -132,6 +135,7 @@ function AppHeader({
             >
               <Icon size={17} />
               <span>{tab.label}</span>
+              {badges[tab.id] ? <span className="tab-badge" title={`${badges[tab.id]} PO${badges[tab.id] === 1 ? "" : "s"} ready to close`}>{badges[tab.id]}</span> : null}
             </button>
             {tab.id === "status" && activeTab === "status" ? <div className="tab-sub" role="group" aria-label="QA/QC sections">
               {statusSections.map((item) => <button key={item.id} type="button" className={statusSection === item.id ? "tab sub active" : "tab sub"} aria-current={statusSection === item.id ? "page" : undefined} onClick={() => onStatusSection(item.id)}>{item.label}</button>)}
@@ -1103,13 +1107,22 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
     return [];
   }
-  function releaseJob(id: string, quantity: number, uom: string) {
+  function releaseJob(id: string, entries: ReleaseEntry[]) {
     if (!caps.release) return ["Your access does not include releasing batches."];
     const job = data.jobOrders.find((item) => item.id === id);
     if (!job) return ["This job order no longer exists."];
-    const result = releaseBatch(job, quantity, uom, member.name, new Date());
+    const result = releaseToOrders(job, entries, data.orders, member.name, new Date());
     if ("error" in result) return [result.error];
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
+    return [];
+  }
+  // QA confirms that POs with different FG codes sharing a batch are the same formula.
+  function confirmFormula(id: string) {
+    if (!caps.release) return ["Your access does not include confirming a shared batch's formula."];
+    const job = data.jobOrders.find((item) => item.id === id);
+    if (!job) return ["This job order no longer exists."];
+    if (!formulaPending(job, data.orders)) return [`${job.number} has nothing to confirm.`];
+    setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? { ...item, formulaConfirmedBy: member.name, formulaConfirmedAt: new Date().toISOString() } : item) }));
     return [];
   }
   function rejectJob(id: string) {
@@ -1119,6 +1132,17 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     const result = rejectBatch(job, member.name, new Date());
     if ("error" in result) return [result.error];
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
+    return [];
+  }
+  // Planning closes a PO once QA has released and reconciled every batch for it.
+  function closePo(id: string, quantity: number, uom: string, note: string) {
+    if (!canEditOrders) return ["Your access does not include closing POs."];
+    const order = data.orders.find((item) => item.id === id);
+    if (!order) return ["This PO no longer exists."];
+    if (!readyToClose(order, data.jobOrders)) return [`${order.poNumber} is not ready to close: QA has not released every batch for it yet.`];
+    const result = closeOrder(order, quantity, uom, note, member.name, new Date());
+    if ("error" in result) return [result.error];
+    setData((current) => ({ ...current, orders: current.orders.map((item) => item.id === id ? result : item) }));
     return [];
   }
   function deleteOrder(id: string) {
@@ -1204,7 +1228,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     </ToolbarMenu>
   </div>;
   return <main className="workstation">
-    <AppHeader version={releases[0]?.version} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAudit={caps.auditTrail} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
+    <AppHeader version={releases[0]?.version} badges={canEditOrders ? { orders: data.orders.filter((order) => !isNonProduction(order) && readyToClose(order, data.jobOrders)).length, trials: data.orders.filter((order) => isNonProduction(order) && readyToClose(order, data.jobOrders)).length } : {}} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAudit={caps.auditTrail} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
       statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }] : [])]}
       statusSection={statusSection} onStatusSection={setStatusSection} />
     <div className="workstation-content">
@@ -1242,11 +1266,11 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers}
+      {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers} directory={directory} onConfirmFormula={confirmFormula}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
         section={statusSection} onSection={setStatusSection} onTest={testJob} onRelease={releaseJob} onReject={rejectJob} /> : null}
-      {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
-      {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
+      {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
+      {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
       {activeTab === "audit" && caps.auditTrail ? <HistoryPanel refreshKey={activeTab} canDownload={caps.printAuditTrail} /> : null}
       {activeTab === "news" ? <ReleaseNotes releases={releases} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>

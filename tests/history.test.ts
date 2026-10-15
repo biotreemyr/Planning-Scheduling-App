@@ -58,3 +58,21 @@ describe("transaction history", () => {
   });
 });
 
+
+describe("shared batches in the transaction history", () => {
+  it("describes sharing a batch, QA's formula confirmation, release to each PO and closing the PO", () => {
+    const other = base.data.orders.find((item) => item.id !== order.id)!;
+    const job = { id: "job-s", number: "JO0060", orderId: order.id, sequence: 1, quantity: 120000, uom: "tablets", createdAt: "2026-10-07T00:00:00Z", createdBy: "Aida" };
+    const before = structuredClone(base); before.data.jobOrders.push(job);
+    const shared = structuredClone(before); shared.data.jobOrders.at(-1)!.shares = [{ orderId: other.id, quantity: 60000 }];
+    expect(describeChanges(before, shared).map((change) => change.text)).toEqual([`Batch JO0060 also made for PO ${other.poNumber}: 60,000 tablets`]);
+    const confirmed = structuredClone(shared); Object.assign(confirmed.data.jobOrders.at(-1)!, { formulaConfirmedAt: "2026-10-16T00:00:00Z", formulaConfirmedBy: "QA" });
+    expect(describeChanges(shared, confirmed).map((change) => change.text)).toEqual(["QA confirmed the POs sharing JO0060 are the same formula"]);
+    const released = structuredClone(confirmed);
+    released.data.jobOrders.at(-1)!.poReleases = [{ orderId: order.id, quantity: 2006, uom: "bottles", otherUses: [{ quantity: 2, note: "Retention sample" }], releasedAt: "2026-10-20T00:00:00Z", releasedBy: "QA" }];
+    expect(describeChanges(confirmed, released).map((change) => change.text)).toEqual(["JO0060 released to PO PO-2610-142: 2,006 bottles; also 2 Retention sample"]);
+    const closed = structuredClone(released);
+    Object.assign(closed.data.orders.find((item) => item.id === order.id)!, { closedQuantity: 2006, closedUom: order.uom, closedAt: "2026-10-21T00:00:00Z", closedBy: "Planner", closeNote: "Customer took the extra 6" });
+    expect(describeChanges(released, closed).map((change) => change.text)).toEqual([`PO PO-2610-142 closed at 2,006 ${order.uom} (ordered ${order.quantity.toLocaleString("en-GB")} ${order.uom}): Customer took the extra 6`]);
+  });
+});

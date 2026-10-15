@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, P
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
-import { MAX_POS_PER_JOB, formulaPending, jobForOrder, jobParts, jobsServing, orderViewLines, partFor, releaseFor, type JobShare } from "@/lib/services/sharedJobs";
+import { MAX_POS_PER_JOB, closedSummary, formulaPending, jobForOrder, jobParts, jobsServing, orderViewLines, partFor, readyToClose, releaseFor, releasedToOrder, type JobShare } from "@/lib/services/sharedJobs";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, isNonProduction, nextRndCode, ORDER_CATEGORIES, type OrderCategory, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
@@ -34,7 +34,9 @@ export type JobActions = {
   onDelete: (id: string) => string[];
 };
 
-export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, transfers = [], lines, products, catalog, directory, visibleCalendarIds, creatable, editable, printable = true, userName, onSave, onAdd, onDelete, flow = [], nonProduction = false }: {
+export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions, transfers = [], lines, products, catalog, directory, visibleCalendarIds, creatable, editable, printable = true, userName, onSave, onAdd, onDelete, onClose, flow = [], nonProduction = false }: {
+  // Planning closes a PO once QA has released and reconciled every batch for it.
+  onClose?: (orderId: string, quantity: number, uom: string, note: string) => string[];
   // nonProduction: the R&D, trial and pilot batch tab, which lists only those orders; Orders lists the rest.
   nonProduction?: boolean;
   orders: PurchaseOrder[]; customers?: Customer[]; jobOrders?: JobOrder[]; jobActions?: JobActions;
@@ -62,6 +64,7 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
         onClose={() => dialog.current?.close()} onDone={(message) => { setAdded(message); dialog.current?.close(); }} />
     </dialog> : null}
     {added ? <p role="status" className="calendar-notice">{added}</p> : null}
+    {editable && onClose ? <ReadyToClose orders={listed} jobOrders={jobOrders} onClose={onClose} /> : null}
     <OrdersTable nonProduction={nonProduction} action={newOrderButton} printable={printable} orders={listed} customerRecords={customers} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} lines={viewLines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
   </section>;
 }
@@ -299,7 +302,7 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
     { key: "finished", label: "Finished", numeric: true, sort: (row) => row.progress.percent, cell: (row) => row.progress.finishedQuantity ? <>{row.progress.finishedQuantity.toLocaleString()}<small>{row.progress.percent}% of order</small></> : "-" },
     { key: "release", label: "Testing / release", sort: (row) => row.status.jobs ? row.status.released / row.status.jobs : -1, cell: (row) => statusText(row.status) },
     { key: "expected", label: nonProduction ? "Expected completion" : "Expected delivery", sort: (row) => row.progress.expectedDate ?? "9999", cell: (row) => <>{row.progress.expectedDate ? displayDate(row.progress.expectedDate) : <span className="route-muted">Not set</span>}{row.progress.overdue ? <span className="badge danger">Overdue</span> : null}</> },
-    { key: "status", label: "Status", sort: (row) => statuses.indexOf(row.progress.status), cell: (row) => <><span className={`badge ${statusBadge[row.progress.status]}`}>{row.progress.status}</span>{row.warnings.length ? <span className="badge danger order-warn-badge" title={row.warnings.map((warning) => warning.message).join("\n")}>⚠ {row.warnings.length}</span> : null}</>, filter: { kind: "select", options: statuses, value: (row) => row.progress.status } }
+    { key: "status", label: "Status", sort: (row) => statuses.indexOf(row.progress.status), cell: (row) => <>{row.order.closedAt ? <span className="badge success" title={[closedSummary(row.order), row.order.closeNote].filter(Boolean).join(" · ")}>Closed</span> : <span className={`badge ${statusBadge[row.progress.status]}`}>{row.progress.status}</span>}{row.order.closedAt ? <small>{closedSummary(row.order).replace(/^Closed · /, "")}</small> : null}{row.warnings.length ? <span className="badge danger order-warn-badge" title={row.warnings.map((warning) => warning.message).join("\n")}>⚠ {row.warnings.length}</span> : null}</>, filter: { kind: "select", options: statuses, value: (row) => row.progress.status } }
   ];
   const shown = columns.filter((column) => column.required || !hidden.includes(column.key));
   const numbers = orderNumbers(orders);
@@ -553,6 +556,45 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
     {notice && !errors.length ? <p role="status">{notice}</p> : null}
     </details>
+  </section>;
+}
+
+/**
+ * POs whose batches QA has released and reconciled, waiting for planning to close them: the closing
+ * quantity starts as what QA released to the PO; closing above or below the order needs a reason.
+ */
+function ReadyToClose({ orders, jobOrders, onClose }: { orders: PurchaseOrder[]; jobOrders: JobOrder[]; onClose: (orderId: string, quantity: number, uom: string, note: string) => string[] }) {
+  const ready = orders.filter((order) => readyToClose(order, jobOrders));
+  const [drafts, setDrafts] = useState<Record<string, { quantity?: string; note: string }>>({});
+  const [messages, setMessages] = useState<Record<string, string>>({});
+  const [closed, setClosed] = useState("");
+  if (!ready.length) return closed ? <p role="status" className="calendar-notice">{closed}</p> : null;
+  const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
+  return <section className="ready-to-close" aria-labelledby="ready-to-close-title">
+    <h3 id="ready-to-close-title">Ready to close <span className="badge info">{ready.length}</span></h3>
+    <p className="route-muted">QA has released and reconciled every batch for these POs. Check the quantity and close them.</p>
+    {closed ? <p role="status" className="calendar-notice">{closed}</p> : null}
+    <ul>{ready.map((order) => {
+      const released = releasedToOrder(order.id, jobOrders);
+      const inOrderUnit = released.find((item) => item.uom === order.uom);
+      const draft = drafts[order.id] ?? { note: "" };
+      const quantity = draft.quantity ?? (inOrderUnit ? String(inOrderUnit.quantity) : "");
+      const difference = quantity.trim() !== "" ? Number((Number(quantity) - order.quantity).toPrecision(12)) : 0;
+      const uses = jobsServing(order.id, jobOrders).flatMap((job) => releaseFor(job, order.id)?.otherUses ?? []);
+      return <li key={order.id}>
+        <span className="ready-po"><strong>{order.poNumber}</strong>{order.customerName ? <small>{order.customerName}</small> : null}
+          <small>Ordered {amount(order.quantity)} {order.uom} · released {released.map((item) => `${amount(item.quantity)} ${item.uom}`).join(", ") || "nothing"}{uses.length ? ` · also ${uses.map((use) => `${amount(use.quantity)} ${use.note}`).join(", ")}` : ""}</small></span>
+        <label>Close at<span className="status-release-qty"><input type="number" min="0" step="any" value={quantity} onChange={(event) => setDrafts({ ...drafts, [order.id]: { ...draft, quantity: event.target.value } })} /> {order.uom}</span>
+          {difference ? <small className="order-warning">{difference > 0 ? "+" : "−"}{amount(Math.abs(difference))} {order.uom} against the order</small> : null}</label>
+        <label className="ready-note">Note{difference ? " (why it differs)" : ""}<input maxLength={500} value={draft.note} placeholder={difference ? "e.g. customer accepted the extra 6" : "Optional"} onChange={(event) => setDrafts({ ...drafts, [order.id]: { ...draft, note: event.target.value } })} /></label>
+        <button type="button" className="primary-button" onClick={() => {
+          const errors = quantity.trim() === "" ? ["Key in the closing quantity."] : onClose(order.id, Number(quantity), order.uom, draft.note);
+          setMessages({ ...messages, [order.id]: errors.join(" ") });
+          if (!errors.length) setClosed(`${order.poNumber} closed at ${amount(Number(quantity))} ${order.uom}.`);
+        }}>Close PO</button>
+        {messages[order.id] ? <p role="alert">{messages[order.id]}</p> : null}
+      </li>;
+    })}</ul>
   </section>;
 }
 
