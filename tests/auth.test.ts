@@ -113,18 +113,16 @@ describe("Core contract", () => {
   });
 });
 
-describe("open access while Core roles are not set up", async () => {
+describe("access follows Core exactly", async () => {
   const { effectivePermissions, permissions } = await import("../src/lib/auth/permissions");
-  it("opens production updates and reports to everyone under SCHEDULER_OPEN_ACCESS, but the rest only from Core", () => {
-    const open = { SCHEDULER_OPEN_ACCESS: "true" };
-    const openKeys = [permissions.viewSchedule, permissions.editEntry, permissions.submitEntry, permissions.reviewEntry, permissions.cancelEntry, permissions.confirmEntry, permissions.reports] as string[];
-    expect(effectivePermissions([], open).sort()).toEqual([...new Set(openKeys)].sort());
-    // A person ticked for "View orders" only gets just that: no create, edit or print.
-    const viewer = effectivePermissions([permissions.viewOrders, permissions.viewPlanning], open);
-    expect(viewer).toEqual(expect.arrayContaining([permissions.viewOrders, permissions.viewPlanning]));
-    for (const key of [permissions.createOrders, permissions.editOrders, permissions.printOrders, permissions.createPlanLine, permissions.editPlanLine, permissions.printPlanning, permissions.viewTesting, permissions.manageMasterData]) expect(viewer).not.toContain(key);
-    expect(effectivePermissions([permissions.manageMasterData, permissions.passTesting], open)).toEqual(expect.arrayContaining([permissions.manageMasterData, permissions.passTesting]));
-    expect(effectivePermissions(["scheduler.planning.view"], {})).toEqual(["scheduler.planning.view"]);
-    expect(effectivePermissions(["scheduler.planning.view"], { SCHEDULER_OPEN_ACCESS: "false" })).toEqual(["scheduler.planning.view"]);
+  it("grants exactly what Core grants: no open-access switch adds anything", () => {
+    expect(effectivePermissions([])).toEqual([]);
+    expect(effectivePermissions([permissions.viewSchedule, permissions.viewOrders])).toEqual([permissions.viewSchedule, permissions.viewOrders]);
+    process.env.SCHEDULER_OPEN_ACCESS = "true";
+    try {
+      expect(effectivePermissions([permissions.viewSchedule])).toEqual([permissions.viewSchedule]);
+    } finally {
+      delete process.env.SCHEDULER_OPEN_ACCESS;
+    }
   });
 });

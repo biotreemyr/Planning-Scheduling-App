@@ -8,6 +8,10 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Security
+- **Access** now follows exactly what is ticked in Bio Tree Core. Until now everyone who could open the scheduler could also edit, submit, review, cancel and approve the detailed schedule, and see Reports, whatever Core said. People keep only what Core grants them.
+- **Audit trail** is shown only to people with "View audit trails" in Core, and its Download Excel only with "Print audit trails".
+
 ## [1.2.0] - 2026-10-15
 
 ### Added
