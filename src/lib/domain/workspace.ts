@@ -52,12 +52,19 @@ export const workspaceSchema = z.object({
       wipRoom: z.boolean().optional() })),
     // Added after the first pilot release; older snapshots load with no orders.
     orders: z.array(z.object({ id, updatedBy: text.optional(), updatedAt: timestamp.optional(), poNumber: name, customerName: text.optional(), customerId: id.optional(), number: number.int().positive().optional(), item: number.int().positive().optional(), format: z.enum(["Capsule", "Tablet", "Sachet", "Other"]).optional(), unitId: id.optional(), productId: id, quantity: number.positive(), uom: name, expectedDates: z.record(id, date), deliveryDate: date.optional(), receivedDate: date.optional(), soNumber: z.string().trim().max(60).optional(), unitWeightMg: number.positive().optional(), unitsPerPack: number.int().positive().optional(),
-      category: z.enum(["R&D", "Trial", "Pilot batch"]).optional(), notes: text.optional(), createdAt: timestamp, createdBy: name })).default([]),
+      category: z.enum(["R&D", "Trial", "Pilot batch"]).optional(),
+      closedQuantity: number.nonnegative().optional(), closedUom: name.optional(), closedAt: timestamp.optional(), closedBy: text.optional(), closeNote: z.string().trim().max(500).optional(),
+      notes: text.optional(), createdAt: timestamp, createdBy: name })).default([]),
     // Customer master and job orders came later still; older snapshots load with none.
     customers: z.array(z.object({ id, code: name, name, contactNotes: text.optional(), active, masterDataId: z.string().uuid().optional() })).default([]),
     jobOrders: z.array(z.object({ id, updatedBy: text.optional(), updatedAt: timestamp.optional(), number: name, orderId: id, sequence: number.int().positive(), quantity: number.positive(), uom: name,
       batchSizeKg: number.positive().optional(), batchVolumeL: number.positive().optional(), packQuantity: number.positive().optional(), packUom: name.optional(), packSize: number.positive().optional(),
       boxQuantity: number.positive().optional(), packingNumber: z.string().trim().min(1).max(60).optional(),
+      shares: z.array(z.object({ orderId: id, quantity: number.positive(), packQuantity: number.positive().optional(), packUom: name.optional(), packSize: number.positive().optional(),
+        boxQuantity: number.positive().optional(), packingNumber: z.string().trim().min(1).max(60).optional() })).max(4).optional(),
+      formulaConfirmedBy: text.optional(), formulaConfirmedAt: timestamp.optional(),
+      poReleases: z.array(z.object({ orderId: id, quantity: number.nonnegative(), uom: name, otherUses: z.array(z.object({ quantity: number.positive(), note: z.string().trim().min(1).max(200) })).max(20).optional(),
+        releasedAt: timestamp, releasedBy: text })).max(5).optional(),
       testedAt: timestamp.optional(), testedBy: text.optional(), testResult: z.enum(["Passed", "Failed", "Under investigation"]).optional(),
       releaseQuantity: number.nonnegative().optional(), releaseUom: name.optional(), releasedAt: timestamp.optional(), releasedBy: text.optional(), rejectedAt: timestamp.optional(), rejectedBy: text.optional(),
       batchNumber: z.string().trim().max(60).optional(), batchNumberBy: text.optional(), batchNumberAt: timestamp.optional(),
@@ -124,11 +131,19 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
   const batchNumbers = data.jobOrders.map((item) => item.batchNumber?.trim().toLowerCase()).filter(Boolean);
   require(new Set(batchNumbers).size === batchNumbers.length, "Duplicate batch number");
   data.jobOrders.forEach((job) => require(has(data.orders, job.orderId), "Invalid job order PO"));
+  // A shared batch serves at most 5 POs, each once, each a PO item of the same dosage form.
+  data.jobOrders.forEach((job) => {
+    const ids = [job.orderId, ...(job.shares ?? []).map((share) => share.orderId)];
+    require(new Set(ids).size === ids.length && ids.every((id) => has(data.orders, id)), "Invalid shared job order PO");
+    require((job.poReleases ?? []).every((release) => ids.includes(release.orderId)) && new Set((job.poReleases ?? []).map((release) => release.orderId)).size === (job.poReleases ?? []).length, "Invalid job order release");
+  });
   data.lines.forEach((line) => {
     if (!line.jobOrderId) return;
     const job = data.jobOrders.find((item) => item.id === line.jobOrderId);
-    const order = data.orders.find((item) => item.id === job?.orderId);
-    require(!!job && !!order && order.productId === line.productId && line.productionOrderId === order.id, "Activity linked to an invalid job order");
+    // A shared batch's filling and packing belong to the PO they are done for, any PO the batch serves.
+    const orderIds = job ? [job.orderId, ...(job.shares ?? []).map((share) => share.orderId)] : [];
+    const order = data.orders.find((item) => item.id === line.productionOrderId && orderIds.includes(item.id));
+    require(!!job && !!order && order.productId === line.productId, "Activity linked to an invalid job order");
   });
   // Production orders and R&D, trial and pilot orders are numbered separately, each from 1.
   const numbered = data.orders.filter((order) => order.number !== undefined);

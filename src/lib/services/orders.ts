@@ -37,6 +37,8 @@ export type PurchaseOrder = {
   notes?: string; createdAt: string; createdBy: string;
   // Who last edited it, and when.
   updatedBy?: string; updatedAt?: string;
+  // Closed by planning once QA has released and reconciled its batches: how much went to the PO.
+  closedQuantity?: number; closedUom?: string; closedAt?: string; closedBy?: string; closeNote?: string;
 };
 
 export const ORDER_CATEGORIES = ["R&D", "Trial", "Pilot batch"] as const;

@@ -1,6 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
+import type { JobShare, PoRelease } from "./sharedJobs";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
 
@@ -32,6 +33,13 @@ export type JobOrder = {
   releaseQuantity?: number; releaseUom?: string; releasedAt?: string; releasedBy?: string;
   // A batch that failed testing goes to Release too, where QA rejects it.
   rejectedAt?: string; rejectedBy?: string;
+  // A batch made once for several POs (at most 5 in all): the other POs it serves, each with its share
+  // of the batch and its own packing. The job order's own PO and pack fields are the first PO's.
+  shares?: JobShare[];
+  // When POs with different FG codes share the batch, QA confirms they are the same formula.
+  formulaConfirmedBy?: string; formulaConfirmedAt?: string;
+  // QA's release to each PO, by batch or one PO at a time, with what else the output went to.
+  poReleases?: PoRelease[];
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;
