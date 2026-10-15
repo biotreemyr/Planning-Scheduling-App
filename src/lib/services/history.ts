@@ -60,6 +60,11 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
       old.unitsPerPack !== row.unitsPerPack ? `units per pack ${num(old.unitsPerPack) || "-"} → ${num(row.unitsPerPack) || "-"}` : "",
       old.deliveryDate !== row.deliveryDate ? `expected delivery ${str(old.deliveryDate) || "-"} → ${str(row.deliveryDate) || "-"}` : ""
     ].filter(Boolean);
+    // Closing a PO is its own entry: how much went to it, against what was ordered, and why.
+    if (!old.closedAt && row.closedAt) {
+      changes.push({ kind: "PO", po: po(row.id), product: productName(row.productId), text: `PO ${po(row.id)} closed at ${num(row.closedQuantity)} ${str(row.closedUom ?? row.uom)} (ordered ${num(row.quantity)} ${str(row.uom)})${row.closeNote ? `: ${str(row.closeNote)}` : ""}` });
+      if (!parts.length) continue;
+    }
     changes.push({ kind: "PO", po: po(row.id), product: productName(row.productId), text: `PO ${po(row.id)} edited${parts.length ? `: ${parts.join("; ")}` : ""}` });
   }
 
@@ -76,6 +81,19 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
       old.packQuantity !== row.packQuantity || old.packUom !== row.packUom || old.packSize !== row.packSize ? `packs ${num(row.packQuantity) || "-"} ${str(row.packUom)}${row.packSize ? ` (${num(row.packSize)} per pack)` : ""}` : ""
     ].filter(Boolean);
     if (parts.length) changes.push({ kind: "Job order", ...jobRefs(row), text: `Job order ${str(row.number)} edited: ${parts.join("; ")}` });
+    // A batch shared by several POs: who joined or left it, QA's formula confirmation, release to each PO.
+    type Share = { orderId: string; quantity: number };
+    const sharesOf = (value: Row) => (Array.isArray(value.shares) ? value.shares : []) as Share[];
+    for (const share of sharesOf(row).filter((item) => !sharesOf(old).some((was) => was.orderId === item.orderId)))
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `Batch ${str(row.number)} also made for PO ${po(share.orderId) ?? "-"}: ${num(share.quantity)} ${str(row.uom)}` });
+    for (const share of sharesOf(old).filter((item) => !sharesOf(row).some((now) => now.orderId === item.orderId)))
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `PO ${po(share.orderId) ?? "-"} taken off batch ${str(row.number)}` });
+    if (!old.formulaConfirmedAt && row.formulaConfirmedAt)
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `QA confirmed the POs sharing ${str(row.number)} are the same formula` });
+    type Release = { orderId: string; quantity: number; uom: string; otherUses?: { quantity: number; note: string }[] };
+    const releasesOf = (value: Row) => (Array.isArray(value.poReleases) ? value.poReleases : []) as Release[];
+    for (const release of releasesOf(row).filter((item) => !releasesOf(old).some((was) => was.orderId === item.orderId)))
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `${str(row.number)} released to PO ${po(release.orderId) ?? "-"}: ${num(release.quantity)} ${str(release.uom)}${release.otherUses?.length ? `; also ${release.otherUses.map((use) => `${num(use.quantity)} ${str(use.note)}`).join(", ")}` : ""}` });
   }
 
   const lineDiff = diff(list(before, "lines"), list(after, "lines"));

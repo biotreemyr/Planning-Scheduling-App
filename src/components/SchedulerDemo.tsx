@@ -43,6 +43,7 @@ import type {
 import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
+import { closeOrder, formulaPending, jobForOrder, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
@@ -95,7 +96,8 @@ function AppHeader({
   statusSections,
   statusSection,
   onStatusSection,
-  version
+  version,
+  badges = {}
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
@@ -111,6 +113,8 @@ function AppHeader({
   statusSections: { id: StatusSection; label: string }[]; statusSection: StatusSection; onStatusSection: (section: StatusSection) => void;
   // The released version in use, from CHANGELOG.md; it opens What's new.
   version?: string;
+  // Work waiting in a tab, e.g. POs ready for planning to close.
+  badges?: Partial<Record<Tab, number>>;
 }) {
   return (
     <aside className="app-header">
@@ -131,6 +135,7 @@ function AppHeader({
             >
               <Icon size={17} />
               <span>{tab.label}</span>
+              {badges[tab.id] ? <span className="tab-badge" title={`${badges[tab.id]} PO${badges[tab.id] === 1 ? "" : "s"} ready to close`}>{badges[tab.id]}</span> : null}
             </button>
             {tab.id === "status" && activeTab === "status" ? <div className="tab-sub" role="group" aria-label="QA/QC sections">
               {statusSections.map((item) => <button key={item.id} type="button" className={statusSection === item.id ? "tab sub active" : "tab sub"} aria-current={statusSection === item.id ? "page" : undefined} onClick={() => onStatusSection(item.id)}>{item.label}</button>)}
@@ -967,12 +972,16 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     const existing = linesForJob(job.id, data.lines);
     if (mode === "new" && existing.length) return { error: `${job.number} is already planned. Open one of its activities to edit its planning.` };
     if (mode === "new" && !inUnit(job, data.orders, visibleCalendars[0]?.unitId)) return { error: `${order.poNumber} is made in ${directory.units.find((item) => item.id === order.unitId)?.name ?? "another unit"}. Plan it on that unit's board.` };
+    // POs with different FG codes share a batch only once QA has confirmed they are the same formula.
+    if (mode === "new" && formulaPending(job, data.orders)) return { error: `${job.number} is shared by POs with different FG codes. QA confirms they are the same formula under QA/QC before it can be planned.` };
+    // A shared batch's filling and packing rows are for one PO each; the rest belong to the batch's first PO.
+    const orderOfRow = (row: { orderId?: string }) => data.orders.find((item) => item.id === (row.orderId ?? job.orderId)) ?? order;
     // Quantities are the job order's theoretical figure for each process, whatever the form sent.
     // A process already split over several days keeps its days' shares (the tally warning checks them).
     // Each process plans with the job order figure set for it in Admin.
-    const processRows = (calendarId: string) => plan.rows.filter((row) => (row.on || row.lineId) && row.calendarId === calendarId).length;
+    const processRows = (calendarId: string, orderId?: string) => plan.rows.filter((row) => (row.on || row.lineId) && row.calendarId === calendarId && (row.orderId ?? job.orderId) === (orderId ?? job.orderId)).length;
     plan = { ...plan, rows: plan.rows.map((row) => {
-      const expected = processRows(row.calendarId) === 1 ? processQuantity(job, calendarSettings(directory, row.calendarId).planned) : undefined;
+      const expected = processRows(row.calendarId, row.orderId) === 1 ? processQuantity(jobForOrder(job, row.orderId ?? job.orderId), calendarSettings(directory, row.calendarId).planned) : undefined;
       return expected ? { ...row, quantity: expected.quantity, uom: expected.uom, batchSizeKg: expected.uom === "kg" ? expected.quantity : batchKilograms(expected.quantity, expected.uom) } : row;
     }) };
     const adding = plan.rows.filter((row) => row.on && !row.lineId);
@@ -1007,7 +1016,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     lines = lines.filter((line) => !removedIds.has(line.id));
     entries = entries.filter((entry) => !removedIds.has(entry.planLineId ?? ""));
     const added: PlanLine[] = adding.map((row) => ({
-      id: newId("line"), planId: "production-plan", calendarId: row.calendarId, productId: order.productId, productionOrderId: order.id, jobOrderId: job.id, orderReference: job.number,
+      id: newId("line"), planId: "production-plan", calendarId: row.calendarId, productId: orderOfRow(row).productId, productionOrderId: orderOfRow(row).id, jobOrderId: job.id, orderReference: job.number,
       plannedDate: row.plannedDate, quantity: row.quantity, uom: row.uom, activityType: row.activityType, priority: plan.priority, status: "Unscheduled",
       ...(row.batchSizeKg !== undefined ? { batchSizeKg: row.batchSizeKg } : {}), ...(plan.notes.trim() ? { notes: plan.notes.trim() } : {})
     }));
@@ -1050,15 +1059,25 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     if (!current) return ["This job order no longer exists."];
     const result = updateJobOrder(next, data.jobOrders, data.orders, products, orderRoute);
     if ("error" in result) return [result.error];
+    const shareIssue = sharesProblem(result, data.orders, data.jobOrders, (order) => order.format ?? inferFormat(products.find((item) => item.id === order.productId)));
+    if (shareIssue) return [shareIssue];
+    // A PO taken off a shared batch must not keep filling or packing planned for it.
+    const dropped = (current.shares ?? []).filter((share) => !result.shares?.some((item) => item.orderId === share.orderId));
+    const stranded = dropped.find((share) => data.lines.some((line) => line.jobOrderId === current.id && line.productionOrderId === share.orderId));
+    if (stranded) return [`${data.orders.find((order) => order.id === stranded.orderId)?.poNumber ?? "That PO"} has filling or packing planned from this batch. Remove those activities on the Planner Board first.`];
+    // POs with different FG codes need QA's confirmation again whenever the POs sharing the batch change.
+    const sameShares = JSON.stringify((current.shares ?? []).map((share) => share.orderId).sort()) === JSON.stringify((result.shares ?? []).map((share) => share.orderId).sort());
+    const checked: JobOrder = sameShares ? result : (({ formulaConfirmedBy: _b, formulaConfirmedAt: _a, ...rest }) => rest)(result);
     const batchChanged = (result.batchNumber ?? "") !== (current.batchNumber ?? "");
-    const saved: JobOrder = batchChanged && result.batchNumber ? { ...result, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
-      : batchChanged ? (({ batchNumberBy: _by, batchNumberAt: _at, ...rest }) => rest)(result) : result;
+    const saved: JobOrder = batchChanged && checked.batchNumber ? { ...checked, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
+      : batchChanged ? (({ batchNumberBy: _by, batchNumberAt: _at, ...rest }) => rest)(checked) : checked;
     // Open activities follow the job order's quantities, when their process runs on one day; a process
     // split over several days is left for planning to share out (the tally warning shows it).
     const jobLines = linesForJob(saved.id, data.lines);
     const synced = new Map(jobLines.flatMap((line) => {
-      const expected = processQuantity(saved, calendarSettings(directory, line.calendarId).planned);
-      if (!expected || line.completedAt || jobLines.filter((other) => other.calendarId === line.calendarId).length !== 1) return [];
+      // A shared batch's filling and packing plan with their own PO's pack figures.
+      const expected = processQuantity(jobForOrder(saved, line.productionOrderId ?? saved.orderId), calendarSettings(directory, line.calendarId).planned);
+      if (!expected || line.completedAt || jobLines.filter((other) => other.calendarId === line.calendarId && other.productionOrderId === line.productionOrderId).length !== 1) return [];
       return [[line.id, { quantity: expected.quantity, uom: expected.uom, batchSizeKg: expected.uom === "kg" ? expected.quantity : batchKilograms(expected.quantity, expected.uom) }] as const];
     }));
     setData((state) => ({ ...state, jobOrders: state.jobOrders.map((job) => job.id === saved.id ? saved : job),
@@ -1088,13 +1107,22 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
     return [];
   }
-  function releaseJob(id: string, quantity: number, uom: string) {
+  function releaseJob(id: string, entries: ReleaseEntry[]) {
     if (!caps.release) return ["Your access does not include releasing batches."];
     const job = data.jobOrders.find((item) => item.id === id);
     if (!job) return ["This job order no longer exists."];
-    const result = releaseBatch(job, quantity, uom, member.name, new Date());
+    const result = releaseToOrders(job, entries, data.orders, member.name, new Date());
     if ("error" in result) return [result.error];
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
+    return [];
+  }
+  // QA confirms that POs with different FG codes sharing a batch are the same formula.
+  function confirmFormula(id: string) {
+    if (!caps.release) return ["Your access does not include confirming a shared batch's formula."];
+    const job = data.jobOrders.find((item) => item.id === id);
+    if (!job) return ["This job order no longer exists."];
+    if (!formulaPending(job, data.orders)) return [`${job.number} has nothing to confirm.`];
+    setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? { ...item, formulaConfirmedBy: member.name, formulaConfirmedAt: new Date().toISOString() } : item) }));
     return [];
   }
   function rejectJob(id: string) {
@@ -1106,9 +1134,22 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
     return [];
   }
+  // Planning closes a PO once QA has released and reconciled every batch for it.
+  function closePo(id: string, quantity: number, uom: string, note: string) {
+    if (!canEditOrders) return ["Your access does not include closing POs."];
+    const order = data.orders.find((item) => item.id === id);
+    if (!order) return ["This PO no longer exists."];
+    if (!readyToClose(order, data.jobOrders)) return [`${order.poNumber} is not ready to close: QA has not released every batch for it yet.`];
+    const result = closeOrder(order, quantity, uom, note, member.name, new Date());
+    if ("error" in result) return [result.error];
+    setData((current) => ({ ...current, orders: current.orders.map((item) => item.id === id ? result : item) }));
+    return [];
+  }
   function deleteOrder(id: string) {
     if (!canEditOrders) return ["Your access does not include editing orders."];
     if (data.lines.some((line) => line.productionOrderId === id)) return ["Activities are linked to this PO. Unlink them on the Planner Board first."];
+    const sharedIn = data.jobOrders.find((job) => job.orderId !== id && job.shares?.some((share) => share.orderId === id));
+    if (sharedIn) return [`This PO shares batch ${sharedIn.number}. Take it off that job order first.`];
     // Unplanned job orders of the PO item go with it.
     setData((current) => ({ ...current, orders: current.orders.filter((item) => item.id !== id), jobOrders: current.jobOrders.filter((job) => job.orderId !== id) }));
     return [];
@@ -1187,7 +1228,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     </ToolbarMenu>
   </div>;
   return <main className="workstation">
-    <AppHeader version={releases[0]?.version} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAudit={caps.auditTrail} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
+    <AppHeader version={releases[0]?.version} badges={canEditOrders ? { orders: data.orders.filter((order) => !isNonProduction(order) && readyToClose(order, data.jobOrders)).length, trials: data.orders.filter((order) => isNonProduction(order) && readyToClose(order, data.jobOrders)).length } : {}} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAudit={caps.auditTrail} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
       statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }] : [])]}
       statusSection={statusSection} onStatusSection={setStatusSection} />
     <div className="workstation-content">
@@ -1225,11 +1266,11 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers}
+      {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers} directory={directory} onConfirmFormula={confirmFormula}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
         section={statusSection} onSection={setStatusSection} onTest={testJob} onRelease={releaseJob} onReject={rejectJob} /> : null}
-      {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
-      {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
+      {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
+      {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
       {activeTab === "audit" && caps.auditTrail ? <HistoryPanel refreshKey={activeTab} canDownload={caps.printAuditTrail} /> : null}
       {activeTab === "news" ? <ReleaseNotes releases={releases} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>

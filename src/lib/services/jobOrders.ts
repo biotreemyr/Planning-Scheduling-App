@@ -1,6 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
+import { jobForOrder, jobsServing, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
 
@@ -32,6 +33,13 @@ export type JobOrder = {
   releaseQuantity?: number; releaseUom?: string; releasedAt?: string; releasedBy?: string;
   // A batch that failed testing goes to Release too, where QA rejects it.
   rejectedAt?: string; rejectedBy?: string;
+  // A batch made once for several POs (at most 5 in all): the other POs it serves, each with its share
+  // of the batch and its own packing. The job order's own PO and pack fields are the first PO's.
+  shares?: JobShare[];
+  // When POs with different FG codes share the batch, QA confirms they are the same formula.
+  formulaConfirmedBy?: string; formulaConfirmedAt?: string;
+  // QA's release to each PO, by batch or one PO at a time, with what else the output went to.
+  poReleases?: PoRelease[];
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;
@@ -60,9 +68,12 @@ export function validateBatchNumber(value: string, job: JobOrder, jobs: JobOrder
   return "";
 }
 
-// The job orders' total in the PO item's own unit may not pass the ordered quantity.
+// The job orders' total in the PO item's own unit may not pass the ordered quantity. A shared batch
+// counts only each PO's share: the first PO keeps what the other POs' shares leave.
 function overOrdered(order: PurchaseOrder, jobs: JobOrder[]) {
-  const total = Number(jobs.filter((job) => job.orderId === order.id && job.uom === order.uom).reduce((sum, job) => sum + job.quantity, 0).toPrecision(12));
+  const shareOf = (job: JobOrder) => job.orderId === order.id ? job.quantity - (job.shares ?? []).reduce((sum, share) => sum + share.quantity, 0)
+    : (job.shares ?? []).filter((share) => share.orderId === order.id).reduce((sum, share) => sum + share.quantity, 0);
+  const total = Number(jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + shareOf(job), 0).toPrecision(12));
   return total > order.quantity ? `Job orders for ${order.poNumber} would add up to ${total.toLocaleString()} ${order.uom}, more than the ${order.quantity.toLocaleString()} ordered.` : "";
 }
 
@@ -207,11 +218,14 @@ const amount = (value: number) => Number(value.toPrecision(12)).toLocaleString("
 export function checkTally(lines: PlanLine[], jobs: JobOrder[], directory: CalendarDirectory): FlowWarning[] {
   // Each process plans with the job order figure set for it in Admin.
   return jobs.flatMap((job) => {
+    // A shared batch's filling and packing are checked per PO, against that PO's own packing.
+    const perPo = (calendarId: string) => !!job.shares?.length && perOrderSource(calendarSettings(directory, calendarId).planned);
     const byProcess = new Map<string, PlanLine[]>();
-    for (const line of linesForJob(job.id, lines)) if (line.calendarId) byProcess.set(line.calendarId, [...byProcess.get(line.calendarId) ?? [], line]);
-    return [...byProcess].flatMap(([calendarId, items]) => {
+    for (const line of linesForJob(job.id, lines)) if (line.calendarId) { const key = perPo(line.calendarId) ? `${line.calendarId}|${line.productionOrderId ?? job.orderId}` : line.calendarId; byProcess.set(key, [...byProcess.get(key) ?? [], line]); }
+    return [...byProcess].flatMap(([key, items]) => {
+      const [calendarId, orderId] = key.split("|");
       const source = calendarSettings(directory, calendarId).planned;
-      const expected = processQuantity(job, source);
+      const expected = processQuantity(orderId ? jobForOrder(job, orderId) : job, source);
       if (!expected) return [];
       const planned = items.reduce((sum, line) => sum + (line.uom === expected.uom ? line.quantity : 0), 0);
       const otherUnit = items.some((line) => line.uom !== expected.uom);
@@ -246,7 +260,13 @@ export function activityFacts(line: PlanLine, jobs: JobOrder[], productUom = "")
   const done = !!line.completedAt && line.yieldQuantity !== undefined;
   const amount = (done ? line.yieldQuantity! : line.quantity).toLocaleString("en-MY", { maximumFractionDigits: 3 });
   const uom = (done ? line.yieldUom ?? line.uom : line.uom) ?? productUom;
-  return { batchNumber: job?.batchNumber?.trim() ?? "", jobNumber: job ? packing ? packingNumber(job) : job.number : line.orderReference?.trim() ?? "", quantity: `${done ? "Actual " : ""}${amount} ${uom}`.trim(), done };
+  // A shared batch's packing carries its own PO's packing job order number.
+  const packingNo = job ? jobForOrder(job, line.productionOrderId ?? job.orderId) : undefined;
+  // A step a shared batch makes once (not its per-PO filling or packing) says how many POs it serves.
+  const step = stepOf(line.activityType ?? "");
+  const pos = job?.shares?.length && step !== "filling" && step !== "packing" ? job.shares.length + 1 : 0;
+  const jobNumber = job ? packing ? packingNumber(packingNo!) : `${job.number}${pos ? ` · ${pos} POs` : ""}` : line.orderReference?.trim() ?? "";
+  return { batchNumber: job?.batchNumber?.trim() ?? "", jobNumber, quantity: `${done ? "Actual " : ""}${amount} ${uom}`.trim(), done };
 }
 
 // ---- Status: testing and release of finished batches ----
@@ -306,17 +326,17 @@ export function releaseBatch(job: JobOrder, quantity: number, uom: string, by: s
 
 // A PO item's testing and release at a glance, for the Orders summary.
 export function orderStatusSummary(orderId: string, jobs: JobOrder[], lines: PlanLine[], transfers: { sourceLineId: string }[]) {
-  const own = jobsFor(orderId, jobs);
+  // Batches shared with other POs count here too; a shared batch's release counts what went to this PO.
+  const own = jobsServing(orderId, jobs);
   const states = own.map((job) => batchStatus(job, lines, transfers));
-  const released = new Map<string, number>();
-  for (const job of own) if (job.releasedAt && job.releaseUom) released.set(job.releaseUom, Number(((released.get(job.releaseUom) ?? 0) + (job.releaseQuantity ?? 0)).toPrecision(12)));
+  const released = new Map<string, number>(releasedToOrder(orderId, own).map((item) => [item.uom, item.quantity]));
   return {
     jobs: own.length,
     awaitingTesting: states.filter((state) => state === "Awaiting testing").length,
     passed: own.filter((job) => testResult(job) === "Passed").length,
     failed: own.filter((job) => testResult(job) === "Failed").length,
     investigating: own.filter((job) => testResult(job) === "Under investigation").length,
-    released: own.filter((job) => job.releasedAt).length,
+    released: own.filter((job) => releaseFor(job, orderId)).length,
     rejected: own.filter((job) => job.rejectedAt).length,
     releasedQuantity: [...released].map(([uom, quantity]) => ({ quantity, uom }))
   };
