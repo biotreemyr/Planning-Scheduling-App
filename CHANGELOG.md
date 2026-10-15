@@ -8,6 +8,8 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-15
+
 ### Added
 - **Shared batches**: one job order can be made for up to 5 POs of the same dosage form. Edit the job order and add the other POs, each with its share of the batch and its own packing (pack size and type, packs, boxes, packing job order number). Dispensing to coating are planned once; filling and packing are planned for each PO.
 - **Short yield on a shared batch**: when compression or capsulation makes less than planned, the PO due first keeps its full share and the next PO takes what is left. Planning sees each PO's adjusted share and about how many packs it fills.
