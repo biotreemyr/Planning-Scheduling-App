@@ -8,13 +8,15 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-15
+
 ### Added
 - **Machines from Master Data**: the scheduler's machines are QA's Production Equipment from Master Data, shown everywhere as Equipment ID and name (for example "CFM/02 · Automatic Capsule Filling Machine"). In Admin → Machines, machines are chosen from that list and given a process; their ID, name and active status follow Master Data.
 - **Several machines on one activity**: a planned activity can book more than one machine, so bottle filling books the counting, capping, sealing and labelling machines together. Each machine is checked for double-booking.
 
 ### Changed
 - **Admin → Machines** no longer takes a typed machine name or code. New equipment is added in Master Data first, then chosen here.
-- The 10 sample machines are replaced by the 14 confirmed production machines. Bookings already made moved to the matching real machine.
+- **Machine list**: the 10 sample machines are replaced by the 14 confirmed production machines. Bookings already made moved to the matching real machine.
 
 ## [1.1.1] - 2026-10-14
 
