@@ -1,7 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
-import { jobForOrder, perOrderSource, type JobShare, type PoRelease } from "./sharedJobs";
+import { jobForOrder, jobsServing, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
 
@@ -260,7 +260,13 @@ export function activityFacts(line: PlanLine, jobs: JobOrder[], productUom = "")
   const done = !!line.completedAt && line.yieldQuantity !== undefined;
   const amount = (done ? line.yieldQuantity! : line.quantity).toLocaleString("en-MY", { maximumFractionDigits: 3 });
   const uom = (done ? line.yieldUom ?? line.uom : line.uom) ?? productUom;
-  return { batchNumber: job?.batchNumber?.trim() ?? "", jobNumber: job ? packing ? packingNumber(job) : job.number : line.orderReference?.trim() ?? "", quantity: `${done ? "Actual " : ""}${amount} ${uom}`.trim(), done };
+  // A shared batch's packing carries its own PO's packing job order number.
+  const packingNo = job ? jobForOrder(job, line.productionOrderId ?? job.orderId) : undefined;
+  // A step a shared batch makes once (not its per-PO filling or packing) says how many POs it serves.
+  const step = stepOf(line.activityType ?? "");
+  const pos = job?.shares?.length && step !== "filling" && step !== "packing" ? job.shares.length + 1 : 0;
+  const jobNumber = job ? packing ? packingNumber(packingNo!) : `${job.number}${pos ? ` · ${pos} POs` : ""}` : line.orderReference?.trim() ?? "";
+  return { batchNumber: job?.batchNumber?.trim() ?? "", jobNumber, quantity: `${done ? "Actual " : ""}${amount} ${uom}`.trim(), done };
 }
 
 // ---- Status: testing and release of finished batches ----
@@ -320,17 +326,17 @@ export function releaseBatch(job: JobOrder, quantity: number, uom: string, by: s
 
 // A PO item's testing and release at a glance, for the Orders summary.
 export function orderStatusSummary(orderId: string, jobs: JobOrder[], lines: PlanLine[], transfers: { sourceLineId: string }[]) {
-  const own = jobsFor(orderId, jobs);
+  // Batches shared with other POs count here too; a shared batch's release counts what went to this PO.
+  const own = jobsServing(orderId, jobs);
   const states = own.map((job) => batchStatus(job, lines, transfers));
-  const released = new Map<string, number>();
-  for (const job of own) if (job.releasedAt && job.releaseUom) released.set(job.releaseUom, Number(((released.get(job.releaseUom) ?? 0) + (job.releaseQuantity ?? 0)).toPrecision(12)));
+  const released = new Map<string, number>(releasedToOrder(orderId, own).map((item) => [item.uom, item.quantity]));
   return {
     jobs: own.length,
     awaitingTesting: states.filter((state) => state === "Awaiting testing").length,
     passed: own.filter((job) => testResult(job) === "Passed").length,
     failed: own.filter((job) => testResult(job) === "Failed").length,
     investigating: own.filter((job) => testResult(job) === "Under investigation").length,
-    released: own.filter((job) => job.releasedAt).length,
+    released: own.filter((job) => releaseFor(job, orderId)).length,
     rejected: own.filter((job) => job.rejectedAt).length,
     releasedQuantity: [...released].map(([uom, quantity]) => ({ quantity, uom }))
   };

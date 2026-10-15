@@ -1124,6 +1124,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   function deleteOrder(id: string) {
     if (!canEditOrders) return ["Your access does not include editing orders."];
     if (data.lines.some((line) => line.productionOrderId === id)) return ["Activities are linked to this PO. Unlink them on the Planner Board first."];
+    const sharedIn = data.jobOrders.find((job) => job.orderId !== id && job.shares?.some((share) => share.orderId === id));
+    if (sharedIn) return [`This PO shares batch ${sharedIn.number}. Take it off that job order first.`];
     // Unplanned job orders of the PO item go with it.
     setData((current) => ({ ...current, orders: current.orders.filter((item) => item.id !== id), jobOrders: current.jobOrders.filter((job) => job.orderId !== id) }));
     return [];

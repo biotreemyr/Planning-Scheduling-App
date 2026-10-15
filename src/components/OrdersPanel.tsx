@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, P
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
-import { MAX_POS_PER_JOB, formulaPending, jobForOrder, jobParts, jobsServing, partFor, type JobShare } from "@/lib/services/sharedJobs";
+import { MAX_POS_PER_JOB, formulaPending, jobForOrder, jobParts, jobsServing, orderViewLines, partFor, releaseFor, type JobShare } from "@/lib/services/sharedJobs";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, isNonProduction, nextRndCode, ORDER_CATEGORIES, type OrderCategory, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
@@ -47,6 +47,8 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
   creatable?: boolean; editable: boolean; printable?: boolean; userName: string; onSave: (order: PurchaseOrder) => string[]; onAdd: (items: PurchaseOrder[], customer: Customer, taken?: Product[]) => string[]; onDelete: (id: string) => string[];
 }) {
   const listed = orders.filter((order) => isNonProduction(order) === nonProduction);
+  // A batch shared by several POs counts its common processes for each of them.
+  const viewLines = orderViewLines(lines, jobOrders, directory);
   const customerNames = [...new Set(listed.map((order) => order.customerName?.trim()).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b));
   // New order opens in a pop-up from the orders header, so the page shows just the orders.
   const dialog = useRef<HTMLDialogElement>(null);
@@ -60,7 +62,7 @@ export function OrdersPanel({ orders, customers = [], jobOrders = [], jobActions
         onClose={() => dialog.current?.close()} onDone={(message) => { setAdded(message); dialog.current?.close(); }} />
     </dialog> : null}
     {added ? <p role="status" className="calendar-notice">{added}</p> : null}
-    <OrdersTable nonProduction={nonProduction} action={newOrderButton} printable={printable} orders={listed} customerRecords={customers} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} lines={lines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
+    <OrdersTable nonProduction={nonProduction} action={newOrderButton} printable={printable} orders={listed} customerRecords={customers} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} lines={viewLines} products={products} directory={directory} visibleCalendarIds={visibleCalendarIds} editable={editable} customers={customerNames} onSave={onSave} onDelete={onDelete} flow={flow} />
   </section>;
 }
 
@@ -447,6 +449,8 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [addVersion, setAddVersion] = useState(0);
+  // The activities themselves, without the repeats that show a shared batch under each PO.
+  lines = [...new Map(lines.map((line) => [line.id, line])).values()];
   // This PO item's own job orders first, then batches other PO items share with it.
   const jobs = [...jobsFor(order.id, jobOrders), ...jobsServing(order.id, jobOrders).filter((job) => job.orderId !== order.id)];
   const [shareDrafts, setShareDrafts] = useState<ShareDraft[]>([]);
@@ -679,7 +683,8 @@ const shortDate = (value: string) => formatDate(value.slice(0, 10));
 // Planning (job order, planned quantity, batch number), Production (one row per process: days,
 // status and actual quantity), QC testing (result) and QA release (released, released quantity).
 function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: PurchaseOrder; jobOrders: JobOrder[]; lines: PlanLine[]; transfers: { sourceLineId: string }[]; matrix: OrderBatchMatrix }) {
-  const jobs = jobsFor(order.id, jobOrders);
+  // Batches shared with other POs show here too, with this PO's packing and release.
+  const jobs = [...jobsFor(order.id, jobOrders), ...jobsServing(order.id, jobOrders).filter((job) => job.orderId !== order.id)];
   const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
   const day = (value?: string) => value ? shortDate(value.slice(0, 10)) : "";
   if (!jobs.length) return <p className="order-empty">No job orders yet. Key them in under Job orders, then plan them on the Planner Board.</p>;
@@ -688,11 +693,13 @@ function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: Purc
     {jobs.map((job) => { const tone = shade?.(job); return <td key={job.id} className={`order-batch-col${tone ? ` order-flow-${tone}` : ""}`}>{cell(job)}</td>; })}<td className="order-batch-summary">{total}</td></tr>;
   const states = new Map(jobs.map((job) => [job.id, batchStatus(job, lines, transfers)]));
   // Planned quantity in boxes (the job order's total packs), else its batch quantity.
-  const plannedBoxes = (job: JobOrder) => processQuantity(job, "packing") ?? { quantity: job.quantity, uom: job.uom };
+  const plannedBoxes = (job: JobOrder) => processQuantity(jobForOrder(job, order.id), "packing") ?? { quantity: partFor(job, order.id)?.quantity ?? job.quantity, uom: job.uom };
   const plannedUoms = [...new Set(jobs.map((job) => plannedBoxes(job).uom))];
   const plannedTotal = <small>{plannedUoms.map((uom) => `${amount(jobs.filter((job) => plannedBoxes(job).uom === uom).reduce((sum, job) => sum + plannedBoxes(job).quantity, 0))} ${uom}`).join(" · ")}{plannedUoms.length === 1 && plannedUoms[0] === order.uom ? ` of ${amount(order.quantity)} ordered` : ""}</small>;
-  const released = jobs.filter((job) => job.releasedAt && job.releaseUom);
-  const releasedUoms = [...new Set(released.map((job) => job.releaseUom!))];
+  // What QA released to this PO from each batch.
+  const releaseOf = (job: JobOrder) => releaseFor(job, order.id);
+  const released = jobs.filter((job) => releaseOf(job));
+  const releasedUoms = [...new Set(released.map((job) => releaseOf(job)!.uom))];
   return <div className="order-batch-scroll"><table className="order-batch-table order-flow-grid">
     <thead><tr><th scope="col" className="order-batch-process">Job order</th>{jobs.map((job) => <th scope="col" key={job.id} className="order-batch-col"><strong>{job.number}</strong></th>)}<th scope="col" className="order-batch-summary">Total</th></tr></thead>
     <tbody>
@@ -726,14 +733,15 @@ function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: Purc
       {stage("QA release")}
       {row("Released", (job) => {
         const state = states.get(job.id);
-        if (state === "Released") return <><span className="badge success">Released</span><small>{day(job.releasedAt)}{job.releasedBy ? ` · ${job.releasedBy}` : ""}</small></>;
+        const release = releaseOf(job);
+        if (release) return <><span className="badge success">Released</span><small>{day(release.releasedAt)}{release.releasedBy ? ` · ${release.releasedBy}` : ""}</small></>;
         if (state === "Rejected") return <><span className="badge danger">Rejected</span><small>{day(job.rejectedAt)}{job.rejectedBy ? ` · ${job.rejectedBy}` : ""}</small></>;
         if (state === "Awaiting release") return <span className="badge info">Awaiting release</span>;
         if (state === "Failed testing") return <span className="badge warning">Awaiting QA rejection</span>;
         return <span className="route-muted">-</span>;
       }, <small>{released.length}/{jobs.length} released</small>)}
-      {row("Released quantity", (job) => job.releasedAt ? `${amount(job.releaseQuantity ?? 0)} ${job.releaseUom ?? ""}` : <span className="route-muted">-</span>,
-        releasedUoms.length ? <small>{releasedUoms.map((uom) => `${amount(released.filter((job) => job.releaseUom === uom).reduce((sum, job) => sum + (job.releaseQuantity ?? 0), 0))} ${uom}`).join(" · ")}</small> : null)}
+      {row("Released quantity", (job) => { const release = releaseOf(job); return release ? <>{amount(release.quantity)} {release.uom}{release.otherUses?.map((use) => <small key={use.note}>+ {amount(use.quantity)} {use.note}</small>)}</> : <span className="route-muted">-</span>; },
+        releasedUoms.length ? <small>{releasedUoms.map((uom) => `${amount(released.filter((job) => releaseOf(job)!.uom === uom).reduce((sum, job) => sum + releaseOf(job)!.quantity, 0))} ${uom}`).join(" · ")}</small> : null)}
     </tbody>
   </table></div>;
 }
