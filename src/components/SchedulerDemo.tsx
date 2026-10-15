@@ -43,7 +43,7 @@ import type {
 import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
-import { jobForOrder, sharesProblem } from "@/lib/services/sharedJobs";
+import { formulaPending, jobForOrder, sharesProblem } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
@@ -968,12 +968,16 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     const existing = linesForJob(job.id, data.lines);
     if (mode === "new" && existing.length) return { error: `${job.number} is already planned. Open one of its activities to edit its planning.` };
     if (mode === "new" && !inUnit(job, data.orders, visibleCalendars[0]?.unitId)) return { error: `${order.poNumber} is made in ${directory.units.find((item) => item.id === order.unitId)?.name ?? "another unit"}. Plan it on that unit's board.` };
+    // POs with different FG codes share a batch only once QA has confirmed they are the same formula.
+    if (mode === "new" && formulaPending(job, data.orders)) return { error: `${job.number} is shared by POs with different FG codes. QA confirms they are the same formula under QA/QC before it can be planned.` };
+    // A shared batch's filling and packing rows are for one PO each; the rest belong to the batch's first PO.
+    const orderOfRow = (row: { orderId?: string }) => data.orders.find((item) => item.id === (row.orderId ?? job.orderId)) ?? order;
     // Quantities are the job order's theoretical figure for each process, whatever the form sent.
     // A process already split over several days keeps its days' shares (the tally warning checks them).
     // Each process plans with the job order figure set for it in Admin.
-    const processRows = (calendarId: string) => plan.rows.filter((row) => (row.on || row.lineId) && row.calendarId === calendarId).length;
+    const processRows = (calendarId: string, orderId?: string) => plan.rows.filter((row) => (row.on || row.lineId) && row.calendarId === calendarId && (row.orderId ?? job.orderId) === (orderId ?? job.orderId)).length;
     plan = { ...plan, rows: plan.rows.map((row) => {
-      const expected = processRows(row.calendarId) === 1 ? processQuantity(job, calendarSettings(directory, row.calendarId).planned) : undefined;
+      const expected = processRows(row.calendarId, row.orderId) === 1 ? processQuantity(jobForOrder(job, row.orderId ?? job.orderId), calendarSettings(directory, row.calendarId).planned) : undefined;
       return expected ? { ...row, quantity: expected.quantity, uom: expected.uom, batchSizeKg: expected.uom === "kg" ? expected.quantity : batchKilograms(expected.quantity, expected.uom) } : row;
     }) };
     const adding = plan.rows.filter((row) => row.on && !row.lineId);
@@ -1008,7 +1012,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     lines = lines.filter((line) => !removedIds.has(line.id));
     entries = entries.filter((entry) => !removedIds.has(entry.planLineId ?? ""));
     const added: PlanLine[] = adding.map((row) => ({
-      id: newId("line"), planId: "production-plan", calendarId: row.calendarId, productId: order.productId, productionOrderId: order.id, jobOrderId: job.id, orderReference: job.number,
+      id: newId("line"), planId: "production-plan", calendarId: row.calendarId, productId: orderOfRow(row).productId, productionOrderId: orderOfRow(row).id, jobOrderId: job.id, orderReference: job.number,
       plannedDate: row.plannedDate, quantity: row.quantity, uom: row.uom, activityType: row.activityType, priority: plan.priority, status: "Unscheduled",
       ...(row.batchSizeKg !== undefined ? { batchSizeKg: row.batchSizeKg } : {}), ...(plan.notes.trim() ? { notes: plan.notes.trim() } : {})
     }));

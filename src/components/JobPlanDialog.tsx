@@ -4,6 +4,7 @@ import { Maximize2, Minus, Plus, X } from "lucide-react";
 import { useFloatingWindow } from "./useFloatingWindow";
 import { useDateCheck } from "./DateCheck";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
+import { isShared, jobForOrder, jobParts, perOrderSource } from "@/lib/services/sharedJobs";
 import { MachinePicker } from "./MachinePicker";
 import { bookedMachineIds } from "@/lib/services/machines";
 import { priorities, type Machine, type PlanLine, type Product, type ScheduleEntry } from "@/lib/domain/types";
@@ -16,10 +17,12 @@ import { defaultSettings, type PlannedSource, type ProcessSettings } from "@/lib
 
 // One row per process of the job order's route. In edit mode a row may already have its activity.
 // Quantity and UOM are the job order's theoretical figure for the process (blank when not keyed in).
-export type PlanRow = { key: string; label: string; calendarId?: string; date: string; quantity: string; uom: string; on: boolean; lineId?: string; locked?: boolean; machineIds: string[]; planned?: PlannedSource };
+export type PlanRow = { key: string; label: string; calendarId?: string; date: string; quantity: string; uom: string; on: boolean; lineId?: string; locked?: boolean; machineIds: string[]; planned?: PlannedSource;
+  // A shared batch's filling and packing rows are for one PO each.
+  orderId?: string };
 // What planning sends back: the rows to plan (or keep), with the activity type and kilograms worked out.
 // machineIds empty means no machine booked for that process yet; a bottle line books several.
-export type PlannedRow = { calendarId: string; lineId?: string; on: boolean; activityType: string; plannedDate: string; quantity: number; uom: string; batchSizeKg?: number; machineIds: string[] };
+export type PlannedRow = { calendarId: string; lineId?: string; on: boolean; activityType: string; plannedDate: string; quantity: number; uom: string; batchSizeKg?: number; machineIds: string[]; orderId?: string };
 export type PlanRequest = { mode: "new"; date: string; calendarId?: string; jobId?: string; nonce: number } | { mode: "edit"; jobId: string; nonce: number };
 export type JobPlan = { jobId: string; rows: PlannedRow[]; batchNumber: string; priority: PlanLine["priority"]; notes: string };
 
@@ -100,7 +103,15 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
     // No fixed route (format Other): one process, chosen in the row.
     const machineFor = (calendarId?: string) => { const options = machinesFor(calendarId); return options.length === 1 ? [options[0].id] : []; };
     if (!drafts.length) return [{ key: "single", label: "Process", calendarId: calendars[0]?.id, date: from, quantity: String(chosen.quantity), uom: chosen.uom, on: true, machineIds: machineFor(calendars[0]?.id) }];
-    return drafts.map((draft) => { const [quantity, uom] = defaults(chosen, draft.planned); return { key: draft.key, label: draft.label, calendarId: draft.calendarId, date: draft.date, quantity, uom, on: false, machineIds: machineFor(draft.calendarId), planned: draft.planned }; });
+    // A batch shared with other POs is made once; its filling and packing are done for each PO.
+    return drafts.flatMap((draft) => {
+      const parts = isShared(chosen) && draft.planned && perOrderSource(draft.planned) ? jobParts(chosen) : [undefined];
+      return parts.map((part) => {
+        const [quantity, uom] = defaults(part ? jobForOrder(chosen, part.orderId) : chosen, draft.planned);
+        const po = part ? orders.find((item) => item.id === part.orderId)?.poNumber ?? "PO" : "";
+        return { key: part ? `${draft.key}:${part.orderId}` : draft.key, label: part ? `${draft.label} · ${po}` : draft.label, calendarId: draft.calendarId, date: draft.date, quantity, uom, on: false, machineIds: machineFor(draft.calendarId), planned: draft.planned, ...(part ? { orderId: part.orderId } : {}) };
+      });
+    });
   }
   // Edit mode: the route's rows filled from the job order's activities; other activities added after.
   function rowsFromPlan(chosen: JobOrder): PlanRow[] {
@@ -109,9 +120,10 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
     const used = new Set<string>();
     // Open activities show the job order's figure (saving brings them in line); completed ones what they ran.
     const fromLine = (line: PlanLine, row?: PlanRow): PlanRow => ({ key: row?.key ?? line.id, label: row?.label ?? nameOf(line.calendarId ?? ""), calendarId: line.calendarId, date: line.plannedDate,
-      quantity: line.completedAt || !row ? String(line.quantity) : row.quantity, uom: line.completedAt || !row ? line.uom ?? chosen.uom : row.uom, on: true, lineId: line.id, locked: !!line.completedAt, machineIds: bookedMachine(line.id) });
+      quantity: line.completedAt || !row ? String(line.quantity) : row.quantity, uom: line.completedAt || !row ? line.uom ?? chosen.uom : row.uom, on: true, lineId: line.id, locked: !!line.completedAt, machineIds: bookedMachine(line.id),
+      ...(row?.orderId ? { orderId: row.orderId } : isShared(chosen) && line.productionOrderId !== chosen.orderId ? { orderId: line.productionOrderId } : {}) });
     const merged = base.map((row) => {
-      const line = planned.find((item) => item.calendarId === row.calendarId && !used.has(item.id));
+      const line = planned.find((item) => item.calendarId === row.calendarId && !used.has(item.id) && (!row.orderId || item.productionOrderId === row.orderId));
       if (!line) return { ...row, on: false };
       used.add(line.id);
       return fromLine(line, row);
@@ -165,7 +177,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       checkDates(rows.filter((row) => row.on && row.calendarId && !row.locked).map((row) => ({ label: `${nameOf(row.calendarId!)} date`, value: row.date, rule: "plan" as const, was: lines.find((line) => line.id === row.lineId)?.plannedDate })), () => {
       const planned: PlannedRow[] = rows.filter((row) => row.calendarId && (row.on || row.lineId)).map((row) => {
         const quantity = Number(row.quantity);
-        return { calendarId: row.calendarId!, lineId: row.lineId, on: row.on, activityType: nameOf(row.calendarId!), plannedDate: row.date, quantity, uom: row.uom, batchSizeKg: kilograms(quantity, row.uom), machineIds: row.machineIds };
+        return { calendarId: row.calendarId!, lineId: row.lineId, on: row.on, activityType: nameOf(row.calendarId!), plannedDate: row.date, quantity, uom: row.uom, batchSizeKg: kilograms(quantity, row.uom), machineIds: row.machineIds, ...(row.orderId ? { orderId: row.orderId } : {}) };
       });
       const result = onPlan({ jobId: job.id, rows: planned, batchNumber, priority, notes }, editing ? "edit" : "new");
       if ("error" in result) { setError(result.error); return; }
