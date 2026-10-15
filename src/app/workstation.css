@@ -889,11 +889,13 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 /* A batch shared by several POs: each other PO's share and packing on one row. */
 .job-shares { grid-column: 1 / -1; display: grid; gap: 10px; margin: 6px 0 0; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; min-width: 0; }
 .job-shares legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
-.job-share { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(90px, 1fr)) minmax(110px, 1fr) auto; gap: 8px; align-items: end; }
+.job-share { display: grid; grid-template-columns: minmax(220px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(170px, 1.4fr) minmax(90px, 1fr) minmax(110px, 1fr) auto; gap: 8px; align-items: end; }
 .job-share label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); min-width: 0; }
 .job-share-po small { font-size: 11px; }
 .job-share-pair { display: flex; gap: 4px; }
-.job-share-pair input { min-width: 0; }
+.job-share-pair input { min-width: 0; flex: 1; }
+.job-share-pair select { flex: none; width: auto; }
+.plan-row-po { display: block; font-weight: 600; color: #1971c2; }
 .job-shared-tag { display: inline-block; margin-top: 3px; }
 @media (max-width: 900px) { .job-share { grid-template-columns: 1fr 1fr; } .job-share-po { grid-column: 1 / -1; } }
 
@@ -925,3 +927,5 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .ready-to-close label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
 .ready-po { display: grid; gap: 2px; }
 @media (max-width: 800px) { .ready-to-close li { grid-template-columns: 1fr; } }
+.ready-to-close .status-release-qty, .release-figures .status-release-qty { display: inline-flex; align-items: center; gap: 6px; }
+.ready-to-close .status-release-qty input, .release-figures .status-release-qty input { width: 110px; }

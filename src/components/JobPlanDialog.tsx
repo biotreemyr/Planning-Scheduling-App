@@ -4,7 +4,7 @@ import { Maximize2, Minus, Plus, X } from "lucide-react";
 import { useFloatingWindow } from "./useFloatingWindow";
 import { useDateCheck } from "./DateCheck";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
-import { isShared, jobForOrder, jobParts, perOrderSource } from "@/lib/services/sharedJobs";
+import { isShared, jobForOrder, jobParts, perOrderSource, shortYield } from "@/lib/services/sharedJobs";
 import { MachinePicker } from "./MachinePicker";
 import { bookedMachineIds } from "@/lib/services/machines";
 import { priorities, type Machine, type PlanLine, type Product, type ScheduleEntry } from "@/lib/domain/types";
@@ -162,6 +162,8 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   // Kilograms for a row: weights convert directly; the product's own unit scales the job order's batch kg.
   const kilograms = (quantity: number, uom: string) => batchKilograms(quantity, uom) ?? (job?.batchSizeKg && uom === job.uom && job.quantity ? Number((job.batchSizeKg * quantity / job.quantity).toPrecision(6)) : undefined);
   const ticked = rows.filter((row) => row.on && row.calendarId);
+  // A shared batch that made less than planned: the PO due first keeps its share, the next takes what is left.
+  const short = job ? shortYield(job, lines, orders, (calendarId) => settingsOf(calendarId ?? "").planned) : undefined;
 
   return <dialog ref={dialog} className={`activity-dialog plan-window${job ? " activity-dialog-wide" : ""}${minimised ? " minimised" : ""}`} aria-labelledby="job-plan-title"
     style={style} onKeyDown={(event) => { if (event.key === "Escape" && !minimised) { event.stopPropagation(); setMinimised(true); } }}>
@@ -205,7 +207,9 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
             <tbody>{rows.map((row, index) => <tr key={row.key} className={row.calendarId ? undefined : "route-missing"}>
               <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => { const on = event.target.checked; setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, on } : item); return editing ? changed : reflow(changed, index, start); }); }} /></td>
               <td>{row.key === "single" ? <select aria-label="Process" value={row.calendarId ?? ""} onChange={(event) => update(index, { calendarId: event.target.value })}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-                : <>{row.calendarId ? nameOf(row.calendarId) : row.label}{!row.calendarId ? <small>Not set up in this unit (or filtered out)</small> : row.locked ? <small>Completed: locked</small> : row.lineId && !row.on ? <small>Will be removed</small> : null}</>}</td>
+                : <>{row.calendarId ? nameOf(row.calendarId) : row.label}{row.orderId ? <small className="plan-row-po">for {orders.find((item) => item.id === row.orderId)?.poNumber ?? "PO"}</small> : null}
+                  {row.orderId && short ? (() => { const share = short.shares.find((item) => item.orderId === row.orderId); const part = job ? jobParts(job).find((item) => item.orderId === row.orderId) : undefined;
+                    return share && share.available < share.planned ? <small className="order-warning">Short yield: {share.available.toLocaleString()} of {share.planned.toLocaleString()} {job?.uom} for this PO{part?.packSize ? ` · about ${Math.floor(share.available / part.packSize).toLocaleString()} packs` : ""}</small> : null; })() : null}{!row.calendarId ? <small>Not set up in this unit (or filtered out)</small> : row.locked ? <small>Completed: locked</small> : row.lineId && !row.on ? <small>Will be removed</small> : null}</>}</td>
               <td>{row.calendarId ? <input type="date" aria-label={`${row.label} date`} disabled={row.locked || !row.on} value={row.on || row.locked ? row.date : ""} title={row.on ? undefined : "Not planned"} onChange={(event) => {
                 // Later processes follow on the working days after, so the route keeps its order.
                 const value = event.target.value;

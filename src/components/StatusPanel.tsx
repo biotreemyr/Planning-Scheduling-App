@@ -146,7 +146,8 @@ function ReleasePanel({ job, orders, lines, transfers, directory, formulaWaiting
   onRelease: (entries: ReleaseEntry[], text: string) => string[];
 }) {
   const parts = jobParts(job);
-  const packedFor = (orderId: string) => finalOutputFor(job, orderId, lines, transfers, directory)[0];
+  // What was packed for the PO, in the PO's own unit (boxes) when production finished in it.
+  const packedFor = (orderId: string) => { const outputs = finalOutputFor(job, orderId, lines, transfers, directory); return outputs.find((output) => output.uom === orders.find((order) => order.id === orderId)?.uom) ?? outputs.at(-1); };
   const [drafts, setDrafts] = useState<Record<string, PartDraft>>(() => Object.fromEntries(parts.map((part) => [part.orderId, { quantity: String(packedFor(part.orderId)?.quantity ?? ""), uses: [] }])));
   const open = parts.filter((part) => !releaseFor(job, part.orderId));
   const set = (orderId: string, change: Partial<PartDraft>) => setDrafts((current) => ({ ...current, [orderId]: { ...current[orderId], ...change } }));

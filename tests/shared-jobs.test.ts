@@ -118,3 +118,13 @@ describe("who may change a shared batch", () => {
     expect(reviewWorkspaceChange(base, released, planner).denied).toEqual(["release or reject batches"]);
   });
 });
+
+describe("short yield shown to planning", () => {
+  it("works out each PO's share from what compression made, earliest delivery first", async () => {
+    const { shortYield } = await import("../src/lib/services/sharedJobs");
+    const plannedOf = (calendarId?: string) => calendarId === "c-comp" ? "batchQuantity" as const : "packQuantity" as const;
+    const made = [line("comp", "c-comp", "po-a", { quantity: 120000, completedAt: "2026-10-20T09:00:00.000Z", yieldQuantity: 110000, uom: "tablets" })];
+    expect(shortYield(job, made, orders, plannedOf)).toEqual({ made: 110000, shares: [{ orderId: "po-b", planned: 60000, available: 60000 }, { orderId: "po-a", planned: 60000, available: 50000 }] });
+    expect(shortYield(job, [{ ...made[0], yieldQuantity: 120000 }], orders, plannedOf)).toBeUndefined();
+  });
+});

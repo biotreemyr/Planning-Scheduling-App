@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, P
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
-import { MAX_POS_PER_JOB, closedSummary, formulaPending, jobForOrder, jobParts, jobsServing, orderViewLines, partFor, readyToClose, releaseFor, releasedToOrder, type JobShare } from "@/lib/services/sharedJobs";
+import { MAX_POS_PER_JOB, shortYield, closedSummary, formulaPending, jobForOrder, jobParts, jobsServing, orderViewLines, partFor, readyToClose, releaseFor, releasedToOrder, type JobShare } from "@/lib/services/sharedJobs";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, isNonProduction, nextRndCode, ORDER_CATEGORIES, type OrderCategory, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
@@ -18,7 +18,7 @@ import { customerFor, productFor, type OrderCatalog } from "@/lib/services/maste
 import { useUoms } from "./MeasurementSettings";
 import { OrderBadge } from "./OrderBadge";
 import { PRODUCT_FORMATS, inferFormat, type FlowWarning, type ProductFormat } from "@/lib/services/processRules";
-import { unitRoute, unitRouteLabel } from "@/lib/services/processSetup";
+import { calendarSettings, unitRoute, unitRouteLabel } from "@/lib/services/processSetup";
 import { formatDate, formatDateTime } from "@/lib/services/dates";
 
 const displayDate = (value: string) => formatDate(value.slice(0, 10));
@@ -523,7 +523,9 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
             {formulaPending(job, orders) ? <span className="badge warning">Awaiting QA formula confirmation</span> : null}
             <Who verb="Added" who={job.createdBy} at={job.createdAt} /><Who verb="Edited" who={job.updatedBy} at={job.updatedAt} /></th>
           <td className="numeric">{measure(processQuantity(job, "dispensing"))}</td>
-          <td className="numeric">{measure(processQuantity(job, "tableting"))}{others.length ? <small>this PO {(partFor(job, order.id)?.quantity ?? 0).toLocaleString("en-MY", { maximumFractionDigits: 3 })} {job.uom}</small> : null}</td>
+          <td className="numeric">{measure(processQuantity(job, "tableting"))}{others.length ? <small>this PO {(partFor(job, order.id)?.quantity ?? 0).toLocaleString("en-MY", { maximumFractionDigits: 3 })} {job.uom}</small> : null}
+            {(() => { const short = shortYield(job, lines, orders, (calendarId) => calendarSettings(directory, calendarId).planned)?.shares.find((item) => item.orderId === order.id);
+              return short && short.available < short.planned ? <small className="order-warning" title="The batch made less than planned: the PO due first keeps its share">Short yield: {short.available.toLocaleString()} {job.uom} for this PO</small> : null; })()}</td>
           <td>{packingNumber(view)}</td>
           <td className="numeric">{measure(processQuantity(view, "filling"))}</td>
           <td className="numeric">{measure(processQuantity(view, "packing"))}</td>

@@ -202,3 +202,21 @@ export function closedSummary(order: PurchaseOrder) {
   return `Closed · ${amount(order.closedQuantity)} of ${amount(order.quantity)} ${order.uom}${difference ? ` (${difference > 0 ? "+" : "−"}${amount(Math.abs(difference))})` : ""}`;
 }
 
+
+/**
+ * What the batch actually made, in the job order's unit: the completed activities of the process
+ * that makes the batch quantity (compression or capsulation). Undefined until one is completed.
+ */
+// plannedOf: how each process plans (from Admin), e.g. calendarId => calendarSettings(directory, calendarId).planned.
+export function batchMade(job: JobOrder, lines: PlanLine[], plannedOf: (calendarId?: string) => PlannedSource) {
+  const made = lines.filter((line) => line.jobOrderId === job.id && line.completedAt && line.yieldQuantity !== undefined && (line.yieldUom ?? line.uom) === job.uom
+    && plannedOf(line.calendarId) === "batchQuantity");
+  return made.length ? Number(made.reduce((sum, line) => sum + line.yieldQuantity!, 0).toPrecision(12)) : undefined;
+}
+
+// Each PO's share once the batch has made less than planned (earliest delivery first); undefined otherwise.
+export function shortYield(job: JobOrder, lines: PlanLine[], orders: PurchaseOrder[], plannedOf: (calendarId?: string) => PlannedSource) {
+  if (!isShared(job)) return undefined;
+  const made = batchMade(job, lines, plannedOf);
+  return made !== undefined && made < job.quantity ? { made, shares: sharesAfterYield(job, orders, made) } : undefined;
+}

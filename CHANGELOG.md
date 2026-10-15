@@ -8,6 +8,14 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Added
+- **Shared batches**: one job order can be made for up to 5 POs of the same dosage form. Edit the job order and add the other POs, each with its share of the batch and its own packing (pack size and type, packs, boxes, packing job order number). Dispensing to coating are planned once; filling and packing are planned for each PO.
+- **Short yield on a shared batch**: when compression or capsulation makes less than planned, the PO due first keeps its full share and the next PO takes what is left. Planning sees each PO's adjusted share and about how many packs it fills.
+- **Same formula check**: when POs with different FG codes share a batch, QA confirms they are the same formula under QA/QC before the batch can be planned.
+- **Release by batch or by PO**: QA releases a batch to all its POs at once or one PO at a time. For each PO, QA records the quantity to the PO and anything else the output went to (retention sample, stability study, customer sample...), with a note.
+- **Ready to close**: once QA has released every batch for a PO, it appears under Ready to close in Orders (with a count on the Orders tab) for the planner to close. Closing above or below the ordered quantity asks for a reason, and the PO then shows, for example, "Closed · 2,006 of 2,000 (+6)".
+- **Audit trail** records shared batches, QA's formula confirmation, each release and PO closing.
+
 ## [1.2.1] - 2026-10-15
 
 ### Fixed
