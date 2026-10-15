@@ -23,7 +23,8 @@ const changedApartFrom = (a: object, b: object, skip: Set<string>) => {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)].filter((key) => !skip.has(key)));
   return [...keys].some((key) => !isDeepStrictEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
 };
-const machineOf = (entries: ScheduleEntry[], lineId: string) => entries.find((entry) => entry.planLineId === lineId && entry.status !== "Cancelled")?.machineId ?? "";
+// The machines an activity is booked on, as one comparable value ("" for none).
+const machinesOf = (entries: ScheduleEntry[], lineId: string) => [...new Set(entries.filter((entry) => entry.planLineId === lineId && entry.status !== "Cancelled" && entry.machineId).map((entry) => entry.machineId!))].sort().join(",");
 
 export function stampChanges<D extends Stampable>(before: D, after: D, who: string, at: string): D {
   if (before === after || !who) return after;
@@ -33,7 +34,7 @@ export function stampChanges<D extends Stampable>(before: D, after: D, who: stri
     let touched = false;
     const stamped = after.lines.map((line) => {
       const was = old.get(line.id);
-      const machineBefore = was ? machineOf(before.entries, line.id) : "", machineNow = machineOf(after.entries, line.id);
+      const machineBefore = was ? machinesOf(before.entries, line.id) : "", machineNow = machinesOf(after.entries, line.id);
       const produced = !!was && differs(was, line, PRODUCTION_KEYS);
       const planned = !was || differs(was, line, PLAN_KEYS) || (!produced && machineBefore !== machineNow);
       if (!planned && !produced) return line;
@@ -41,7 +42,7 @@ export function stampChanges<D extends Stampable>(before: D, after: D, who: stri
       return { ...line,
         ...(planned ? { plannedBy: who, plannedAt: at } : {}),
         ...(produced ? { updatedBy: who, updatedAt: at } : {}),
-        ...(produced && machineBefore && machineBefore !== machineNow && !line.plannedMachineId ? { plannedMachineId: machineBefore } : {}) };
+        ...(produced && machineBefore && machineBefore !== machineNow && !line.plannedMachineId && !line.plannedMachineIds ? { plannedMachineIds: machineBefore.split(",") } : {}) };
     });
     if (touched) lines = stamped;
   }

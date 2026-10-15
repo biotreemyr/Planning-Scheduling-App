@@ -43,6 +43,8 @@ import type {
 import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
+import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
+import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
 import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
@@ -355,7 +357,7 @@ function ScheduleBoard({
                   <div className="entry-main">
                     <h3>{labelFor(products, entry.productId)}</h3>
                     <p>
-                      {labelFor(workCentres, entry.workCentreId)} · {labelFor(machines, entry.machineId)}
+                      {labelFor(workCentres, entry.workCentreId)} · {machineLabel(machines.find((item) => item.id === entry.machineId)) || "Unassigned"}
                     </p>
                   </div>
                   <div className="entry-actions">
@@ -425,7 +427,7 @@ function ScheduleBoard({
             <option value="">No machine</option>
             {filteredMachines.map((machine) => (
               <option key={machine.id} value={machine.id}>
-                {machine.name}
+                {machineLabel(machine)}
               </option>
             ))}
           </select>
@@ -655,7 +657,7 @@ function ReportsPanel({
           ))}
           {report.conflicts.map((conflict) => (
             <article className="record-row conflict-record" key={conflict.id}>
-              <h3>{labelFor(machines, conflict.machineId)}</h3>
+              <h3>{machineLabel(machines.find((item) => item.id === conflict.machineId)) || "Unassigned"}</h3>
               <p>{conflict.message}</p>
               <StatusBadge value="Conflict" />
             </article>
@@ -669,11 +671,11 @@ function ReportsPanel({
 // A person verified by Bio Tree Core. Their permissions come from Core; the server rechecks every save.
 export type CoreIdentity = { id: string; name: string; permissions: string[] };
 
-export default function SchedulerDemo({ initial, writeToken, identity, catalog, releases = [] }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; releases?: Release[] }) {
-  return <MeasurementProvider initial={initial.snapshot.measurements}><DateCheckProvider><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} catalog={catalog} releases={releases} /></DateCheckProvider></MeasurementProvider>;
+export default function SchedulerDemo({ initial, writeToken, identity, catalog, equipment, releases = [] }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; equipment?: EquipmentCatalog; releases?: Release[] }) {
+  return <MeasurementProvider initial={initial.snapshot.measurements}><DateCheckProvider><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} catalog={catalog} equipment={equipment} releases={releases} /></DateCheckProvider></MeasurementProvider>;
 }
 
-function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; releases: Release[] }) {
+function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, releases }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; equipment?: EquipmentCatalog; releases: Release[] }) {
   const [directory, setDirectory] = useState<CalendarDirectory>(initial.snapshot.directory);
   const [memberId, setMemberId] = useState(initial.snapshot.directory.people.find((person) => person.role === "admin")!.id);
   // In Core mode the signed-in user replaces the demo person picker. Core has no unit model
@@ -714,14 +716,16 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
   const [jobEdit, setJobEdit] = useState<{ jobId: string; nonce: number } | null>(null);
   const [products, setProducts] = useState<Product[]>(initial.snapshot.products);
   const [workCentres, setWorkCentres] = useState<WorkCentre[]>(initial.snapshot.workCentres);
-  const [machines, setMachines] = useState<Machine[]>(initial.snapshot.machines);
+  const [storedMachines, setMachines] = useState<Machine[]>(initial.snapshot.machines);
+  // Shown and booked with Master Data's current Equipment ID, name and active state; saved as stored.
+  const machines = useMemo(() => withMasterEquipment(storedMachines, equipment), [storedMachines, equipment]);
   const [data, setRawData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] }>(initial.snapshot.data);
   type WorkspaceData = { lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] };
   // Every change goes through here and is stamped with who made it and when (see stamps.ts).
   const setData = (update: WorkspaceData | ((current: WorkspaceData) => WorkspaceData)) =>
     setRawData((current) => stampChanges(current, typeof update === "function" ? update(current) : update, member.name, new Date().toISOString()));
   const { uoms, activities } = useSettings();
-  const snapshot = { schemaVersion: 1, directory, products, workCentres, machines, measurements: { uoms, activities }, data } as WorkspaceSnapshot;
+  const snapshot = { schemaVersion: 1, directory, products, workCentres, machines: storedMachines, measurements: { uoms, activities }, data } as WorkspaceSnapshot;
   const persistenceStatus = useWorkspacePersistence(initial, snapshot, writeToken);
   const scope = <T extends { calendarId?: string },>(records: T[]) => visibleCalendars.flatMap((item) => scopeCalendarRecords(records, member, item, directory));
   const entries = scope(data.entries);
@@ -768,7 +772,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
     if (!selectedLine) return ["Activity not available."];
     const errors = validateCompletion(selectedLine, input, identity ? { ...member, role: "production" } : member, directory, !identity);
     if (errors.length) return errors;
-    const machine = machineChange(selectedLine, input.machineId);
+    const machine = machineChange(selectedLine, input.machineIds);
     if ("error" in machine) return [machine.error];
     // The completed day production keyed in, at the time of saving (or end of day for an earlier day).
     const now = new Date();
@@ -800,11 +804,10 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
     ...(isVolume(input.weighed.uom) ? { actualUnitVolumeMl: input.weighed.unitWeightMg } : { actualUnitWeightMg: input.weighed.unitWeightMg }) };
   // Production's machine choice in its update: the bookings this save starts from, with the machine
   // changed when it differs (undefined when no choice was sent).
-  function machineChange(line: PlanLine, machineId?: string): { entries?: ScheduleEntry[] } | { error: string } {
-    if (machineId === undefined) return {};
-    const current = data.entries.find((entry) => entry.planLineId === line.id && entry.status !== "Cancelled")?.machineId ?? "";
-    if (current === machineId) return {};
-    const booked = bookMachine(data.entries, line, machineId);
+  function machineChange(line: PlanLine, machineIds?: string[]): { entries?: ScheduleEntry[] } | { error: string } {
+    if (machineIds === undefined) return {};
+    if (sameMachines(bookedMachineIds(data.entries, line.id), machineIds)) return {};
+    const booked = bookMachines(data.entries, line, machineIds);
     return "error" in booked ? booked : { entries: booked.entries };
   }
   // A mistaken production update can be corrected after completion: dates, notes, the actual quantity
@@ -815,7 +818,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
     const outgoing = data.transfers.find((item) => item.sourceLineId === line.id);
     const errors = validateCorrection(line, input, outgoing, identity ? { ...member, role: "production" } : member, directory, !identity);
     if (errors.length) return errors;
-    const machine = machineChange(line, input.machineId);
+    const machine = machineChange(line, input.machineIds);
     if ("error" in machine) return [machine.error];
     const now = new Date();
     const sameDay = line.completedAt && localDateKey(new Date(line.completedAt)) === input.completedDate;
@@ -842,12 +845,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
     return [];
   }
   // Production's progress on an activity: the day it started and notes; its bookings go in progress.
-  function saveProgress(startedAt: string, notes: string, machineId?: string, progress?: Progress) {
+  function saveProgress(startedAt: string, notes: string, machineIds?: string[], progress?: Progress) {
     const line = selectedLine;
     if (!line || !canProduce) return ["Production access to this activity is required."];
     if (line.completedAt) return ["This activity is already complete."];
     if (startedAt && !/^\d{4}-\d{2}-\d{2}$/.test(startedAt)) return ["Choose the date production started."];
-    const machine = machineChange(line, machineId);
+    const machine = machineChange(line, machineIds);
     if ("error" in machine) return [machine.error];
     setData((previous) => { const current = machine.entries ? { ...previous, entries: machine.entries } : previous; return { ...current,
       // The amount run so far and the output's destination are kept as keyed in (an emptied amount is
@@ -884,7 +887,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
     const moved = new Set(result.movedEntryIds);
     const clash = findMachineConflicts(result.entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => moved.has(entryId)));
     const flowWarning = checkProcessFlow(result.lines, result.entries, data.orders, products, directory).find((warning) => warning.lineIds.includes(id) && !flow.some((old) => old.message === warning.message));
-    const base = clash ? `Moved to ${when}. ${machines.find((item) => item.id === clash.machineId)?.name ?? "A machine"} is now double-booked that day; change the machine in the activity or check Reports.`
+    const base = clash ? `Moved to ${when}. ${machineLabel(machines.find((item) => item.id === clash.machineId)) || "A machine"} is now double-booked that day; change the machine in the activity or check Reports.`
       : moved.size ? `Moved to ${when}. Its machine booking${moved.size === 1 ? "" : "s"} moved with it.` : `Moved to ${when}. No machine booked yet.`;
     return flowWarning ? `${base} Warning: ${flowWarning.message}` : base;
   }
@@ -907,7 +910,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
     const changed = new Set(result.changedEntryIds);
     const clash = findMachineConflicts(result.entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => changed.has(entryId)));
     const flowWarning = checkProcessFlow(result.lines, result.entries, data.orders, products, directory).find((warning) => warning.lineIds.includes(id) && !flow.some((old) => old.message === warning.message));
-    const base = `${line.activityType ?? "Activity"} now planned ${span}.${clash ? ` ${machines.find((item) => item.id === clash.machineId)?.name ?? "A machine"} is now double-booked in that time; change the machine or check Reports.` : changed.size ? " Its machine booking runs to the same day." : ""}`;
+    const base = `${line.activityType ?? "Activity"} now planned ${span}.${clash ? ` ${machineLabel(machines.find((item) => item.id === clash.machineId)) || "A machine"} is now double-booked in that time; change the machine or check Reports.` : changed.size ? " Its machine booking runs to the same day." : ""}`;
     return flowWarning ? `${base} Warning: ${flowWarning.message}` : base;
   }
   function saveOrder(order: PurchaseOrder) {
@@ -947,26 +950,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
   // The plan form. New: one activity per ticked process of the job order's route. Edit: rows with an
   // activity are corrected (a date change moves its bookings, like dragging), unticked ones removed,
   // newly ticked ones added. The batch number is stored on the job order either way.
-  // Book (or clear) one activity's machine. A booking already made keeps its times and moves to the
-  // new machine; a new one is a draft for the working day (completed, for a completed activity being
-  // corrected). Double-booking a machine is refused.
-  function bookMachine(current: ScheduleEntry[], line: PlanLine, machineId: string): { entries: ScheduleEntry[] } | { error: string } {
-    const own = current.filter((entry) => entry.planLineId === line.id && entry.status !== "Cancelled");
-    if (!machineId) {
-      if (own.some((entry) => entry.status !== "Draft")) return { error: "Confirmed bookings keep their machine. Choose another machine instead." };
-      return { entries: current.filter((entry) => !own.includes(entry)) };
-    }
-    const processId = directory.calendars.find((item) => item.id === line.calendarId)?.processId;
-    const unitId = directory.calendars.find((item) => item.id === line.calendarId)?.unitId;
-    const machine = machines.find((item) => item.id === machineId && item.active === "Active" && item.unitId === unitId && item.processIds?.includes(processId ?? ""));
-    if (!machine) return { error: "Select an active machine set up for this process." };
-    const next = own.length
-      ? current.map((entry) => own.includes(entry) ? { ...entry, machineId, workCentreId: machine.workCentreId, changedBy: member.name } : entry)
-      : [...current, { id: newId("sched"), calendarId: line.calendarId, planLineId: line.id, productId: line.productId, productionOrderId: line.productionOrderId, workCentreId: machine.workCentreId, machineId, startAt: `${line.plannedDate}T08:00`, endAt: `${lineEnd(line)}T17:00`, status: line.completedAt ? "Completed" as const : "Draft" as const, changedBy: member.name }];
-    const changed = new Set(next.filter((entry) => entry.planLineId === line.id).map((entry) => entry.id));
-    const clash = findMachineConflicts(next, machines, products).find((conflict) => conflict.entryIds.some((id) => changed.has(id)));
-    if (clash) return { error: `${machine.name} is already booked that day.` };
-    return { entries: next };
+  // Book an activity's machines: the ones ticked stay or are added, the others are let go. Usually one
+  // machine; a bottle line books several (counting, capping, sealing, labelling). A booking already made
+  // keeps its times: a machine swapped for another takes over its booking. A new one is a draft for the
+  // working day (completed, for a completed activity being corrected). Double-booking is refused.
+  function bookMachines(current: ScheduleEntry[], line: PlanLine, machineIds: string[]) {
+    return bookActivityMachines(current, line, machineIds, { calendars: directory.calendars, machines, products, who: member.name, newId: () => newId("sched") });
   }
   function planJobRoute(plan: JobPlan, mode: "new" | "edit"): { error: string } | { message: string } {
     const job = data.jobOrders.find((item) => item.id === plan.jobId);
@@ -1028,15 +1017,14 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
       if (!row.on) continue;
       const line = row.lineId ? finalLines.find((item) => item.id === row.lineId) : added[adding.indexOf(row)];
       if (!line || line.completedAt) continue;
-      const current = entries.filter((entry) => entry.planLineId === line.id && entry.status !== "Cancelled");
-      if ((current[0]?.machineId ?? "") === row.machineId) continue;
-      const booked = bookMachine(entries, line, row.machineId);
+      if (sameMachines(bookedMachineIds(entries, line.id), row.machineIds)) continue;
+      const booked = bookMachines(entries, line, row.machineIds);
       if ("error" in booked) return { error: `${plan.rows[index].activityType}: ${booked.error}` };
       entries = booked.entries; machinesChanged += 1;
     }
     setData((current) => ({ ...current, lines: finalLines, entries, jobOrders: batchChanged ? current.jobOrders.map((item) => item.id === savedJob.id ? savedJob : item) : current.jobOrders }));
     const parts = [added.length ? `${added.length} added` : "", updated ? `${updated} updated` : "", removing.length ? `${removing.length} removed` : "", machinesChanged && mode === "edit" ? `${machinesChanged} machine${machinesChanged === 1 ? "" : "s"} changed` : ""].filter(Boolean).join(", ");
-    const booked = plan.rows.filter((row) => row.on && row.machineId).length;
+    const booked = plan.rows.filter((row) => row.on).reduce((total, row) => total + row.machineIds.length, 0);
     return { message: mode === "new" ? `${job.number} planned: ${added.map((line) => line.activityType).join(", ")}${batch ? ` · batch ${batch}` : ""}${booked ? ` · ${booked} machine${booked === 1 ? "" : "s"} booked` : ""}.` : `${job.number} planning saved (${parts || (batchChanged ? "batch number" : "no changes")}).` };
   }
   // A PO item's route from Admin: its unit's processes used for its dosage form, in order.
@@ -1123,13 +1111,13 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
     return [];
   }
   // Set the machine for a batch step. Unbooked days get a draft booking for the working day.
-  function assignMachine(lineIds: string[], machineId: string) {
+  function assignMachine(lineIds: string[], machineIds: string[]) {
     if (!canAssign) return ["Planning or production access is required."];
     const targets = allowedLines.filter((line) => lineIds.includes(line.id) && !line.completedAt);
     if (!targets.length || targets.length !== lineIds.length) return ["These activities can no longer be changed."];
     let next = data.entries;
     for (const line of targets) {
-      const booked = bookMachine(next, line, machineId);
+      const booked = bookMachines(next, line, machineIds);
       if ("error" in booked) return [booked.error];
       next = booked.entries;
     }
@@ -1138,10 +1126,11 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
   }
   function saveMachine(machine: Machine) {
     if (!canManage) return ["Administrator access is required."];
-    if (!machine.name.trim() || !machine.code.trim() || !directory.units.some((item) => item.id === machine.unitId) || !machine.processIds?.length) return ["Enter a name, code, unit and at least one process."];
+    if (!machine.name.trim() || !machine.code.trim() || !directory.units.some((item) => item.id === machine.unitId) || !machine.processIds?.length) return ["Choose the equipment, a unit and at least one process."];
     if (machine.processIds.some((processId) => !directory.calendars.some((calendar) => calendar.unitId === machine.unitId && calendar.processId === processId))) return ["Select processes configured under this unit."];
     if (!Number.isInteger(machine.setupMinutes) || machine.setupMinutes! < 0 || (machine.capacity !== undefined && (!Number.isFinite(machine.capacity) || machine.capacity <= 0 || !machine.capacityUom?.trim()))) return ["Enter a non-negative setup time and a positive capacity with its unit/basis."];
     if (machines.some((item) => item.id !== machine.id && item.code.toLowerCase() === machine.code.toLowerCase())) return ["Machine code is already in use."];
+    if (machine.masterDataId && storedMachines.some((item) => item.id !== machine.id && item.masterDataId === machine.masterDataId)) return [`${machineLabel(machine)} is already set up as a machine.`];
     const old = machines.find((item) => item.id === machine.id);
     if (old && data.entries.some((entry) => entry.machineId === machine.id && (old.unitId !== machine.unitId || !machine.processIds?.includes(directory.calendars.find((item) => item.id === entry.calendarId)?.processId ?? "")))) return ["A booked machine must retain its unit and booked processes."];
     setMachines((current) => current.some((item) => item.id === machine.id) ? current.map((item) => item.id === machine.id ? machine : item) : [...current, machine]);
@@ -1211,12 +1200,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, releases }: { i
         jobOrders={data.jobOrders}>
         {(inRow, equivalence) => <ProductionUpdate key={selectedLine.id} inRow={inRow} equivalence={equivalence} onCancel={() => setActivityUpdating(false)} line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
           machines={unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? "") && (machine.active === "Active" || data.entries.some((entry) => entry.planLineId === selectedLine.id && entry.machineId === machine.id)))}
-          machineId={data.entries.find((entry) => entry.planLineId === selectedLine.id && entry.status !== "Cancelled")?.machineId ?? ""}
+          machineIds={bookedMachineIds(data.entries, selectedLine.id)}
           onSaved={(message) => { setActivityUpdating(false); setActivityNotice(`${selectedLine.activityType ?? "Activity"} ${formatDate(selectedLine.plannedDate)}: ${message}`); }} />}
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
         <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements", ...(identity ? [] : ["Sample data"])].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>
-        {adminSection === "Configuration" ? <CalendarAdmin showPeople={!identity} directory={directory} onSave={saveDirectory} machines={machines} workCentres={workCentres} onMachine={saveMachine} onDeleteMachine={deleteMachine} onOpenCalendar={(unitId) => { setUnitSelection(unitId); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
+        {adminSection === "Configuration" ? <CalendarAdmin showPeople={!identity} directory={directory} onSave={saveDirectory} machines={machines} savedMachines={storedMachines} equipment={equipment} workCentres={workCentres} onMachine={saveMachine} onDeleteMachine={deleteMachine} onOpenCalendar={(unitId) => { setUnitSelection(unitId); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
         {adminSection === "Sample data" && !identity ? <SampleDataAdmin snapshot={snapshot} onApply={applySnapshot} onOpenCalendar={() => { setUnitSelection(directory.units.find((item) => item.id.startsWith("sample-"))?.id ?? ""); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
         {adminSection === "Measurements" ? <MeasurementAdmin usedUoms={[...products.map((item) => item.uom), ...data.lines.map((item) => item.uom ?? ""), ...data.transfers.map((item) => item.uom), ...machines.map((item) => item.capacityUom ?? "")]} usedActivities={data.lines.map((item) => item.activityType ?? "")} /> : null}
         {adminSection === "Products" ? <CatalogAdmin products={products} workCentres={workCentres} onProduct={(item) => {

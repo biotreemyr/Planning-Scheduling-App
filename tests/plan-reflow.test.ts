@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { reflow, type PlanRow } from "../src/components/JobPlanDialog";
 
-const row = (label: string, date: string, on = true, extra: Partial<PlanRow> = {}): PlanRow => ({ key: label, label, calendarId: label, date, quantity: "1", uom: "kg", on, machineId: "", ...extra });
+const row = (label: string, date: string, on = true, extra: Partial<PlanRow> = {}): PlanRow => ({ key: label, label, calendarId: label, date, quantity: "1", uom: "kg", on, machineIds: [], ...extra });
 // Friday 9 Oct 2026 onwards: Mon 12, Tue 13, Wed 14...
 const route = () => [row("Dispensing", "2026-10-09"), row("Blending", "2026-10-12"), row("Granulation", "2026-10-13"), row("Compression", "2026-10-14"), row("Packing", "2026-10-15")];
 const dates = (rows: PlanRow[]) => rows.map((item) => `${item.label} ${item.date || "-"}`);

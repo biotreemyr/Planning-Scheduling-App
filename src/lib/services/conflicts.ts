@@ -1,4 +1,5 @@
 import type { Machine, Product, ScheduleConflict, ScheduleEntry } from "@/lib/domain/types";
+import { machineLabel } from "./machines";
 
 const conflictStatuses = new Set(["Confirmed", "In Progress"]);
 
@@ -13,7 +14,7 @@ export function findMachineConflicts(
   products: Product[]
 ): ScheduleConflict[] {
   const conflicts: ScheduleConflict[] = [];
-  const machineNames = new Map(machines.map((machine) => [machine.id, machine.name]));
+  const machineNames = new Map(machines.map((machine) => [machine.id, machineLabel(machine)]));
   const productNames = new Map(products.map((product) => [product.id, product.name]));
   const confirmedEntries = entries
     .filter((entry) => entry.machineId && conflictStatuses.has(entry.status))

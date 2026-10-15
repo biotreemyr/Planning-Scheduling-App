@@ -32,10 +32,10 @@ export const workspaceSchema = z.object({
   }),
   products: z.array(record.extend({ sku: name, uom: name, productType: z.enum(["Finished Good", "Intermediate", "Packaging", "Raw Material"]), active, batchQuantity: number.positive().optional(), batchSizeKg: number.positive().optional(), masterDataId: z.string().uuid().optional(), rnd: z.boolean().optional() })),
   workCentres: z.array(record.extend({ code: name, description: text.optional(), active })),
-  machines: z.array(record.extend({ code: name, workCentreId: id, unitId: id, processIds: z.array(id).min(1), setupMinutes: number.int().nonnegative(), capacity: number.positive().optional(), capacityUom: text.optional(), capacityNotes: text.optional(), active })),
+  machines: z.array(record.extend({ code: name, workCentreId: id, unitId: id, processIds: z.array(id).min(1), setupMinutes: number.int().nonnegative(), capacity: number.positive().optional(), capacityUom: text.optional(), capacityNotes: text.optional(), active, masterDataId: z.string().uuid().optional() })),
   measurements: settings,
   data: z.object({
-    lines: z.array(z.object({ id, plannedBy: text.optional(), plannedAt: timestamp.optional(), updatedBy: text.optional(), updatedAt: timestamp.optional(), plannedMachineId: id.optional(), calendarId: id, planId: id, productId: id, quantity: number.positive(), plannedDate: date, endDate: date.optional(),
+    lines: z.array(z.object({ id, plannedBy: text.optional(), plannedAt: timestamp.optional(), updatedBy: text.optional(), updatedAt: timestamp.optional(), plannedMachineId: id.optional(), plannedMachineIds: z.array(id).optional(), calendarId: id, planId: id, productId: id, quantity: number.positive(), plannedDate: date, endDate: date.optional(),
       priority: z.enum(["Low", "Normal", "High", "Urgent"]), status: z.enum(["Unscheduled", "Partially Scheduled", "Fully Scheduled"]),
       startedAt: date.optional(), productionNotes: text.optional(), progressQuantity: number.nonnegative().optional(), progressUom: name.optional(), progressUnitSize: number.positive().optional(), progressDestination: text.optional(),
       completedAt: timestamp.optional(), yieldQuantity: number.nonnegative().optional(), yieldUom: name.optional(),

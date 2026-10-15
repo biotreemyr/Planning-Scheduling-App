@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Maximize2, Minus, X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
+import { bookedMachineIds, machineLabels } from "@/lib/services/machines";
+import { MachinePicker } from "./MachinePicker";
 import { isNonProduction, orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
 import type { FlowWarning, ProductFormat } from "@/lib/services/processRules";
 import { OrderBadge } from "./OrderBadge";
@@ -25,7 +27,7 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, c
   canAssign?: boolean; canUpdate?: boolean; updating?: boolean; notice?: string;
   // The processes this person may see; others in the route show as not theirs rather than not planned.
   visibleCalendarIds?: string[];
-  onAssignMachine?: (lineIds: string[], machineId: string) => string[];
+  onAssignMachine?: (lineIds: string[], machineIds: string[]) => string[];
   // Opens another day of the batch; with update, its production form too.
   onOpenLine?: (id: string, update?: boolean) => void;
   line: PlanLine; product?: Product; onClose: () => void;
@@ -67,12 +69,12 @@ export function MachineConfiguration({ machines, onSave }: { machines: Machine[]
 function ProductionRoute({ line, route, format, warnings, machines, entries, transfers, visibleCalendarIds, factors, editable, canUpdate, updating, update, onAssign, onOpenLine }: {
   line: PlanLine; route: RouteStep[]; format: ProductFormat; warnings: FlowWarning[]; machines: Machine[]; entries: ScheduleEntry[]; transfers: WipTransfer[]; visibleCalendarIds?: string[]; factors: Factors;
   editable: boolean; canUpdate: boolean; updating: boolean; update?: (inRow: boolean, equivalence?: (quantity: number, uom: string) => string) => ReactNode;
-  onAssign?: (lineIds: string[], machineId: string) => string[]; onOpenLine?: (id: string, update?: boolean) => void;
+  onAssign?: (lineIds: string[], machineIds: string[]) => string[]; onOpenLine?: (id: string, update?: boolean) => void;
 }) {
   const [messages, setMessages] = useState<Record<string, string[]>>({});
   const day = (value: string) => formatDate(value.slice(0, 10));
   const amount = (value: number) => value.toLocaleString("en-GB", { maximumFractionDigits: 3 });
-  const machineName = (id?: string) => machines.find((machine) => machine.id === id)?.name ?? "";
+  const machineNames = (ids: string[]) => machineLabels(machines, ids);
   const COLUMNS = 13;
   // Who planned or updated a day shows in a small box right beside the cell pointed at.
   const [tip, setTip] = useState<{ text: string; left: number; top: number } | null>(null);
@@ -101,9 +103,9 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
         if (!step.lines.length) return [<tr key={step.calendar.id} className="route-empty"><td className="route-plan-mark" /><th scope="row">{step.processName}</th><td colSpan={COLUMNS - 2} className="route-muted">{outside ? `Not used for ${format.toLowerCase()}s` : visibleCalendarIds && !visibleCalendarIds.includes(step.calendar.id) ? "Not in your processes" : "Not planned"}</td></tr>];
         const done = step.lines.every((item) => item.completedAt);
         return step.lines.flatMap((item, index) => {
-          const booked = entries.find((entry) => entry.planLineId === item.id && entry.status !== "Cancelled")?.machineId;
-          const options = machines.filter((machine) => machine.processIds?.includes(step.calendar.processId) && (machine.active === "Active" || machine.id === booked));
-          const planned = item.plannedMachineId ?? booked;
+          const booked = bookedMachineIds(entries, item.id);
+          const options = machines.filter((machine) => machine.processIds?.includes(step.calendar.processId) && (machine.active === "Active" || booked.includes(machine.id)));
+          const planned = item.plannedMachineIds ?? (item.plannedMachineId ? [item.plannedMachineId] : booked);
           const reported = item.completedAt ? item.yieldQuantity : undefined, reportedUom = item.yieldUom ?? item.uom;
           // Before the day completes: the amount run so far, saved with progress.
           const soFar = item.completedAt ? undefined : item.progressQuantity, soFarUom = item.progressUom ?? item.uom;
@@ -124,15 +126,15 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
             <td {...plannedWho}>{day(item.plannedDate)}{item.endDate ? ` – ${day(item.endDate)}` : ""}</td>
             <td className="numeric" {...plannedWho}>{amount(item.quantity)} {item.uom ?? ""}</td>
             <td className="route-equivalence" {...plannedWho}>{equivalence(item.quantity, item.uom, factors) || <span className="route-muted">-</span>}</td>
-            <td {...plannedWho}>{editable && onAssign && !item.completedAt ? <select aria-label={`Machine for ${step.processName} on ${day(item.plannedDate)}`} value={booked ?? ""} onChange={(event) => setMessages({ ...messages, [item.id]: onAssign([item.id], event.target.value) })}>
-                <option value="">Not assigned</option>{options.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select>
-              : machineName(planned) || <span className="route-muted">Not assigned</span>}
+            <td {...plannedWho}>{editable && onAssign && !item.completedAt ? <MachinePicker label={`Machines for ${step.processName} on ${day(item.plannedDate)}`} machines={options} value={booked}
+                onChange={(ids) => setMessages({ ...messages, [item.id]: onAssign([item.id], ids) })} />
+              : machineNames(planned) || <span className="route-muted">Not assigned</span>}
               {(messages[item.id] ?? []).map((message) => <small role="alert" key={message}>{message}</small>)}</td>
             {current && updating && update ? update(true, (quantity, uom) => equivalence(quantity, uom, factors)) : <>
               <td {...open()}>{item.completedAt ? day(item.completedAt) : item.startedAt ? <>Started {day(item.startedAt)}</> : <span className="route-muted">-</span>}</td>
               <td {...open("numeric")}>{reported !== undefined ? `${amount(reported)} ${reportedUom ?? ""}` : soFar !== undefined ? <>{amount(soFar)} {soFarUom}<small className="route-so-far">so far</small></> : <span className="route-muted">-</span>}</td>
               <td {...open("route-equivalence")}>{(reported !== undefined ? equivalence(reported, reportedUom, factors) : soFar !== undefined ? equivalence(soFar, soFarUom, factors) : "") || <span className="route-muted">-</span>}</td>
-              <td {...open()}>{item.completedAt || item.startedAt ? machineName(booked) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
+              <td {...open()}>{item.completedAt || item.startedAt ? machineNames(booked) || <span className="route-muted">-</span> : <span className="route-muted">-</span>}</td>
               <td {...open("route-remarks")}>{item.productionNotes || <span className="route-muted">-</span>}</td>
               <td {...open()}>{next || <span className="route-muted">-</span>}</td>
               <td>{canUpdate ? <button type="button" className="calendar-button" onClick={() => onOpenLine?.(item.id, true)}>{item.completedAt ? "Correct" : "Update"}</button> : null}</td>

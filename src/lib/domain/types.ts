@@ -61,6 +61,9 @@ export type Machine = {
   workCentreId: string;
   capacityNotes?: string;
   active: ActiveState;
+  // The Master Data equipment it is (QA's equipment master list). Its code and name are copied from
+  // there when chosen, and shown as Master Data has them now whenever Master Data can be read.
+  masterDataId?: string;
 };
 
 export type Employee = {
@@ -131,7 +134,8 @@ export type PlanLine = {
   notes?: string;
   // Who last changed the plan (date, quantity, machine...) and who last keyed in production, and when.
   plannedBy?: string; plannedAt?: string; updatedBy?: string; updatedAt?: string;
-  // The machine planned, kept when production reported running on another one.
+  // The machines planned, kept when production reported running on others. Older records hold one id.
+  plannedMachineIds?: string[];
   plannedMachineId?: string;
 };
 
