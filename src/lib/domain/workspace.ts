@@ -130,8 +130,9 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
     const order = data.orders.find((item) => item.id === job?.orderId);
     require(!!job && !!order && order.productId === line.productId && line.productionOrderId === order.id, "Activity linked to an invalid job order");
   });
+  // Production orders and R&D, trial and pilot orders are numbered separately, each from 1.
   const numbered = data.orders.filter((order) => order.number !== undefined);
-  require(new Set(numbered.map((order) => order.number)).size === numbered.length, "Duplicate order number");
+  require(new Set(numbered.map((order) => `${order.category ? "trial" : "production"}:${order.number}`)).size === numbered.length, "Duplicate order number");
   require(new Set(data.actuals.map((item) => item.planLineId)).size === data.actuals.length, "Duplicate actual result");
   data.actuals.forEach((actual) => require(data.lines.some((line) => line.id === actual.planLineId && line.calendarId === actual.calendarId) && (!actual.hasDeviation || !!actual.deviation.trim()), "Invalid actual result"));
   require(new Set(data.transfers.map((item) => item.sourceLineId)).size === data.transfers.length, "Duplicate WIP handoff");

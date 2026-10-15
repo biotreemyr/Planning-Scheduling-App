@@ -52,3 +52,12 @@ describe("order numbers", () => {
     expect(nextOrderNumber([], true)).toBe(1);
   });
 });
+
+describe("saving numbered orders", () => {
+  it("accepts production order 1 beside R&D order 1, but not two production orders numbered 1", () => {
+    const state = newWorkspace();
+    const save = (orders: object[]) => () => parseWorkspace({ ...state, products: [product], data: { ...state.data, orders } });
+    expect(save([{ ...order, number: 1 }, { ...order, id: "order-2", poNumber: "RND-1", number: 1, category: "R&D" }])).not.toThrow();
+    expect(save([{ ...order, number: 1 }, { ...order, id: "order-2", poNumber: "PO-2", number: 1 }])).toThrow(/Duplicate order number/);
+  });
+});
