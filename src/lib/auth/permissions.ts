@@ -18,6 +18,8 @@ export const permissions = {
   cancelEntry: "scheduler.schedule.cancel",
   confirmEntry: "scheduler.schedule.approve",
   reports: "scheduler.reports.view",
+  viewAuditTrail: "scheduler.audit_trails.view",
+  printAuditTrail: "scheduler.audit_trails.print",
   manageMasterData: "scheduler.master_data.manage",
   // Per-feature access added in Core migration 0011: view, create, edit and print per feature.
   printPlanning: "scheduler.planning.print",
@@ -36,22 +38,13 @@ export const permissions = {
 // Opening the workspace at all needs at least one of these.
 export const boardPermissions = [permissions.viewPlanning, permissions.viewSchedule, permissions.viewOrders, permissions.viewTesting, permissions.viewRelease] as const;
 
-// Still open to everyone under open access: production updates (the detailed schedule) and reports.
-// Everything else, Planner Board, Orders, QA/QC and Admin, is granted only as ticked in Core, so
-// "view" alone means look only.
-const openKeys = new Set<string>([permissions.viewSchedule, permissions.editEntry, permissions.submitEntry, permissions.reviewEntry, permissions.cancelEntry, permissions.confirmEntry, permissions.reports]);
-const coreOnly = new Set<string>(Object.values(permissions).filter((key) => !openKeys.has(key)));
-
 /**
- * What a signed-in user may do in the scheduler. While SCHEDULER_OPEN_ACCESS is "true", anyone who
- * can open the scheduler from Core may record production and see reports without roles being set
- * up; the Planner Board, Orders, QA/QC and Admin follow Core's ticks. Otherwise every Core
- * permission applies exactly as granted.
+ * What a signed-in user may do in the scheduler: exactly what Core grants, nothing more. There used
+ * to be an open-access switch (SCHEDULER_OPEN_ACCESS) that gave everyone production updates,
+ * approval and reports whatever Core said; it is gone, so "view" in Core means look only.
  */
-export function effectivePermissions(granted: readonly string[], env: Record<string, string | undefined> = process.env) {
-  if (env.SCHEDULER_OPEN_ACCESS !== "true") return [...granted];
-  const everyday = Object.values(permissions).filter((key) => !coreOnly.has(key));
-  return [...new Set<string>([...everyday, ...granted.filter((key) => coreOnly.has(key))])];
+export function effectivePermissions(granted: readonly string[]) {
+  return [...granted];
 }
 
 export type Permission = (typeof permissions)[keyof typeof permissions];

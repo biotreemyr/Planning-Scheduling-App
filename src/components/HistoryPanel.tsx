@@ -13,7 +13,7 @@ const when = (iso: string) => formatDateTime(iso);
  * Every transaction since the scheduler started, newest first: when, who, what kind, the PO, job
  * order and batch it concerns, and what changed. Search by any of them to trace one batch.
  */
-export function HistoryPanel({ refreshKey }: { refreshKey: string }) {
+export function HistoryPanel({ refreshKey, canDownload }: { refreshKey: string; canDownload: boolean }) {
   const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -66,7 +66,7 @@ export function HistoryPanel({ refreshKey }: { refreshKey: string }) {
     <div className="panel-title"><h2>Changes <span className="badge neutral">{rows.length}</span></h2>
       <div className="calendar-navigation">
         <button type="button" className="calendar-button" onClick={() => setLoads((value) => value + 1)}><RotateCw size={15} />Refresh</button>
-        <button type="button" className="calendar-button" disabled={!shown.length} onClick={() => void download()}><FileSpreadsheet size={15} />Download Excel</button>
+        {canDownload ? <button type="button" className="calendar-button" disabled={!shown.length} onClick={() => void download()}><FileSpreadsheet size={15} />Download Excel</button> : null}
       </div>
     </div>
     <p className="orders-help">Every change saved in the scheduler, newest first. Search a PO, job order or batch number to trace it from order to production.</p>

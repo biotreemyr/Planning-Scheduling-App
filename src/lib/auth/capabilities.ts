@@ -5,6 +5,7 @@ import { permissions } from "./permissions";
 export type WorkspaceCapabilities = {
   manage: boolean; createPlan: boolean; editPlan: boolean; produce: boolean;
   approve: boolean; cancel: boolean; reports: boolean;
+  auditTrail: boolean; printAuditTrail: boolean;
   printPlan: boolean;
   viewOrders: boolean; createOrders: boolean; editOrders: boolean; printOrders: boolean;
   viewTesting: boolean; passTesting: boolean; printTesting: boolean;
@@ -21,6 +22,8 @@ export function capabilitiesFromPermissions(granted: readonly string[]): Workspa
     approve: has(permissions.confirmEntry),
     cancel: has(permissions.cancelEntry),
     reports: has(permissions.reports),
+    auditTrail: has(permissions.viewAuditTrail),
+    printAuditTrail: has(permissions.printAuditTrail),
     printPlan: has(permissions.printPlanning),
     viewOrders: has(permissions.viewOrders), createOrders: has(permissions.createOrders), editOrders: has(permissions.editOrders), printOrders: has(permissions.printOrders),
     viewTesting: has(permissions.viewTesting), passTesting: has(permissions.passTesting), printTesting: has(permissions.printTesting),
@@ -33,6 +36,7 @@ export function capabilitiesForDemoRole(role: "admin" | "planner" | "production"
   return {
     manage: role === "admin", createPlan: role !== "production", editPlan: role !== "production", produce: role === "production",
     approve: true, cancel: true, reports: true, printPlan: true,
+    auditTrail: true, printAuditTrail: true,
     // Planners own orders; production tests and releases finished batches; everyone may look.
     viewOrders: true, createOrders: role !== "production", editOrders: role !== "production", printOrders: true,
     viewTesting: true, passTesting: role !== "planner", printTesting: true,

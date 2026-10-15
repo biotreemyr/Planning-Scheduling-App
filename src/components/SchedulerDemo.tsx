@@ -88,6 +88,7 @@ function AppHeader({
   onTabChange,
   conflictCount,
   showReports,
+  showAudit,
   showAdmin,
   showOrders,
   showStatus,
@@ -100,6 +101,8 @@ function AppHeader({
   onTabChange: (tab: Tab) => void;
   conflictCount: number;
   showReports: boolean;
+  // The Audit trail only with Core's "View audit trails".
+  showAudit: boolean;
   // Signed-in Core users see Admin only with Core's "Manage scheduler master data".
   showAdmin: boolean;
   // Orders with Core's "View orders"; Status with "View testing" or "View release".
@@ -116,7 +119,7 @@ function AppHeader({
         <p>Production workspace</p>
       </div>
       <nav className="tab-list" aria-label="Scheduler sections">
-        {tabs.filter((tab) => (showReports || tab.id !== "reports") && (showAdmin || tab.id !== "master") && (showOrders || (tab.id !== "orders" && tab.id !== "trials")) && (showStatus || tab.id !== "status")).map((tab) => {
+        {tabs.filter((tab) => (showReports || tab.id !== "reports") && (showAudit || tab.id !== "audit") && (showAdmin || tab.id !== "master") && (showOrders || (tab.id !== "orders" && tab.id !== "trials")) && (showStatus || tab.id !== "status")).map((tab) => {
           const Icon = tab.icon;
           return <Fragment key={tab.id}>
             <button
@@ -1184,7 +1187,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     </ToolbarMenu>
   </div>;
   return <main className="workstation">
-    <AppHeader version={releases[0]?.version} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
+    <AppHeader version={releases[0]?.version} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAudit={caps.auditTrail} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
       statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }] : [])]}
       statusSection={statusSection} onStatusSection={setStatusSection} />
     <div className="workstation-content">
@@ -1227,7 +1230,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
         section={statusSection} onSection={setStatusSection} onTest={testJob} onRelease={releaseJob} onReject={rejectJob} /> : null}
       {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
       {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} flow={flow} /> : null}
-      {activeTab === "audit" ? <HistoryPanel refreshKey={activeTab} /> : null}
+      {activeTab === "audit" && caps.auditTrail ? <HistoryPanel refreshKey={activeTab} canDownload={caps.printAuditTrail} /> : null}
       {activeTab === "news" ? <ReleaseNotes releases={releases} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
         {filterControls}

@@ -28,7 +28,11 @@ describe("workspace for a signed-in Core user", () => {
   it("shows Admin only with Core's master data permission, and the audit trail after Reports", () => {
     const without = render(["planning.view", "planning.create", "reports.view"]);
     expect(without).not.toMatch(/<span>Admin<\/span>/);
-    const withAdmin = render(["planning.view", "reports.view", "master_data.manage"]);
+    const withAdmin = render(["planning.view", "reports.view", "master_data.manage", "audit_trails.view"]);
     expect(withAdmin).toMatch(/<span>Admin<\/span>[\s\S]*<span>Reports<\/span>[\s\S]*<span>Audit trail<\/span>/);
+  });
+  it("shows the Audit trail only with Core's View audit trails", () => {
+    expect(render(["planning.view", "schedule.view"])).not.toMatch(/<span>Audit trail<\/span>/);
+    expect(render(["planning.view", "audit_trails.view"])).toMatch(/<span>Audit trail<\/span>/);
   });
 });
