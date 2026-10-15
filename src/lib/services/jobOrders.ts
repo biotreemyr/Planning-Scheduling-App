@@ -68,9 +68,12 @@ export function validateBatchNumber(value: string, job: JobOrder, jobs: JobOrder
   return "";
 }
 
-// The job orders' total in the PO item's own unit may not pass the ordered quantity.
+// The job orders' total in the PO item's own unit may not pass the ordered quantity. A shared batch
+// counts only each PO's share: the first PO keeps what the other POs' shares leave.
 function overOrdered(order: PurchaseOrder, jobs: JobOrder[]) {
-  const total = Number(jobs.filter((job) => job.orderId === order.id && job.uom === order.uom).reduce((sum, job) => sum + job.quantity, 0).toPrecision(12));
+  const shareOf = (job: JobOrder) => job.orderId === order.id ? job.quantity - (job.shares ?? []).reduce((sum, share) => sum + share.quantity, 0)
+    : (job.shares ?? []).filter((share) => share.orderId === order.id).reduce((sum, share) => sum + share.quantity, 0);
+  const total = Number(jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + shareOf(job), 0).toPrecision(12));
   return total > order.quantity ? `Job orders for ${order.poNumber} would add up to ${total.toLocaleString()} ${order.uom}, more than the ${order.quantity.toLocaleString()} ordered.` : "";
 }
 

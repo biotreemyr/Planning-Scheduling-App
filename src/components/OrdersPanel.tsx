@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, P
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
+import { MAX_POS_PER_JOB, formulaPending, jobForOrder, jobParts, jobsServing, partFor, type JobShare } from "@/lib/services/sharedJobs";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, isNonProduction, nextRndCode, ORDER_CATEGORIES, type OrderCategory, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
@@ -366,7 +367,7 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
                 <td><button type="button" className="icon-button order-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} ${row.order.poNumber} details`} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : row.order.id); }}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button></td>
                 {shown.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(row)}</td>)}
               </tr>
-              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail printable={printable} orders={orders} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} product={row.product} onPrint={() => setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 }))} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
+              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail printable={printable} orders={orders} products={products} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} product={row.product} onPrint={() => setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 }))} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
             </Fragment>;
           })}
         </tbody>
@@ -441,13 +442,15 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
 // every process makes. Planning them happens on the Planner Board.
 const FILL_UOMS = ["blisters", "bottles", "sachets"];
 const COUNT_UOMS = ["tablets", "capsules"];
-function JobOrders({ orders, order, product, format, jobOrders, transfers, lines, actions, directory }: { directory: CalendarDirectory; orders: PurchaseOrder[]; order: PurchaseOrder; product?: Product; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
+function JobOrders({ orders, order, product, products, format, jobOrders, transfers, lines, actions, directory }: { directory: CalendarDirectory; orders: PurchaseOrder[]; order: PurchaseOrder; product?: Product; products: Product[]; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [addVersion, setAddVersion] = useState(0);
-  const jobs = jobsFor(order.id, jobOrders);
-  const released = jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + job.quantity, 0);
+  // This PO item's own job orders first, then batches other PO items share with it.
+  const jobs = [...jobsFor(order.id, jobOrders), ...jobsServing(order.id, jobOrders).filter((job) => job.orderId !== order.id)];
+  const [shareDrafts, setShareDrafts] = useState<ShareDraft[]>([]);
+  const released = jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + (partFor(job, order.id)?.quantity ?? 0), 0);
   const remaining = Math.max(0, Number((order.quantity - released).toPrecision(12)));
   const allowable = product?.batchQuantity;
   const report = (result: string[], success: string) => { setErrors(result); setNotice(result.length ? "" : success); return !result.length; };
@@ -470,7 +473,7 @@ function JobOrders({ orders, order, product, format, jobOrders, transfers, lines
   // blister/bottle from the product's last job order: what the figures are worked out from.
   const factors = { unitWeightMg: order.unitWeightMg ?? lastOrderWeights(order.productId, orders).unitWeightMg, unitsPerBox: orderWeightKind(order.uom) === "pack" ? order.unitsPerPack ?? lastOrderWeights(order.productId, orders).unitsPerPack : undefined, packSize: lastPackSize(order.productId, orders, jobOrders) };
   const countUom = isCounted(order.uom) ? order.uom : format === "Capsule" ? "capsules" : format === "Tablet" ? "tablets" : format === "Sachet" ? "sachets" : order.uom;
-  const fields = (job?: JobOrder) => <JobOrderFields job={job} order={order} format={format} countSteps={countSteps} factors={factors} countUom={countUom}
+  const fields = (job?: JobOrder, reserved = 0) => <JobOrderFields job={job} order={order} format={format} countSteps={countSteps} factors={factors} countUom={countUom} reserved={reserved}
     defaultQuantity={remaining && countUom === order.uom ? Math.min(remaining, allowable ?? remaining) : undefined} productKg={product?.batchSizeKg} options={options} />;
   const sum = (totals: { quantity: number; uom: string }[]) => totals.length ? totals.map((total) => <span key={total.uom} className="job-total">{total.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {total.uom}</span>) : <span className="route-muted">-</span>;
   const measure = (value?: { quantity: number; uom: string }) => value ? `${value.quantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} ${value.uom}` : <span className="route-muted">Not keyed in</span>;
@@ -489,28 +492,39 @@ function JobOrders({ orders, order, product, format, jobOrders, transfers, lines
             // The batch number is keyed in on the Planner Board; editing here keeps it.
             const read = readJob(data);
             const { batchSizeKg: _k, batchVolumeL: _l, packQuantity: _pq, packUom: _pu, packSize: _ps, boxQuantity: _b, packingNumber: _pn, ...rest } = job;
-            const next: JobOrder = { ...rest, number: read.number, quantity: read.quantity, uom: read.uom,
+            const { shares: _s, ...unshared } = rest;
+            const shares = readShares(shareDrafts);
+            const next: JobOrder = { ...unshared, ...(shares.length ? { shares } : {}), number: read.number, quantity: read.quantity, uom: read.uom,
               ...(read.batchSizeKg ? { batchSizeKg: read.batchSizeKg } : {}), ...(read.batchVolumeL ? { batchVolumeL: read.batchVolumeL } : {}), ...(read.packQuantity ? { packQuantity: read.packQuantity } : {}),
               ...(read.packUom ? { packUom: read.packUom } : {}), ...(read.packSize ? { packSize: read.packSize } : {}), ...(read.boxQuantity ? { boxQuantity: read.boxQuantity } : {}), ...(read.packingNumber ? { packingNumber: read.packingNumber } : {}) };
             if (report(actions.onUpdate(next), `${next.number.trim()} saved.${planned.some((line) => !line.completedAt) ? " Its planned activities now carry the new quantities." : ""}`)) setEditing(null);
           }}>
-            {fields(job)}
+            {fields(job, shareDrafts.reduce((sum, draft) => sum + (Number(draft.quantity) || 0), 0))}
+            <JobSharesEditor job={job} order={order} format={format} orders={orders} products={products} drafts={shareDrafts} onChange={setShareDrafts} />
             <div className="job-order-buttons"><button type="submit" className="primary-button">Save</button>
               <button type="button" className="calendar-button" onClick={() => { setEditing(null); setErrors([]); }}>Cancel</button></div>
             {planned.length ? <small className="route-muted">Saving also updates its {planned.length} planned activit{planned.length === 1 ? "y" : "ies"} (completed ones stay as they are).</small> : null}
           </form>
         </td></tr>;
+        // A batch shared with other POs shows this PO's share and packing; it is edited on its first PO.
+        const own = job.orderId === order.id;
+        const view = jobForOrder(job, order.id);
+        const others = jobParts(job).filter((part) => part.orderId !== order.id).map((part) => orders.find((item) => item.id === part.orderId)?.poNumber ?? "another PO");
         return <tr key={job.id}>
-          <th scope="row"><strong>{job.number}</strong><small>Batch {job.sequence} of PO item</small><Who verb="Added" who={job.createdBy} at={job.createdAt} /><Who verb="Edited" who={job.updatedBy} at={job.updatedAt} /></th>
+          <th scope="row"><strong>{job.number}</strong><small>{own ? `Batch ${job.sequence} of PO item` : `Shared batch of ${orders.find((item) => item.id === job.orderId)?.poNumber ?? "another PO"}`}</small>
+            {others.length ? <span className="badge info job-shared-tag" title={`Made once for ${[order.poNumber, ...others].join(", ")}`}>Shared with {others.join(", ")}</span> : null}
+            {formulaPending(job, orders) ? <span className="badge warning">Awaiting QA formula confirmation</span> : null}
+            <Who verb="Added" who={job.createdBy} at={job.createdAt} /><Who verb="Edited" who={job.updatedBy} at={job.updatedAt} /></th>
           <td className="numeric">{measure(processQuantity(job, "dispensing"))}</td>
-          <td className="numeric">{measure(processQuantity(job, "tableting"))}</td>
-          <td>{packingNumber(job)}</td>
-          <td className="numeric">{measure(processQuantity(job, "filling"))}</td>
-          <td className="numeric">{measure(processQuantity(job, "packing"))}</td>
+          <td className="numeric">{measure(processQuantity(job, "tableting"))}{others.length ? <small>this PO {(partFor(job, order.id)?.quantity ?? 0).toLocaleString("en-MY", { maximumFractionDigits: 3 })} {job.uom}</small> : null}</td>
+          <td>{packingNumber(view)}</td>
+          <td className="numeric">{measure(processQuantity(view, "filling"))}</td>
+          <td className="numeric">{measure(processQuantity(view, "packing"))}</td>
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
           <td><span className="job-actions">
-            {actions.canEdit ? <button type="button" className="icon-button" title={`Edit ${job.number}`} aria-label={`Edit ${job.number}`} onClick={() => { setEditing(job.id); setErrors([]); setNotice(""); }}><Pencil size={15} /></button> : null}
-            {!planned.length && actions.canEdit ? <button type="button" className="icon-button danger" title={`Remove ${job.number}`} aria-label={`Remove ${job.number}`} onClick={() => report(actions.onDelete(job.id), `${job.number} removed.`)}><Trash2 size={15} /></button> : null}
+            {actions.canEdit && own ? <button type="button" className="icon-button" title={`Edit ${job.number}`} aria-label={`Edit ${job.number}`} onClick={() => { setEditing(job.id); setShareDrafts((job.shares ?? []).map(shareDraft)); setErrors([]); setNotice(""); }}><Pencil size={15} /></button> : null}
+            {!own ? <small className="route-muted">Edit on {orders.find((item) => item.id === job.orderId)?.poNumber ?? "its first PO"}</small> : null}
+            {!planned.length && actions.canEdit && own ? <button type="button" className="icon-button danger" title={`Remove ${job.number}`} aria-label={`Remove ${job.number}`} onClick={() => report(actions.onDelete(job.id), `${job.number} removed.`)}><Trash2 size={15} /></button> : null}
           </span></td>
         </tr>;
       })}</tbody>
@@ -538,6 +552,60 @@ function JobOrders({ orders, order, product, format, jobOrders, transfers, lines
   </section>;
 }
 
+// A shared batch's other POs, as keyed in: each PO's share of the batch and its own packing.
+type ShareDraft = { key: string; orderId: string; quantity: string; packSize: string; packQuantity: string; packUom: string; boxQuantity: string; packingNumber: string };
+const shareDraft = (share?: JobShare): ShareDraft => ({ key: crypto.randomUUID(), orderId: share?.orderId ?? "", quantity: shown(share?.quantity), packSize: shown(share?.packSize),
+  packQuantity: shown(share?.packQuantity), packUom: share?.packUom ?? "bottles", boxQuantity: shown(share?.boxQuantity), packingNumber: share?.packingNumber ?? "" });
+function readShares(drafts: ShareDraft[]): JobShare[] {
+  return drafts.filter((draft) => draft.orderId).map((draft) => {
+    const quantity = Number(draft.quantity), packSize = asNumber(draft.packSize);
+    const packQuantity = asNumber(draft.packQuantity) ?? fullPacks(quantity > 0 ? quantity : undefined, packSize);
+    return { orderId: draft.orderId, quantity, ...(packSize ? { packSize } : {}), ...(packQuantity ? { packQuantity, packUom: draft.packUom } : {}),
+      ...(asNumber(draft.boxQuantity) ? { boxQuantity: asNumber(draft.boxQuantity) } : {}), ...(draft.packingNumber.trim() ? { packingNumber: draft.packingNumber.trim() } : {}) };
+  });
+}
+
+/**
+ * The other POs one batch is made for (up to 5 POs in all): each PO's share of the batch and its own
+ * packing (pack size and type, packs, boxes, packing job order). Only PO items of the same dosage
+ * form are offered; a different FG code needs QA to confirm the formula is the same.
+ */
+function JobSharesEditor({ job, order, format, orders, products, drafts, onChange }: {
+  job: JobOrder; order: PurchaseOrder; format: ProductFormat; orders: PurchaseOrder[]; products: Product[]; drafts: ShareDraft[]; onChange: (drafts: ShareDraft[]) => void;
+}) {
+  const productOf = (item: PurchaseOrder) => products.find((product) => product.id === item.productId);
+  const formatOf = (item: PurchaseOrder) => item.format ?? inferFormat(productOf(item));
+  const choices = orders.filter((item) => item.id !== order.id && !item.closedAt && formatOf(item) === format && isNonProduction(item) === isNonProduction(order));
+  const update = (key: string, change: Partial<ShareDraft>) => onChange(drafts.map((draft) => draft.key === key ? { ...draft, ...change } : draft));
+  const firstShare = Number((job.quantity - drafts.reduce((sum, draft) => sum + (Number(draft.quantity) || 0), 0)).toPrecision(12));
+  const differs = drafts.some((draft) => { const item = orders.find((entry) => entry.id === draft.orderId); return item && item.productId !== order.productId; });
+  return <fieldset className="job-shares">
+    <legend>Other POs made from this batch <span className="badge neutral">{drafts.length + 1} of {MAX_POS_PER_JOB} POs</span></legend>
+    <p className="route-muted">Dispensing to coating are done once for the batch; filling and packing are done for each PO with its own packing. {order.poNumber} keeps the rest of the batch: <strong>{firstShare.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {job.uom}</strong>.</p>
+    {drafts.map((draft, index) => {
+      const chosen = orders.find((item) => item.id === draft.orderId);
+      const packAuto = !draft.packQuantity.trim() ? fullPacks(Number(draft.quantity) > 0 ? Number(draft.quantity) : undefined, asNumber(draft.packSize)) : undefined;
+      return <div className="job-share" key={draft.key} role="group" aria-label={`Shared PO ${index + 2}`}>
+        <label className="job-share-po">PO item<select value={draft.orderId} onChange={(event) => update(draft.key, { orderId: event.target.value })}>
+          <option value="">Choose a PO item</option>
+          {choices.filter((item) => item.id === draft.orderId || !drafts.some((other) => other.orderId === item.id)).map((item) =>
+            <option key={item.id} value={item.id}>{poLabel(item, orders)} · {productOf(item)?.sku ?? ""} {productOf(item)?.name ?? ""} · {item.customerName ?? ""}</option>)}
+        </select>{chosen && chosen.productId !== order.productId ? <small className="order-warning">Different FG code: QA must confirm it is the same formula before planning</small> : null}</label>
+        <label>Share of batch ({job.uom})<input type="number" min="0" step="any" required value={draft.quantity} onChange={(event) => update(draft.key, { quantity: event.target.value })} /></label>
+        <label>{job.uom} per pack<input type="number" min="0" step="any" value={draft.packSize} placeholder="e.g. 30" onChange={(event) => update(draft.key, { packSize: event.target.value })} /></label>
+        <label>Packs<span className="job-share-pair"><input type="number" min="0" step="any" value={draft.packQuantity} placeholder={packAuto ? String(packAuto) : ""} onChange={(event) => update(draft.key, { packQuantity: event.target.value })} />
+          <select aria-label="Pack type" value={draft.packUom} onChange={(event) => update(draft.key, { packUom: event.target.value })}>{FILL_UOMS.map((name) => <option key={name}>{name}</option>)}</select></span></label>
+        <label>Boxes<input type="number" min="0" step="any" value={draft.boxQuantity} onChange={(event) => update(draft.key, { boxQuantity: event.target.value })} /></label>
+        <label>Packing JO no.<input maxLength={60} value={draft.packingNumber} placeholder={`${packingNumber(job)}-${index + 2}`} onChange={(event) => update(draft.key, { packingNumber: event.target.value })} /></label>
+        <button type="button" className="icon-button danger" title="Take this PO off the batch" aria-label={`Remove shared PO ${index + 2}`} onClick={() => onChange(drafts.filter((other) => other.key !== draft.key))}><Trash2 size={15} /></button>
+      </div>;
+    })}
+    {drafts.length + 1 < MAX_POS_PER_JOB ? <button type="button" className="calendar-button" disabled={!choices.length} onClick={() => onChange([...drafts, shareDraft()])}><Plus size={16} />Add another PO to this batch</button> : null}
+    {!choices.length ? <small className="route-muted">No other open {format.toLowerCase()} PO items to share this batch with.</small> : null}
+    {differs ? <p className="route-muted">POs with different FG codes share this batch: QA confirms they are the same formula under QA/QC before it can be planned.</p> : null}
+  </fieldset>;
+}
+
 type Factors = { unitWeightMg?: number; unitsPerBox?: number; packSize?: number };
 type FigureKey = "quantity" | "packQuantity" | "boxQuantity";
 const asNumber = (value: string) => value.trim() && Number(value) > 0 ? Number(value) : undefined;
@@ -548,8 +616,9 @@ const shown = (value: number | undefined) => value === undefined ? "" : String(v
  * from the unit weight, and the batch quantity gives the pack quantity (units per blister/bottle) and
  * the boxes (units per box). A figure typed over stays as typed; clearing it works it out again.
  */
-function JobOrderFields({ job, order, format, countSteps, factors, countUom, defaultQuantity, productKg, options }: {
-  job?: JobOrder; order: PurchaseOrder; format: ProductFormat; countSteps: string; factors: Factors; countUom: string;
+function JobOrderFields({ job, order, format, countSteps, factors, countUom, defaultQuantity, productKg, options, reserved = 0 }: {
+  // reserved: the batch other POs take (a shared batch); this PO's packs come from the rest.
+  job?: JobOrder; order: PurchaseOrder; format: ProductFormat; countSteps: string; factors: Factors; countUom: string; reserved?: number;
   defaultQuantity?: number; productKg?: number; options: (list: string[], current?: string) => string[];
 }) {
   const [values, setValues] = useState({
@@ -566,13 +635,13 @@ function JobOrderFields({ job, order, format, countSteps, factors, countUom, def
   // A figure is worked out while it is blank or still what working it out gives; a new job order starts so.
   const [auto, setAuto] = useState<Record<FigureKey, boolean>>(() => {
     if (!job) return { quantity: true, packQuantity: true, boxQuantity: true };
-    const units = isCounted(job.uom) ? job.quantity : undefined;
+    const units = isCounted(job.uom) ? job.quantity - (job.shares ?? []).reduce((sum, share) => sum + share.quantity, 0) : undefined;
     return { quantity: job.batchSizeKg !== undefined && batchUnits(job.batchSizeKg, factors.unitWeightMg) === job.quantity,
       packQuantity: !job.packQuantity || fullPacks(units, job.packSize) === job.packQuantity, boxQuantity: !job.boxQuantity || fullPacks(units, factors.unitsPerBox) === job.boxQuantity };
   });
   const worked = derive(values);
   const quantity = auto.quantity && worked.quantity !== undefined ? String(worked.quantity) : values.quantity;
-  const units = isCounted(values.uom) ? asNumber(quantity) : undefined;
+  const units = isCounted(values.uom) && asNumber(quantity) ? Math.max(0, asNumber(quantity)! - reserved) || undefined : undefined;
   const packAuto = fullPacks(units, asNumber(values.packSize)), boxAuto = fullPacks(units, factors.unitsPerBox);
   const packQuantity = auto.packQuantity && packAuto !== undefined ? String(packAuto) : values.packQuantity;
   const boxQuantity = auto.boxQuantity && boxAuto !== undefined ? String(boxAuto) : values.boxQuantity;
@@ -669,8 +738,8 @@ function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: Purc
   </table></div>;
 }
 
-function OrderDetail({ printable, orders, order, product, jobOrders, transfers, jobActions, format, warnings, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete, onPrint }: {
-  orders: PurchaseOrder[];
+function OrderDetail({ printable, orders, products, order, product, jobOrders, transfers, jobActions, format, warnings, rows, lines, directory, visibleCalendarIds, linked, editable, customers, onSave, onDelete, onPrint }: {
+  orders: PurchaseOrder[]; products: Product[];
   product?: Product; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions;
   format: ProductFormat; warnings: FlowWarning[];
   onPrint: () => void;
@@ -697,7 +766,7 @@ function OrderDetail({ printable, orders, order, product, jobOrders, transfers, 
       <summary className="order-section-summary"><h3>Progress</h3><span className="route-muted">Planning · Production · QC testing · QA release</span></summary>
       <OrderFlow order={order} jobOrders={jobOrders} lines={lines} transfers={transfers} matrix={matrix} />
     </details>
-    {jobActions ? <JobOrders directory={directory} orders={orders} order={order} product={product} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
+    {jobActions ? <JobOrders directory={directory} orders={orders} order={order} product={product} products={products} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
     {editable ? <form className="order-edit" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);

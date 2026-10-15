@@ -43,6 +43,7 @@ import type {
 import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
+import { jobForOrder, sharesProblem } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
@@ -1050,15 +1051,25 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     if (!current) return ["This job order no longer exists."];
     const result = updateJobOrder(next, data.jobOrders, data.orders, products, orderRoute);
     if ("error" in result) return [result.error];
+    const shareIssue = sharesProblem(result, data.orders, data.jobOrders, (order) => order.format ?? inferFormat(products.find((item) => item.id === order.productId)));
+    if (shareIssue) return [shareIssue];
+    // A PO taken off a shared batch must not keep filling or packing planned for it.
+    const dropped = (current.shares ?? []).filter((share) => !result.shares?.some((item) => item.orderId === share.orderId));
+    const stranded = dropped.find((share) => data.lines.some((line) => line.jobOrderId === current.id && line.productionOrderId === share.orderId));
+    if (stranded) return [`${data.orders.find((order) => order.id === stranded.orderId)?.poNumber ?? "That PO"} has filling or packing planned from this batch. Remove those activities on the Planner Board first.`];
+    // POs with different FG codes need QA's confirmation again whenever the POs sharing the batch change.
+    const sameShares = JSON.stringify((current.shares ?? []).map((share) => share.orderId).sort()) === JSON.stringify((result.shares ?? []).map((share) => share.orderId).sort());
+    const checked: JobOrder = sameShares ? result : (({ formulaConfirmedBy: _b, formulaConfirmedAt: _a, ...rest }) => rest)(result);
     const batchChanged = (result.batchNumber ?? "") !== (current.batchNumber ?? "");
-    const saved: JobOrder = batchChanged && result.batchNumber ? { ...result, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
-      : batchChanged ? (({ batchNumberBy: _by, batchNumberAt: _at, ...rest }) => rest)(result) : result;
+    const saved: JobOrder = batchChanged && checked.batchNumber ? { ...checked, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
+      : batchChanged ? (({ batchNumberBy: _by, batchNumberAt: _at, ...rest }) => rest)(checked) : checked;
     // Open activities follow the job order's quantities, when their process runs on one day; a process
     // split over several days is left for planning to share out (the tally warning shows it).
     const jobLines = linesForJob(saved.id, data.lines);
     const synced = new Map(jobLines.flatMap((line) => {
-      const expected = processQuantity(saved, calendarSettings(directory, line.calendarId).planned);
-      if (!expected || line.completedAt || jobLines.filter((other) => other.calendarId === line.calendarId).length !== 1) return [];
+      // A shared batch's filling and packing plan with their own PO's pack figures.
+      const expected = processQuantity(jobForOrder(saved, line.productionOrderId ?? saved.orderId), calendarSettings(directory, line.calendarId).planned);
+      if (!expected || line.completedAt || jobLines.filter((other) => other.calendarId === line.calendarId && other.productionOrderId === line.productionOrderId).length !== 1) return [];
       return [[line.id, { quantity: expected.quantity, uom: expected.uom, batchSizeKg: expected.uom === "kg" ? expected.quantity : batchKilograms(expected.quantity, expected.uom) }] as const];
     }));
     setData((state) => ({ ...state, jobOrders: state.jobOrders.map((job) => job.id === saved.id ? saved : job),
