@@ -8,6 +8,11 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-15
+
+### Fixed
+- **R&D, Trial & Pilot orders** can be saved when their number matches a production order's number. Each kind counts from 1, but saving the first R&D order beside production order 1 was refused.
+
 ### Security
 - **Access** now follows exactly what is ticked in Bio Tree Core. Until now everyone who could open the scheduler could also edit, submit, review, cancel and approve the detailed schedule, and see Reports, whatever Core said. People keep only what Core grants them.
 - **Audit trail** is shown only to people with "View audit trails" in Core, and its Download Excel only with "Print audit trails".
