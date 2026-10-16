@@ -61,7 +61,8 @@ function kindOf(directory: CalendarDirectory, calendarId: string, uom: string): 
 export function batchYield(job: JobOrder, orderId: string, lines: PlanLine[], orders: PurchaseOrder[], directory: CalendarDirectory, limits?: YieldLimits): BatchYield {
   const order = orders.find((item) => item.id === orderId);
   const view = jobForOrder(job, orderId);
-  const own = lines.filter((line) => line.jobOrderId === job.id && line.calendarId && (!isShared(job) || line.productionOrderId === orderId
+  // Each activity once: the Orders tab repeats a shared batch's common activities under every PO.
+  const own = [...new Map(lines.map((line) => [line.id, line])).values()].filter((line) => line.jobOrderId === job.id && line.calendarId && (!isShared(job) || line.productionOrderId === orderId
     || (line.productionOrderId === job.orderId && !isPerOrderLine(line, directory))));
   const unitWeight = order?.unitWeightMg && order.unitWeightMg > 0 ? order.unitWeightMg : undefined;
   // Sachets filled one per pack need no pack size.
@@ -139,4 +140,24 @@ export function stepYieldWith(job: JobOrder, orderId: string, lines: PlanLine[],
   const changed = lines.map((line) => line.id === lineId ? { ...line, completedAt: line.completedAt ?? new Date().toISOString(), yieldQuantity: actual } : line);
   const line = changed.find((item) => item.id === lineId);
   return batchYield(job, orderId, changed, orders, directory, limits).stages.find((stage) => stage.calendarId === line?.calendarId);
+}
+
+/**
+ * For the planner: batches whose yield can't be worked out because a conversion figure is missing
+ * (unit weight, units per pack, units per box). Checked on the planned quantities, so it shows as soon
+ * as the batch is planned, before production records anything.
+ */
+export function yieldWarnings(jobs: JobOrder[], lines: PlanLine[], orders: PurchaseOrder[], directory: CalendarDirectory) {
+  return jobs.flatMap((job) => {
+    const planned = lines.filter((line) => line.jobOrderId === job.id);
+    if (!planned.length) return [];
+    // As if every activity made exactly what was planned: only the conversions are being checked.
+    const asPlanned = planned.map((line) => ({ ...line, completedAt: line.completedAt ?? "planned", yieldQuantity: line.yieldQuantity ?? line.quantity }));
+    return jobParts(job).flatMap((part) => {
+      const missing = batchYield(job, part.orderId, asPlanned, orders, directory).missing;
+      if (!missing.length) return [];
+      const ids = planned.filter((line) => line.productionOrderId === part.orderId || !isShared(job)).map((line) => line.id);
+      return [{ kind: "yield" as const, lineIds: ids, orderId: part.orderId, batch: job.number, message: `Yield for ${job.number} can't be worked out: ${missing.join("; ")}.` }];
+    });
+  });
 }

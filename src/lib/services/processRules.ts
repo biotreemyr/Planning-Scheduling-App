@@ -61,7 +61,7 @@ export function inferFormat(product?: Pick<Product, "name" | "uom"> & { sku?: st
   return "Other";
 }
 
-export type FlowWarning = { kind: "route" | "missing" | "sequence" | "booking" | "tally"; lineIds: string[]; orderId?: string; batch?: string; message: string };
+export type FlowWarning = { kind: "route" | "missing" | "sequence" | "booking" | "tally" | "yield"; lineIds: string[]; orderId?: string; batch?: string; message: string };
 
 const pretty = (date: string) => formatDate(date.slice(0, 10));
 function bookingDate(value: string) {

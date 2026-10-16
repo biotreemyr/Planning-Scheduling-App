@@ -1,4 +1,5 @@
 "use client";
+import { formatYield, limitText, type StageYield } from "@/lib/services/yields";
 import { machineLabels } from "@/lib/services/machines";
 import { MachinePicker } from "./MachinePicker";
 import { useState, type ReactNode } from "react";
@@ -22,7 +23,9 @@ const localDay = (value: string) => { const date = new Date(value); return `${da
  * actual quantity, notes on any issue, and where the output goes: the next process of the job's
  * route, the WIP room (held for that process), or nowhere when it is the final output.
  */
-export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineIds = [], inRow = false, onCancel, equivalence }: {
+export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineIds = [], inRow = false, onCancel, equivalence, previewYield }: {
+  // The step yield this actual would give, against QA's limits; outside them a deviation note is needed.
+  previewYield?: (quantity: number, uom: string) => StageYield | undefined;
   line: PlanLine; uom: string; directory: CalendarDirectory; editable: boolean;
   // Keyed in on the activity's own row of the route table: renders that row's Actual cells and buttons.
   inRow?: boolean; onCancel?: () => void;
@@ -114,6 +117,14 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     : <span className="route-muted">Actual quantity is worked out from the {sizeUom === "mL" ? "volume" : "weight"}; change it if needed.</span>}</p> : null;
   // Not a <label>: a label around the picker would tick its first machine when its title is clicked.
   const machineField = <div className="picker-field"><span>Machine</span><MachinePicker label="Machines" machines={machines} defaultValue={machineIds} name="machine" form={formId} /></div>;
+  // The step yield the typed actual gives, shown as it is keyed in; outside QA's limits it needs a deviation note.
+  const previewQuantity = weighing ? (actualShown.trim() ? Number(actualShown) : undefined) : quantityText.trim() ? Number(quantityText) : undefined;
+  const preview = previewQuantity !== undefined && Number.isFinite(previewQuantity) ? previewYield?.(previewQuantity, weighing ? countUom ?? uom : chosenUom) : undefined;
+  const yieldField = preview?.percent !== undefined ? <div className="production-yield">
+    <span className={`yield-chip yield-${preview.tone}`} title={preview.working}>Step yield {formatYield(preview.percent)}{preview.tone === "out" ? " · outside QA limits" : ""}</span>
+    {preview.limit ? <small className="route-muted">QA limits {limitText(preview.limit)}</small> : null}
+    {preview.tone === "out" ? <label className="production-deviation">Deviation note<textarea form={formId} name="deviation" required maxLength={500} placeholder="What happened and what was done, e.g. powder loss at the hopper; QA informed" /></label> : null}
+  </div> : null;
   const notesField = <label className="production-notes">{inRow ? "Remarks" : "Notes"}<textarea form={formId} name="notes" defaultValue={line.productionNotes ?? ""} placeholder="Anything that happened during production: issues, stoppages, deviations" /></label>;
   const destination = <label className="production-destination">{inRow ? "Send to" : "After completion, send to"}<select form={formId} name="destination" defaultValue={destinationValue} disabled={handedOver}>
     {wipFor ? <option value={`wip:${wipFor}`}>WIP room</option> : null}
@@ -146,7 +157,8 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       if ((typed || correcting) && weighing && !(Number(unitMg) > 0)) { setErrors([`Enter the ${unitLabel.toLowerCase()} in ${sizeUom} to convert ${reported} to ${countUom}.`]); return; }
       const weighed = typed && weighing ? { quantity: Number(typed), uom: reported, unitWeightMg: Number(unitMg) } : undefined;
       const quantityText = weighed ? actualShown.trim() : typed;
-      const output = { quantity: Number(quantityText), uom: weighed ? countUom! : reported, ...(weighed ? { weighed } : {}), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineIds: machine };
+      const deviation = String(data.get("deviation") ?? "").trim();
+      const output = { quantity: Number(quantityText), uom: weighed ? countUom! : reported, ...(weighed ? { weighed } : {}), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineIds: machine, ...(deviation ? { deviation } : {}) };
       const done = (result: string[], message: string) => { setErrors(result); if (!result.length) { if (onSaved) onSaved(message); else setSaved(message); } return result; };
       if (correcting) {
         if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity."]); return; }
@@ -173,13 +185,13 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       <td className="route-edit route-edit-quantity">{quantity}{weighedNote}</td>
       <td className="route-equivalence">{shown || <span className="route-muted">-</span>}</td>
       <td className="route-edit">{machineField}</td>
-      <td className="route-edit">{notesField}</td>
+      <td className="route-edit">{notesField}{yieldField}</td>
       <td className="route-edit">{destination}</td>
       <td className="route-edit route-edit-actions">{form(<>{actions}{messages}</>)}<small className="route-muted" title={help}>{correcting ? "Correcting" : "Updating"} this day</small></td>
     </>;
   }
   return <section className="production-update"><h3>{correcting ? "Correct production update" : "Production update"}</h3>
-    {form(<>{started}{completed}{quantity}{weighedNote}{machineField}{notesField}{destination}{actions}{messages}<p className="route-muted">{help}</p></>)}
+    {form(<>{started}{completed}{quantity}{weighedNote}{yieldField}{machineField}{notesField}{destination}{actions}{messages}<p className="route-muted">{help}</p></>)}
   </section>;
 }
 

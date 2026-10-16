@@ -60,3 +60,13 @@ describe("step yield", () => {
     expect(stepYieldWith(job, "po", lines, [order], directory, "capsulation", 60000, limits)).toMatchObject({ percent: 100.5, tone: "ok" });
   });
 });
+
+describe("warning the planner", () => {
+  it("as soon as a batch is planned, says which figure the yield needs", async () => {
+    const { yieldWarnings } = await import("../src/lib/services/yields");
+    const planned = lines.map(({ completedAt: _c, yieldQuantity: _y, ...line }) => line);
+    expect(yieldWarnings([job], planned, [order], directory)).toEqual([]);
+    expect(yieldWarnings([job], planned, [{ ...order, unitWeightMg: undefined, unitsPerPack: undefined }], directory).map((warning) => warning.message))
+      .toEqual(["Yield for JO-00002 can't be worked out: add the unit weight (mg) on PO PWL005114; add the units per box on PO PWL005114."]);
+  });
+});
