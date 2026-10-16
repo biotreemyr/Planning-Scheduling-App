@@ -8,6 +8,13 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Added
+- **Print summary** can also **Download Excel**: the same orders as a spreadsheet, with a title, what the list covers, filters on every column, and dates as DD/MM/YYYY.
+
+### Changed
+- **Print summary** window is laid out step by step: tick the orders to include (each with its count), pick the period (This month, Last month, Last 3 months, This year, All dates or your own dates), see how many orders and pages you will get, then Print or Download Excel.
+- **Printed and Excel order lists** number their rows 1, 2, 3 instead of showing the order numbers, and say which orders and period they cover.
+
 ## [1.4.1] - 2026-10-16
 
 ### Changed

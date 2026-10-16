@@ -941,18 +941,38 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .workstation .order-views button[aria-selected="true"] { background: var(--blue); border-color: var(--blue); color: #fff; }
 .workstation .order-views button[aria-selected="true"] .badge { background: #ffffff2e; color: #fff; }
 .workstation .orders-toolbar .calendar-button, .workstation .orders-toolbar .orders-columns > summary { font-size: 13px; }
-.activity-dialog.print-dialog { width: min(520px, calc(100vw - 24px)); }
-.print-dialog .print-options { display: grid; gap: 14px; padding: 18px 20px 20px; }
-.print-dialog .panel-title { margin: 0; }
-.print-dialog .panel-title h2 { margin: 0; font-size: 18px; }
-.print-dialog p { margin: 0; }
-.print-options fieldset { display: grid; gap: 8px; border: 0; margin: 0; padding: 0; min-width: 0; }
-.print-options fieldset:first-of-type { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
-.print-options fieldset:nth-of-type(2) { grid-template-columns: 1fr 1fr; }
-.print-options legend { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; padding: 0; }
-.print-options fieldset label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
-.print-options fieldset label:has(input[type="date"]) { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
-.print-options-count { font-size: 14px; padding: 8px 10px; border-radius: 6px; background: var(--panel-soft); }
-.print-options-buttons { display: flex; justify-content: flex-end; gap: 8px; }
-.print-options fieldset label { white-space: nowrap; }
-.print-options input[type="checkbox"] { width: auto; min-width: 0; height: auto; min-height: 0; flex: none; margin: 0; }
+/* Print summary: one window, read top to bottom - what to include, which period, what you will get,
+   then Cancel / Download Excel / Print. One type scale: 18 title, 13 everything else, 12 hints. */
+.activity-dialog.print-dialog { width: min(560px, calc(100vw - 24px)); }
+.print-chooser { display: grid; font-size: 13px; color: var(--ink); }
+.print-chooser-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 22px 14px; border-bottom: 1px solid var(--line); }
+.print-chooser-head h2 { margin: 0; font-size: 18px; line-height: 1.3; }
+.print-chooser-head p { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.print-chooser-step { display: grid; gap: 10px; padding: 16px 22px; border-bottom: 1px solid var(--line); }
+.print-chooser-label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.print-chooser-label h3 { margin: 0; font-size: 13px; font-weight: 700; }
+.print-chooser .link-button { padding: 0; min-height: 0; border: 0; background: none; color: var(--blue); font: inherit; font-size: 13px; cursor: pointer; }
+.print-chooser .link-button:hover { text-decoration: underline; }
+.choice-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.choice-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 0; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.choice-chip:hover { border-color: #b9d1e6; background: var(--blue-soft); }
+.choice-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.choice-chip[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: #fff; }
+.choice-check { display: inline-grid; place-items: center; width: 16px; height: 16px; border: 1.5px solid currentColor; border-radius: 50%; font-size: 10px; line-height: 1; opacity: .7; }
+.choice-chip[aria-pressed="true"] .choice-check { opacity: 1; background: #ffffff33; }
+.choice-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--panel-soft); color: var(--muted); font-size: 12px; font-weight: 700; text-align: center; }
+.choice-chip[aria-pressed="true"] .choice-count { background: #ffffff2e; color: #fff; }
+.print-chooser-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.print-chooser-dates label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.print-chooser-dates input { font-size: 13px; }
+.print-chooser-range { margin: 0; font-size: 12px; color: var(--muted); }
+.print-chooser-summary { display: flex; align-items: center; gap: 14px; margin: 16px 22px 0; padding: 12px 16px; border-radius: 8px; background: var(--blue-soft); }
+.print-chooser-summary strong { font-size: 26px; line-height: 1; color: var(--blue); font-variant-numeric: tabular-nums; }
+.print-chooser-summary span { display: grid; gap: 2px; font-size: 13px; }
+.print-chooser-summary small { font-size: 12px; color: var(--muted); }
+.print-chooser-summary.empty { background: var(--panel-soft); }
+.print-chooser-summary.empty strong { color: var(--muted); }
+.print-chooser-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 16px 22px 20px; }
+.print-chooser-actions button { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.print-chooser-actions .calendar-button:first-child { margin-right: auto; }
+@media (max-width: 520px) { .print-chooser-dates { grid-template-columns: 1fr; } .print-chooser-actions .calendar-button:first-child { margin-right: 0; } }
