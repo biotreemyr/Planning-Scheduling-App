@@ -8,6 +8,8 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-10-16
+
 ### Changed
 - **Order view tabs** are smaller rounded buttons in bold, the same size as the table's text; the selected tab is dark blue so it stands out. **Columns** and **Print summary** use the same text size.
 - **Print summary** opens its choices in a pop-up window instead of above the list.
