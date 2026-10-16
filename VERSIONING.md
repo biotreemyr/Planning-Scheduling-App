@@ -133,3 +133,4 @@ Roll back: deploy the previous tag the same way. If that release changed the dat
 4. Show the version in the app, and a **What's new** page that reads `CHANGELOG.md`.
 5. Add a test that `package.json`'s version matches the newest release in `CHANGELOG.md`.
 6. Tag and publish every release as above.
+7. Follow [bio-tree-ui-ux-handoff.md](bio-tree-ui-ux-handoff.md) for the look and the interaction patterns (type scale, lists, view tabs, pop-up windows, printing and Excel).

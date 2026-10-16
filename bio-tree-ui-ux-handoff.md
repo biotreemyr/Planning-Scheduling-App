@@ -1,6 +1,6 @@
 # Bio Tree UI/UX Handoff
 
-Date: 2026-09-12
+Date: 2026-09-12 · Updated 2026-10-16 with the list, view tab, pop-up window and print/export patterns proven in the Production Scheduler (see [Workstation Patterns](#workstation-patterns)).
 
 ## Purpose
 
@@ -233,7 +233,7 @@ Use this standard for Inventory Bank, Receiving, Purchasing, Planning, QA/QC que
 | Search | Search across real user lookup fields such as code, item, GRN, PO, batch, supplier, certificate |
 | Filters | Use dropdown filters, not click-to-cycle chips |
 | Sorting | Table headers should be clickable where sorting is meaningful |
-| Dates | Display operational dates as `DD-MM-YYYY` |
+| Dates | Display operational dates as `DD/MM/YYYY` (with a time: `DD/MM/YYYY HH:MM`), in numbers, everywhere: screens, prints, PDFs and Excel |
 | Row detail | Open details in a focused window, drawer, split view, or page |
 | Actions | Use explicit buttons such as Upload COA, View COA, Print, Reprint, Export, Preview, Sign & submit |
 | Restricted fields | Hide restricted fields from UI, API, export, print, PDF, and download |
@@ -327,6 +327,88 @@ If a role cannot see a field in the UI, the same field must be excluded from:
 - print view
 - downloaded report
 - notification payload where applicable
+
+## Workstation Patterns
+
+Patterns built and confirmed with users in the Production Scheduler (versions 1.4 to 1.5, October 2026). Use them in every operations app so lists, choices and printouts work the same everywhere. Where this section is more specific than the rules above, follow this section.
+
+### Type Scale
+
+One scale across a screen. Mixing sizes inside one control or window is what makes it look disorganised.
+
+| Use | Size | Weight |
+| --- | --- | --- |
+| Page title | 22–26px | 700 |
+| Pop-up window title | 18px | 700 |
+| Section heading inside a window or panel | 13px | 700 |
+| Table text, tabs, toolbar buttons, chips, form inputs | **13px** | 400 (tabs and chips 600–700) |
+| Hints, field labels, captions | 12px | 400–600, muted colour |
+| Count badges | 11–12px | 700 |
+
+Toolbar buttons (Columns, Print summary, Clear filters) use the table's text size, not a larger button size.
+
+### Colour Tokens (operations layer)
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--ink` | `#1f2528` | Text |
+| `--muted` | `#667078` | Hints, labels, secondary text |
+| `--line` | `#d8dedb` | Borders, dividers |
+| `--bg` | `#f6f7f4` | Page background |
+| `--panel` / `--panel-soft` | `#ffffff` / `#f0f4f7` | Cards, windows / soft fills, summary cards |
+| `--blue` / `--blue-soft` | `#28679e` / `#e7f0f8` | **Selected** tab or chip (solid blue, white text) / hover |
+| `--green` / `--green-soft` | `#24785f` / `#e4f3ed` | Primary action, done, released |
+| `--amber` / `--amber-soft` | `#9b6517` / `#fff1d7` | Waiting, warnings, "needs attention" |
+| `--red` / `--red-soft` | `#b13a32` / `#fbe5e2` | Failed, rejected, destructive |
+
+The selected state must be clearly darker than the rest (solid `--blue` with white text), never just a lighter tint.
+
+### Lists
+
+- **Newest first.** Operational lists open with the most recent record at the top, so nobody scrolls to the bottom as the list grows. Record numbers never change; only the order does.
+- **The sort arrow shows the current direction** (↓ newest first, ↑ oldest first). One click flips it; a hover tip says so ("Newest first, click for oldest first").
+- **Paging:** 50 rows per page by default, 100 as an option. Below the table: "Showing 1–50 of 132", Rows per page, Previous / Page x of y / Next. The pager is hidden while everything fits on one page. Changing a filter or tab goes back to page 1.
+- **The page scrolls, not the table.** No fixed-height scroll box around a long list; only wide tables scroll sideways.
+- **Downloads and prints take every matching row**, not just the page on screen.
+
+### View Tabs
+
+Above a list, tabs split it by stage, e.g. **All · Not scheduled · Scheduled · In production · Completed · Closed**.
+
+- Rounded pill buttons at the table's text size, **bold**, 6px apart, each with a count badge.
+- Selected tab: solid `--blue`, white text. Hover: `--blue-soft`. Smooth 150ms colour transition.
+- **Every tab describes itself on hover** (e.g. "Orders with production under way").
+- Counts follow the other filters (month, searches), so the count always matches what the tab shows.
+- Opens on **All**; after that each person's **last tab is remembered** (per list, per computer, in browser storage).
+- Tabs replace a status dropdown filter: do not offer both.
+- Compact on desktop (about 30px high); on touch screens give tabs and chips the 44px minimum target from [Interaction Rules](#interaction-rules).
+
+### Pop-up Windows for Choices
+
+Use a pop-up window (modal dialog), not a panel that pushes the page down, whenever an action needs choices first (print, export, release, confirm). Lay it out as one top-to-bottom flow:
+
+1. **Header:** the action as the title ("Print summary"), one line saying what the window does, and a ✕ close button.
+2. **Steps**, each a section with a 13px bold heading and a divider below:
+   - Multiple choices as **toggle chips** (pills with a ✓ and a count), plus **Select all / Clear all**.
+   - Common values as **quick picks** (This month, Last month, Last 3 months, This year, All dates, Custom). Show the extra fields (From/To dates) **only for Custom**; otherwise show the range the pick means in a muted line.
+3. **Summary card:** what will happen, in numbers, before the person commits: "**23** orders · about 2 printed pages", or "No orders match these choices".
+4. **Footer:** **Cancel** on the left; the secondary action (Download Excel) and the **primary action** (Print) on the right, primary last. Disable the actions while there is nothing to act on.
+
+Cancel, ✕ and Esc all close the window and leave the page as it was. Close the window before printing starts.
+
+### Printing and Exporting
+
+- **Choose before printing.** A print or export never dumps everything by default: the person picks which records and which period, and sees the count first. A list that grows for years must not print hundreds of pages by accident.
+- **Number rows 1, 2, 3** in the printed or exported order. Record numbers are shown only as their own column, if at all.
+- **Say what it covers:** the header of every printout and the second line of every Excel file states the selection and period ("Scheduled, In production · PO received 01/10/2026 – 31/10/2026 · 23 orders · printed 16/10/2026 20:30").
+- **Excel layout:** row 1 the title (bold, 14pt); row 2 what it covers and when it was downloaded; row 4 the column headings (bold, frozen, with filters on every column). Numbers stay numbers (with `#,##0` formats) and dates stay dates (`dd/mm/yyyy`) so people can sort and add up. Page setup: landscape, fit to one page wide, headings repeated on every printed page. File name: what it is plus the date, e.g. `customer-orders-2026-10-16.xlsx`.
+- **Excel and print show the same columns and wording as the screen**, including statuses like "Closed · 2,006 of 2,000 (+6)".
+
+### Labels People Recognise
+
+- Show records by the identifier staff use plus the name: equipment as **"CFM/02 · Automatic Capsule Filling Machine"**, customers as "305-P0001 · POWERLIFE (M) SDN. BHD.".
+- Name tabs, buttons and fields by what people do or see, not by how the system stores it ("Ready to close", "Release to PWL005273", "Other use (sample, stability…)").
+- When something differs from what was expected, say it plainly with the number: "−388 bottles against the order", "231 bottles not accounted for", and ask for a reason only when it matters.
 
 ## Interaction Rules
 
