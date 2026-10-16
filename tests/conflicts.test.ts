@@ -73,4 +73,13 @@ describe("findMachineConflicts", () => {
 
     expect(findMachineConflicts(entries, machines, products)).toHaveLength(0);
   });
+  it("flags an open booking over a completed one, but not two drafts or two finished runs", () => {
+    // db-01 on 28/09/2026: JO-00002 completed, JO-00003 still a draft.
+    const done: ScheduleEntry = { id: "jo2", productId: "product-1", workCentreId: "wc-1", machineId: "machine-1", startAt: "2026-09-28T08:00", endAt: "2026-09-28T17:00", status: "Completed" };
+    const draft: ScheduleEntry = { ...done, id: "jo3", status: "Draft" };
+    expect(findMachineConflicts([done, draft], machines, products)).toHaveLength(1);
+    expect(findMachineConflicts([draft, { ...draft, id: "jo4" }], machines, products)).toHaveLength(0);
+    expect(findMachineConflicts([done, { ...done, id: "jo5" }], machines, products)).toHaveLength(0);
+    expect(findMachineConflicts([done, { ...draft, status: "Cancelled" }], machines, products)).toHaveLength(0);
+  });
 });

@@ -1,7 +1,12 @@
 import type { Machine, Product, ScheduleConflict, ScheduleEntry } from "@/lib/domain/types";
 import { machineLabel } from "./machines";
 
-const conflictStatuses = new Set(["Confirmed", "In Progress"]);
+// A booking still to run clashes with any booking that holds the machine, finished ones included:
+// a draft over a completed run is as wrong as one over a confirmed run. Two drafts are still being
+// planned, and two finished runs are history, so neither pair is flagged.
+const open = new Set(["Draft", "Confirmed", "In Progress"]);
+const holding = new Set(["Confirmed", "In Progress", "Completed"]);
+const clash = (a: ScheduleEntry, b: ScheduleEntry) => (open.has(a.status) && holding.has(b.status)) || (holding.has(a.status) && open.has(b.status));
 
 function overlaps(a: ScheduleEntry, b: ScheduleEntry, setupMinutes: number) {
   const setup = setupMinutes * 60000;
@@ -17,7 +22,7 @@ export function findMachineConflicts(
   const machineNames = new Map(machines.map((machine) => [machine.id, machineLabel(machine)]));
   const productNames = new Map(products.map((product) => [product.id, product.name]));
   const confirmedEntries = entries
-    .filter((entry) => entry.machineId && conflictStatuses.has(entry.status))
+    .filter((entry) => entry.machineId && (open.has(entry.status) || holding.has(entry.status)))
     .sort((a, b) => a.startAt.localeCompare(b.startAt));
 
   for (let index = 0; index < confirmedEntries.length; index += 1) {
@@ -26,7 +31,7 @@ export function findMachineConflicts(
     for (let nextIndex = index + 1; nextIndex < confirmedEntries.length; nextIndex += 1) {
       const second = confirmedEntries[nextIndex];
 
-      if (first.machineId !== second.machineId) {
+      if (first.machineId !== second.machineId || !clash(first, second)) {
         continue;
       }
 
