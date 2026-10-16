@@ -1,7 +1,7 @@
 "use client";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, FileSpreadsheet, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
@@ -10,6 +10,7 @@ import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, isNonProduction, nextRndCode, ORDER_CATEGORIES, type OrderCategory, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
 import { usePager } from "./Pager";
+import { ordersWorkbook } from "@/lib/services/ordersExcel";
 import { useDateCheck } from "./DateCheck";
 import { Who } from "./Who";
 import { batchUnits, fullPacks, isCounted, jobTotals, lastPackSize, leftOver } from "@/lib/services/jobQuantities";
@@ -273,6 +274,21 @@ const viewOf = (row: Row): Exclude<OrderView, "all"> => row.order.closedAt ? "cl
 const isView = (value: unknown): value is OrderView => value === "all" || ORDER_VIEWS.some((view) => view.key === value);
 // A printed list page holds about this many orders (A4 landscape).
 const ORDERS_PER_PRINTED_PAGE = 14;
+// Quick periods for the print summary, worked out from today; Custom shows its own dates.
+type PrintPeriod = "this-month" | "last-month" | "last-3" | "this-year" | "all" | "custom";
+const PRINT_PERIODS: { key: PrintPeriod; label: string }[] = [
+  { key: "this-month", label: "This month" }, { key: "last-month", label: "Last month" }, { key: "last-3", label: "Last 3 months" },
+  { key: "this-year", label: "This year" }, { key: "all", label: "All dates" }, { key: "custom", label: "Custom" }
+];
+function periodRange(period: PrintPeriod, today: string): { from: string; to: string } {
+  const [year, month] = today.split("-").map(Number);
+  const iso = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  if (period === "last-month") return { from: iso(new Date(year, month - 2, 1)), to: iso(new Date(year, month - 1, 0)) };
+  if (period === "last-3") return { from: iso(new Date(year, month - 3, 1)), to: iso(new Date(year, month, 0)) };
+  if (period === "this-year") return { from: `${year}-01-01`, to: `${year}-12-31` };
+  if (period === "all") return { from: "", to: "" };
+  return { from: iso(new Date(year, month - 1, 1)), to: iso(new Date(year, month, 0)) };
+}
 const monthBounds = (day: string) => { const [year, month] = day.split("-").map(Number); return { from: `${day.slice(0, 7)}-01`, to: `${day.slice(0, 7)}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}` }; };
 
 function OrdersTable({ nonProduction, action, printable, orders, customerRecords, jobOrders, transfers, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
@@ -292,8 +308,10 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
   useEffect(() => { try { const saved = localStorage.getItem(viewStorage); if (isView(saved)) setView(saved); } catch { /* starts on All */ } }, [viewStorage]);
   const chooseView = (next: OrderView) => { setView(next); try { localStorage.setItem(viewStorage, next); } catch { /* not remembered */ } };
   // Print summary first asks which orders: views, and when the PO was received.
-  const [printSetup, setPrintSetup] = useState<{ views: OrderView[]; from: string; to: string } | null>(null);
+  const [printSetup, setPrintSetup] = useState<{ views: OrderView[]; period: PrintPeriod; from: string; to: string } | null>(null);
   const [printRows, setPrintRows] = useState<string[] | null>(null);
+  // What the printed or downloaded list covers, e.g. "Scheduled, In production · PO received 01/10/2026 – 31/10/2026".
+  const [printCaption, setPrintCaption] = useState("");
   // The print choices open in a pop-up window over the list.
   const printDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { const box = printDialog.current; if (!box) return; if (printSetup && !box.open) box.showModal(); if (!printSetup && box.open) box.close(); }, [printSetup]);
@@ -356,7 +374,28 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
   const filtering = !!month || Object.values(filters).some((value) => value.trim());
   // What the print options would print: the views ticked, received in the period, with the searches applied.
   const receivedOn = (row: Row) => row.order.receivedDate ?? row.order.createdAt.slice(0, 10);
-  const toPrint = printSetup ? filtered.filter((row) => (printSetup.views.includes("all") || printSetup.views.includes(viewOf(row))) && (!printSetup.from || receivedOn(row) >= printSetup.from) && (!printSetup.to || receivedOn(row) <= printSetup.to)) : [];
+  const inPeriod = (row: Row) => !printSetup || ((!printSetup.from || receivedOn(row) >= printSetup.from) && (!printSetup.to || receivedOn(row) <= printSetup.to));
+  const toPrint = printSetup ? filtered.filter((row) => printSetup.views.includes(viewOf(row)) && inPeriod(row)) : [];
+  const periodCounts = Object.fromEntries(ORDER_VIEWS.map((item) => [item.key, filtered.filter((row) => viewOf(row) === item.key && inPeriod(row)).length]));
+  const receivedWord = nonProduction ? "Received" : "PO received";
+  const captionFor = (setup: NonNullable<typeof printSetup>) => [
+    setup.views.length === ORDER_VIEWS.length ? "All orders" : ORDER_VIEWS.filter((item) => setup.views.includes(item.key)).map((item) => item.label).join(", "),
+    setup.from || setup.to ? `${receivedWord} ${setup.from ? displayDate(setup.from) : "…"} – ${setup.to ? displayDate(setup.to) : "…"}` : `${receivedWord}: all dates`,
+    ...(filtering ? ["with the list's searches and month filter"] : [])
+  ].join(" · ");
+  const pages = Math.max(1, Math.ceil(toPrint.length / ORDERS_PER_PRINTED_PAGE));
+  async function downloadExcel(rows: Row[], caption: string) {
+    const book = await ordersWorkbook(rows.map((row) => ({
+      received: row.order.receivedDate, customer: row.order.customerName ?? "", po: poLabel(row.order, orders), reference: row.order.soNumber ?? "", productCode: row.product?.sku ?? "", product: row.product?.name ?? "Unknown product",
+      format: row.format, quantity: row.order.quantity, uom: row.order.uom, kg: orderKg(row.order), progress: progressText(row.progress), finished: row.progress.finishedQuantity || undefined,
+      release: statusPrint(row.status), expected: row.progress.expectedDate, status: row.order.closedAt ? closedSummary(row.order) : row.progress.status
+    })), { title, caption, sheet: nonProduction ? "R&D, trial & pilot" : "Customer orders", at: formatDateTime(new Date()),
+      labels: { received: receivedWord, po: nonProduction ? "Document no." : "PO number", reference: nonProduction ? "Reference" : "SO number", expected: nonProduction ? "Expected completion" : "Expected delivery" } });
+    const url = URL.createObjectURL(new Blob([await book.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `${nonProduction ? "rnd-trial-pilot" : "customer-orders"}-${today}.xlsx`; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   return <div className="workspace-panel orders-list">
     <div className="orders-toolbar">
       <h2>{title} <span className="badge neutral">{orders.length}</span></h2>
@@ -371,26 +410,46 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
         <div role="group" aria-label="Columns to show">{columns.map((column) => <label key={column.key}><input type="checkbox" disabled={column.required} checked={column.required || !hidden.includes(column.key)} onChange={() => toggleColumn(column.key)} />{column.label}</label>)}</div>
       </details>
       {filtering ? <button type="button" className="calendar-button" onClick={() => { setFilters({}); setMonth(""); }}><X size={16} />Clear filters</button> : null}
-      {printable ? <button type="button" className="calendar-button" aria-expanded={!!printSetup} onClick={() => setPrintSetup(printSetup ? null : { views: view === "all" ? ORDER_VIEWS.map((item) => item.key) : [view], ...monthBounds(today) })} title="Choose which orders to print, or save as PDF"><Printer size={16} />Print summary</button> : null}
+      {printable ? <button type="button" className="calendar-button" aria-expanded={!!printSetup} onClick={() => setPrintSetup(printSetup ? null : { views: view === "all" ? ORDER_VIEWS.map((item) => item.key) : [view], period: "this-month", ...periodRange("this-month", today) })} title="Choose which orders to print or download in Excel"><Printer size={16} />Print summary</button> : null}
       <span className="result-count" aria-live="polite">{table.length} of {orders.length} orders</span>
       {action}
     </div>
     <dialog ref={printDialog} className="activity-dialog print-dialog" aria-labelledby="print-dialog-title" onClose={() => setPrintSetup(null)}>
-    {printSetup ? <div className="print-options" role="group" aria-label="Print summary options">
-      <div className="panel-title"><h2 id="print-dialog-title">Print summary</h2><button type="button" className="icon-button" aria-label="Close" title="Close" onClick={() => setPrintSetup(null)}><X size={18} /></button></div>
-      <p className="route-muted">Choose which orders to print. Searches and the month filter on the list apply too.</p>
-      <fieldset><legend>Which orders</legend>
-        {ORDER_VIEWS.map((item) => <label key={item.key} title={item.hint}><input type="checkbox" checked={printSetup.views.includes(item.key)} onChange={(event) => setPrintSetup({ ...printSetup, views: event.target.checked ? [...printSetup.views, item.key] : printSetup.views.filter((key) => key !== item.key) })} />{item.label}</label>)}
-      </fieldset>
-      <fieldset><legend>{nonProduction ? "Received" : "PO received"}</legend>
-        <label>From<input type="date" value={printSetup.from} onChange={(event) => setPrintSetup({ ...printSetup, from: event.target.value })} /></label>
-        <label>To<input type="date" value={printSetup.to} onChange={(event) => setPrintSetup({ ...printSetup, to: event.target.value })} /></label>
-      </fieldset>
-      <p className="print-options-count" aria-live="polite"><strong>{toPrint.length} order{toPrint.length === 1 ? "" : "s"}</strong>{toPrint.length ? ` · about ${Math.max(1, Math.ceil(toPrint.length / ORDERS_PER_PRINTED_PAGE))} page${Math.ceil(toPrint.length / ORDERS_PER_PRINTED_PAGE) > 1 ? "s" : ""}` : ""}</p>
-      <div className="print-options-buttons">
-        <button type="button" className="primary-button" disabled={!toPrint.length} onClick={() => { printDialog.current?.close(); setPrintRows(toPrint.map((row) => row.order.id)); setPrint((current) => ({ request: current.request + 1 })); setPrintSetup(null); }}><Printer size={16} />Print</button>
+    {printSetup ? <div className="print-chooser">
+      <header className="print-chooser-head">
+        <div><h2 id="print-dialog-title">Print summary</h2><p>Choose the orders, then print or download them in Excel.</p></div>
+        <button type="button" className="icon-button" aria-label="Close" title="Close" onClick={() => setPrintSetup(null)}><X size={18} /></button>
+      </header>
+      <section className="print-chooser-step" aria-labelledby="print-step-orders">
+        <div className="print-chooser-label"><h3 id="print-step-orders">Orders to include</h3>
+          <button type="button" className="link-button" onClick={() => setPrintSetup({ ...printSetup, views: printSetup.views.length === ORDER_VIEWS.length ? [] : ORDER_VIEWS.map((item) => item.key) })}>{printSetup.views.length === ORDER_VIEWS.length ? "Clear all" : "Select all"}</button></div>
+        <div className="choice-chips" role="group" aria-label="Orders to include">
+          {ORDER_VIEWS.map((item) => { const on = printSetup.views.includes(item.key); return <button key={item.key} type="button" className="choice-chip" aria-pressed={on} title={item.hint}
+            onClick={() => setPrintSetup({ ...printSetup, views: on ? printSetup.views.filter((key) => key !== item.key) : [...printSetup.views, item.key] })}>
+            <span className="choice-check" aria-hidden="true">{on ? "✓" : ""}</span>{item.label}<span className="choice-count">{periodCounts[item.key]}</span></button>; })}
+        </div>
+      </section>
+      <section className="print-chooser-step" aria-labelledby="print-step-period">
+        <div className="print-chooser-label"><h3 id="print-step-period">{receivedWord}</h3></div>
+        <div className="choice-chips" role="radiogroup" aria-label={receivedWord}>
+          {PRINT_PERIODS.map((item) => <button key={item.key} type="button" role="radio" className="choice-chip" aria-checked={printSetup.period === item.key} aria-pressed={printSetup.period === item.key}
+            onClick={() => setPrintSetup({ ...printSetup, period: item.key, ...(item.key === "custom" ? {} : periodRange(item.key, today)) })}>{item.label}</button>)}
+        </div>
+        {printSetup.period === "custom" ? <div className="print-chooser-dates">
+          <label>From<input type="date" value={printSetup.from} max={printSetup.to || undefined} onChange={(event) => setPrintSetup({ ...printSetup, from: event.target.value })} /></label>
+          <label>To<input type="date" value={printSetup.to} min={printSetup.from || undefined} onChange={(event) => setPrintSetup({ ...printSetup, to: event.target.value })} /></label>
+        </div> : <p className="print-chooser-range">{printSetup.from || printSetup.to ? `${displayDate(printSetup.from)} – ${displayDate(printSetup.to)}` : "Every order, whenever it was received"}</p>}
+      </section>
+      <section className={`print-chooser-summary${toPrint.length ? "" : " empty"}`} aria-live="polite">
+        <strong>{toPrint.length}</strong>
+        <span>{toPrint.length ? <>order{toPrint.length === 1 ? "" : "s"} · about {pages} printed page{pages === 1 ? "" : "s"}</> : "No orders match these choices"}
+          {filtering ? <small>The list's searches and month filter also apply.</small> : null}</span>
+      </section>
+      <footer className="print-chooser-actions">
         <button type="button" className="calendar-button" onClick={() => setPrintSetup(null)}>Cancel</button>
-      </div>
+        <button type="button" className="calendar-button" disabled={!toPrint.length} onClick={() => void downloadExcel(toPrint, captionFor(printSetup))}><FileSpreadsheet size={16} />Download Excel</button>
+        <button type="button" className="primary-button" disabled={!toPrint.length} onClick={() => { printDialog.current?.close(); setPrintCaption(captionFor(printSetup)); setPrintRows(toPrint.map((row) => row.order.id)); setPrint((current) => ({ request: current.request + 1 })); setPrintSetup(null); }}><Printer size={16} />Print</button>
+      </footer>
     </div> : null}
     </dialog>
     <div className="view-switch order-views" role="tablist" aria-label="Show orders">
@@ -437,7 +496,7 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
       <datalist id="order-filter-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
     </div>
     {pager}
-    <OrdersPrint title={title} orders={orders} rows={print.orderId ? all.filter((row) => row.order.id === print.orderId) : printRows ? filtered.filter((row) => printRows.includes(row.order.id)) : table} detail={!!print.orderId} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} filtered={(printRows?.length ?? table.length) !== orders.length} />
+    <OrdersPrint title={title} caption={print.orderId || !printRows ? "" : printCaption} orders={orders} rows={print.orderId ? all.filter((row) => row.order.id === print.orderId) : printRows ? filtered.filter((row) => printRows.includes(row.order.id)) : table} detail={!!print.orderId} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} filtered={(printRows?.length ?? table.length) !== orders.length} />
   </div>;
 }
 
@@ -457,21 +516,21 @@ const progressText = (progress: OrderProgress) => !progress.processCount ? "Not 
   : `${progress.batchesFinished}/${progress.batchCount} batches finished${progress.nextStep ? ` · ${progress.nextStep.batch} at ${progress.nextStep.processName}` : ""}`;
 
 // Print sheet for the Orders tab: the order list as shown, or one order with its batch grid.
-function OrdersPrint({ title, rows, orders, detail, lines, directory, visibleCalendarIds, filtered }: { title: string; rows: Row[]; orders: PurchaseOrder[]; detail: boolean; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; filtered: boolean }) {
+function OrdersPrint({ title, caption, rows, orders, detail, lines, directory, visibleCalendarIds, filtered }: { title: string; caption: string; rows: Row[]; orders: PurchaseOrder[]; detail: boolean; lines: PlanLine[]; directory: CalendarDirectory; visibleCalendarIds: string[]; filtered: boolean }) {
   if (typeof document === "undefined") return null;
   const printed = formatDateTime(new Date());
   return createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
     {detail && rows[0] ? <OrderPrintDetail row={rows[0]} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} printed={printed} /> : <>
-      <header><h1>{title}</h1><p>{rows.length} order{rows.length === 1 ? "" : "s"}{filtered ? " (filtered)" : ""} · printed {printed}</p></header>
+      <header><h1>{title}</h1><p>{caption ? `${caption} · ` : ""}{rows.length} order{rows.length === 1 ? "" : "s"}{!caption && filtered ? " (filtered)" : ""} · printed {printed}</p></header>
       <table className="print-orders-table">
-        <thead><tr><th>#</th><th>PO received</th><th>Customer</th><th>PO number</th><th>SO number</th><th className="print-col-product">Product</th><th>Dosage form</th><th>Order qty</th><th>Total kg</th><th>Progress</th><th>Finished</th><th>Testing / release</th><th>Expected delivery</th><th>Status</th></tr></thead>
-        <tbody>{rows.map((row) => <tr key={row.order.id}>
-          <td>{row.number}</td><td>{row.order.receivedDate ? displayDate(row.order.receivedDate) : ""}</td><td>{row.order.customerName ?? ""}</td><td>{poLabel(row.order, orders)}</td><td>{row.order.soNumber ?? ""}</td><td className="print-col-product">{row.product?.name ?? "Unknown product"}</td><td>{row.format}</td>
+        <thead><tr><th>No.</th><th>PO received</th><th>Customer</th><th>PO number</th><th>SO number</th><th className="print-col-product">Product</th><th>Dosage form</th><th>Order qty</th><th>Total kg</th><th>Progress</th><th>Finished</th><th>Testing / release</th><th>Expected delivery</th><th>Status</th></tr></thead>
+        <tbody>{rows.map((row, index) => <tr key={row.order.id}>
+          <td>{index + 1}</td><td>{row.order.receivedDate ? displayDate(row.order.receivedDate) : ""}</td><td>{row.order.customerName ?? ""}</td><td>{poLabel(row.order, orders)}</td><td>{row.order.soNumber ?? ""}</td><td className="print-col-product">{row.product?.name ?? "Unknown product"}</td><td>{row.format}</td>
           <td>{row.order.quantity.toLocaleString()} {row.order.uom}</td><td>{(() => { const kg = orderKg(row.order); return kg !== undefined ? kg.toLocaleString("en-GB", { maximumFractionDigits: 3 }) : "-"; })()}</td><td>{progressText(row.progress)}</td>
           <td>{row.progress.finishedQuantity ? `${row.progress.finishedQuantity.toLocaleString()} (${row.progress.percent}%)` : "-"}</td>
           <td>{statusPrint(row.status)}</td>
           <td>{row.progress.expectedDate ? displayDate(row.progress.expectedDate) : "Not set"}{row.progress.overdue ? " · Overdue" : ""}</td>
-          <td>{row.progress.status}{row.warnings.length ? ` · ${row.warnings.length} warning${row.warnings.length === 1 ? "" : "s"}` : ""}</td>
+          <td>{row.order.closedAt ? closedSummary(row.order) : row.progress.status}{row.warnings.length ? ` · ${row.warnings.length} warning${row.warnings.length === 1 ? "" : "s"}` : ""}</td>
         </tr>)}</tbody>
       </table>
     </>}
