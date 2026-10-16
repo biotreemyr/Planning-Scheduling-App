@@ -8,6 +8,16 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-16
+
+### Added
+- **Order views**: tabs above the Orders and the R&D, Trial & Pilot lists show All, Not scheduled, Scheduled, In production, Completed or Closed orders, each with its count. Hover over a tab to see what it shows. The page opens on All, then remembers each person's last tab on their computer.
+- **Print summary options**: before printing, choose which kinds of orders and the PO received period to print. It shows how many orders and about how many pages you will get.
+
+### Changed
+- **Orders** and **R&D, Trial & Pilot** list the newest order first, 50 to a page. Click the # heading to switch to oldest first. Order numbers do not change.
+- The **Status** column no longer has its own filter: the view tabs replace it.
+
 ## [1.3.0] - 2026-10-15
 
 ### Added

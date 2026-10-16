@@ -9,6 +9,7 @@ import { MAX_POS_PER_JOB, shortYield, closedSummary, formulaPending, jobForOrder
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, isNonProduction, nextRndCode, ORDER_CATEGORIES, type OrderCategory, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
+import { usePager } from "./Pager";
 import { useDateCheck } from "./DateCheck";
 import { Who } from "./Who";
 import { batchUnits, fullPacks, isCounted, jobTotals, lastPackSize, leftOver } from "@/lib/services/jobQuantities";
@@ -259,6 +260,21 @@ type Column = {
 const COLUMN_STORAGE = "scheduler.orderColumns";
 
 
+// Views of the order list, chosen from the tabs above it; each describes itself on hover.
+type OrderView = "all" | "not-scheduled" | "scheduled" | "in-production" | "completed" | "closed";
+const ORDER_VIEWS: { key: Exclude<OrderView, "all">; label: string; hint: string }[] = [
+  { key: "not-scheduled", label: "Not scheduled", hint: "Orders with no job order planned yet" },
+  { key: "scheduled", label: "Scheduled", hint: "Orders planned on the Planner Board but not started" },
+  { key: "in-production", label: "In production", hint: "Orders with production under way" },
+  { key: "completed", label: "Completed", hint: "Orders with all production finished, waiting to be closed" },
+  { key: "closed", label: "Closed", hint: "Orders the planner has closed after QA's release" }
+];
+const viewOf = (row: Row): Exclude<OrderView, "all"> => row.order.closedAt ? "closed" : row.progress.status === "Completed" ? "completed" : row.progress.status === "In production" ? "in-production" : row.progress.status === "Scheduled" ? "scheduled" : "not-scheduled";
+const isView = (value: unknown): value is OrderView => value === "all" || ORDER_VIEWS.some((view) => view.key === value);
+// A printed list page holds about this many orders (A4 landscape).
+const ORDERS_PER_PRINTED_PAGE = 14;
+const monthBounds = (day: string) => { const [year, month] = day.split("-").map(Number); return { from: `${day.slice(0, 7)}-01`, to: `${day.slice(0, 7)}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}` }; };
+
 function OrdersTable({ nonProduction, action, printable, orders, customerRecords, jobOrders, transfers, jobActions, lines, products, directory, visibleCalendarIds, editable, customers, onSave, onDelete, flow }: {
   customerRecords: Customer[]; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; jobActions?: JobActions; action?: ReactNode; nonProduction: boolean;
   flow: FlowWarning[];
@@ -268,7 +284,16 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
   const today = localDateKey(new Date());
   const title = nonProduction ? "R&D, trial & pilot batches" : "Customer orders";
   const [filters, setFilters] = useState<Record<string, string>>({});
-  const [sort, setSort] = useState<{ key: string; ascending: boolean }>({ key: "number", ascending: true });
+  // Newest order first, so recent orders are at the top of the first page.
+  const [sort, setSort] = useState<{ key: string; ascending: boolean }>({ key: "number", ascending: false });
+  // The tab chosen above the table, remembered per person on this computer, for each list.
+  const viewStorage = nonProduction ? "scheduler.trialsView" : "scheduler.ordersView";
+  const [view, setView] = useState<OrderView>("all");
+  useEffect(() => { try { const saved = localStorage.getItem(viewStorage); if (isView(saved)) setView(saved); } catch { /* starts on All */ } }, [viewStorage]);
+  const chooseView = (next: OrderView) => { setView(next); try { localStorage.setItem(viewStorage, next); } catch { /* not remembered */ } };
+  // Print summary first asks which orders: views, and when the PO was received.
+  const [printSetup, setPrintSetup] = useState<{ views: OrderView[]; from: string; to: string } | null>(null);
+  const [printRows, setPrintRows] = useState<string[] | null>(null);
   const [month, setMonth] = useState("");
   const [basis, setBasis] = useState<MonthBasis>("scheduled");
   const [hidden, setHidden] = useState<string[]>([]);
@@ -302,7 +327,7 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
     { key: "finished", label: "Finished", numeric: true, sort: (row) => row.progress.percent, cell: (row) => row.progress.finishedQuantity ? <>{row.progress.finishedQuantity.toLocaleString()}<small>{row.progress.percent}% of order</small></> : "-" },
     { key: "release", label: "Testing / release", sort: (row) => row.status.jobs ? row.status.released / row.status.jobs : -1, cell: (row) => statusText(row.status) },
     { key: "expected", label: nonProduction ? "Expected completion" : "Expected delivery", sort: (row) => row.progress.expectedDate ?? "9999", cell: (row) => <>{row.progress.expectedDate ? displayDate(row.progress.expectedDate) : <span className="route-muted">Not set</span>}{row.progress.overdue ? <span className="badge danger">Overdue</span> : null}</> },
-    { key: "status", label: "Status", sort: (row) => statuses.indexOf(row.progress.status), cell: (row) => <>{row.order.closedAt ? <span className="badge success" title={[closedSummary(row.order), row.order.closeNote].filter(Boolean).join(" · ")}>Closed</span> : <span className={`badge ${statusBadge[row.progress.status]}`}>{row.progress.status}</span>}{row.order.closedAt ? <small>{closedSummary(row.order).replace(/^Closed · /, "")}</small> : null}{row.warnings.length ? <span className="badge danger order-warn-badge" title={row.warnings.map((warning) => warning.message).join("\n")}>⚠ {row.warnings.length}</span> : null}</>, filter: { kind: "select", options: statuses, value: (row) => row.progress.status } }
+    { key: "status", label: "Status", sort: (row) => statuses.indexOf(row.progress.status), cell: (row) => <>{row.order.closedAt ? <span className="badge success" title={[closedSummary(row.order), row.order.closeNote].filter(Boolean).join(" · ")}>Closed</span> : <span className={`badge ${statusBadge[row.progress.status]}`}>{row.progress.status}</span>}{row.order.closedAt ? <small>{closedSummary(row.order).replace(/^Closed · /, "")}</small> : null}{row.warnings.length ? <span className="badge danger order-warn-badge" title={row.warnings.map((warning) => warning.message).join("\n")}>⚠ {row.warnings.length}</span> : null}</> }
   ];
   const shown = columns.filter((column) => column.required || !hidden.includes(column.key));
   const numbers = orderNumbers(orders);
@@ -312,7 +337,7 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
     return { order, number: numbers.get(order.id)!, rows, product, progress: orderProgress(order, rows, today, lines), format: order.format ?? inferFormat(product), warnings: flow.filter((warning) => warning.orderId === order.id), status: orderStatusSummary(order.id, jobOrders, lines, transfers) };
   });
   const sorter = columns.find((column) => column.key === sort.key) ?? columns[0];
-  const table = all.filter((row) => orderInMonth(row.order, row.rows, row.progress, month, basis) && columns.every((column) => {
+  const filtered = all.filter((row) => orderInMonth(row.order, row.rows, row.progress, month, basis) && columns.every((column) => {
     const value = filters[column.key]?.trim().toLowerCase();
     if (!value || !column.filter) return true;
     if (column.filter.kind === "date") return matchesDateFilter(column.filter.date(row), value);
@@ -322,7 +347,13 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
     const result = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
     return (result || a.order.poNumber.localeCompare(b.order.poNumber)) * (sort.ascending ? 1 : -1);
   });
+  const counts = Object.fromEntries(ORDER_VIEWS.map((item) => [item.key, filtered.filter((row) => viewOf(row) === item.key).length])) as Record<Exclude<OrderView, "all">, number>;
+  const table = view === "all" ? filtered : filtered.filter((row) => viewOf(row) === view);
+  const { rows: page, pager } = usePager(table, `${view}|${month}|${basis}|${JSON.stringify(filters)}|${sort.key}|${sort.ascending}`, [50, 100]);
   const filtering = !!month || Object.values(filters).some((value) => value.trim());
+  // What the print options would print: the views ticked, received in the period, with the searches applied.
+  const receivedOn = (row: Row) => row.order.receivedDate ?? row.order.createdAt.slice(0, 10);
+  const toPrint = printSetup ? filtered.filter((row) => (printSetup.views.includes("all") || printSetup.views.includes(viewOf(row))) && (!printSetup.from || receivedOn(row) >= printSetup.from) && (!printSetup.to || receivedOn(row) <= printSetup.to)) : [];
   return <div className="workspace-panel orders-list">
     <div className="orders-toolbar">
       <h2>{title} <span className="badge neutral">{orders.length}</span></h2>
@@ -337,9 +368,27 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
         <div role="group" aria-label="Columns to show">{columns.map((column) => <label key={column.key}><input type="checkbox" disabled={column.required} checked={column.required || !hidden.includes(column.key)} onChange={() => toggleColumn(column.key)} />{column.label}</label>)}</div>
       </details>
       {filtering ? <button type="button" className="calendar-button" onClick={() => { setFilters({}); setMonth(""); }}><X size={16} />Clear filters</button> : null}
-      {printable ? <button type="button" className="calendar-button" onClick={() => setPrint((current) => ({ request: current.request + 1 }))} title="Print the orders shown, or save as PDF"><Printer size={16} />Print summary</button> : null}
+      {printable ? <button type="button" className="calendar-button" aria-expanded={!!printSetup} onClick={() => setPrintSetup(printSetup ? null : { views: view === "all" ? ORDER_VIEWS.map((item) => item.key) : [view], ...monthBounds(today) })} title="Choose which orders to print, or save as PDF"><Printer size={16} />Print summary</button> : null}
       <span className="result-count" aria-live="polite">{table.length} of {orders.length} orders</span>
       {action}
+    </div>
+    {printSetup ? <div className="print-options" role="group" aria-label="Print summary options">
+      <fieldset><legend>Which orders</legend>
+        {ORDER_VIEWS.map((item) => <label key={item.key} title={item.hint}><input type="checkbox" checked={printSetup.views.includes(item.key)} onChange={(event) => setPrintSetup({ ...printSetup, views: event.target.checked ? [...printSetup.views, item.key] : printSetup.views.filter((key) => key !== item.key) })} />{item.label}</label>)}
+      </fieldset>
+      <fieldset><legend>{nonProduction ? "Received" : "PO received"}</legend>
+        <label>From<input type="date" value={printSetup.from} onChange={(event) => setPrintSetup({ ...printSetup, from: event.target.value })} /></label>
+        <label>To<input type="date" value={printSetup.to} onChange={(event) => setPrintSetup({ ...printSetup, to: event.target.value })} /></label>
+      </fieldset>
+      <p className="print-options-count" aria-live="polite"><strong>{toPrint.length} order{toPrint.length === 1 ? "" : "s"}</strong>{toPrint.length ? ` · about ${Math.max(1, Math.ceil(toPrint.length / ORDERS_PER_PRINTED_PAGE))} page${Math.ceil(toPrint.length / ORDERS_PER_PRINTED_PAGE) > 1 ? "s" : ""}` : ""}{filtering ? " · your searches and month filter apply" : ""}</p>
+      <div className="print-options-buttons">
+        <button type="button" className="primary-button" disabled={!toPrint.length} onClick={() => { setPrintRows(toPrint.map((row) => row.order.id)); setPrint((current) => ({ request: current.request + 1 })); setPrintSetup(null); }}><Printer size={16} />Print</button>
+        <button type="button" className="calendar-button" onClick={() => setPrintSetup(null)}>Cancel</button>
+      </div>
+    </div> : null}
+    <div className="view-switch order-views" role="tablist" aria-label="Show orders">
+      <button type="button" role="tab" aria-selected={view === "all"} title="Every order, whatever its stage" onClick={() => chooseView("all")}>All <span className="badge neutral">{filtered.length}</span></button>
+      {ORDER_VIEWS.map((item) => <button key={item.key} type="button" role="tab" aria-selected={view === item.key} title={item.hint} onClick={() => chooseView(item.key)}>{item.label} <span className="badge neutral">{counts[item.key]}</span></button>)}
     </div>
     <div className="orders-table-scroll" tabIndex={0} role="region" aria-label={title}>
       <table className="orders-table">
@@ -350,7 +399,8 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
               const active = sort.key === column.key;
               const Icon = !active ? ArrowUpDown : sort.ascending ? ArrowUp : ArrowDown;
               return <th scope="col" key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined} aria-sort={active ? sort.ascending ? "ascending" : "descending" : "none"}>
-                <button type="button" className="table-sort" onClick={() => setSort({ key: column.key, ascending: active ? !sort.ascending : true })}>{column.label}<Icon size={13} /></button>
+                <button type="button" className="table-sort" title={column.key === "number" ? active && !sort.ascending ? "Newest first, click for oldest first" : active ? "Oldest first, click for newest first" : "Sort by order number" : undefined}
+                  onClick={() => setSort({ key: column.key, ascending: active ? !sort.ascending : column.key !== "number" })}>{column.label}<Icon size={13} /></button>
               </th>;
             })}
           </tr>
@@ -364,22 +414,23 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
           </tr>
         </thead>
         <tbody>
-          {!table.length ? <tr><td colSpan={shown.length + 1} className="empty-state">{orders.length ? "No orders match these filters." : "No orders yet. Add a customer, PO number and quantity to start."}</td></tr> : null}
-          {table.map((row) => {
+          {!table.length ? <tr><td colSpan={shown.length + 1} className="empty-state">{!orders.length ? "No orders yet. Add a customer, PO number and quantity to start." : view !== "all" && filtered.length ? `No ${ORDER_VIEWS.find((item) => item.key === view)?.label.toLowerCase()} orders${filtering ? " match these filters" : ""}.` : "No orders match these filters."}</td></tr> : null}
+          {page.map((row) => {
             const open = expanded === row.order.id;
             return <Fragment key={row.order.id}>
               <tr className={open ? "order-row open" : "order-row"} style={{ "--order-color": orderColor(row.number) } as React.CSSProperties} onClick={() => setExpanded(open ? null : row.order.id)}>
                 <td><button type="button" className="icon-button order-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} ${row.order.poNumber} details`} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : row.order.id); }}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button></td>
                 {shown.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(row)}</td>)}
               </tr>
-              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail printable={printable} orders={orders} products={products} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} product={row.product} onPrint={() => setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 }))} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
+              {open ? <tr className="order-detail-row"><td colSpan={shown.length + 1}><OrderDetail printable={printable} orders={orders} products={products} jobOrders={jobOrders} transfers={transfers} jobActions={jobActions} product={row.product} onPrint={() => { setPrintRows(null); setPrint((current) => ({ orderId: row.order.id, request: current.request + 1 })); }} order={row.order} format={row.format} warnings={row.warnings} rows={row.rows} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} linked={lines.some((line) => line.productionOrderId === row.order.id)} editable={editable} customers={customers} onSave={onSave} onDelete={(id) => { const result = onDelete(id); if (!result.length) setExpanded(null); return result; }} /></td></tr> : null}
             </Fragment>;
           })}
         </tbody>
       </table>
       <datalist id="order-filter-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
     </div>
-    <OrdersPrint title={title} orders={orders} rows={print.orderId ? all.filter((row) => row.order.id === print.orderId) : table} detail={!!print.orderId} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} filtered={table.length !== orders.length} />
+    {pager}
+    <OrdersPrint title={title} orders={orders} rows={print.orderId ? all.filter((row) => row.order.id === print.orderId) : printRows ? filtered.filter((row) => printRows.includes(row.order.id)) : table} detail={!!print.orderId} lines={lines} directory={directory} visibleCalendarIds={visibleCalendarIds} filtered={(printRows?.length ?? table.length) !== orders.length} />
   </div>;
 }
 
