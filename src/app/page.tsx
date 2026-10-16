@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export default async function Home() {
   try {
     if (getAuthMode() === "demo") {
-      if (!localPersistenceAllowed((await headers()).get("host"), process.env)) return <AccessMessage title="Local pilot only" message="Open this workspace on localhost. Verified dashboard login is required for shared deployment." />;
+      if (!localPersistenceAllowed((await headers()).get("host"), process.env)) return <AccessMessage title="Local pilot only" message="Open this workspace on localhost, against a copy of the database (its name ending in _scratch, _preview, _test or _dev), never the live one. Verified dashboard login is required for shared deployment." />;
       if (!process.env.DATABASE_URL) return <AccessMessage title="Database setup required" message="Configure PostgreSQL and apply database migrations before using the workspace." />;
       const [initial, catalog, equipment, releases] = await Promise.all([workspaceRepository(db).load(), loadOrderCatalog(), loadEquipmentCatalog(), loadReleases()]);
       return <SchedulerDemo initial={initial} writeToken={writeToken()} catalog={catalog} equipment={equipment} releases={releases} />;

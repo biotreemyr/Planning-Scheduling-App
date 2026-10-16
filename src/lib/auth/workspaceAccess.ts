@@ -21,6 +21,21 @@ function changedKeys(before: object, after: object) {
 }
 const only = (keys: string[], allowed: string[]) => keys.every((key) => allowed.includes(key));
 
+// Who/when a record was last edited: they follow the change they stamp, so need no right of their own.
+const EDIT_STAMPS = ["updatedBy", "updatedAt"];
+const LINE_STAMPS = [...EDIT_STAMPS, "plannedBy", "plannedAt"];
+// What production records on an activity.
+const LINE_RESULTS: string[] = ["completedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "actualUnitVolumeMl", "shellWeightMg", "startedAt", "productionNotes", "progressQuantity", "progressUom", "progressUnitSize", "progressDestination"];
+// A job order's fields that only one right may set, each with the people who record them.
+const jobGroups = (can: WorkspaceCapabilities) => [
+  { keys: ["batchNumber", "batchNumberBy", "batchNumberAt"], allowed: can.produce || can.editPlan, what: "enter batch numbers" },
+  { keys: ["testedAt", "testedBy", "testResult"], allowed: can.passTesting, what: "record testing results" },
+  { keys: ["releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy", "poReleases"], allowed: can.release, what: "release or reject batches" },
+  // QA confirms that POs with different FG codes sharing a batch are the same formula.
+  { keys: ["formulaConfirmedBy", "formulaConfirmedAt"], allowed: can.release, what: "confirm a shared batch's formula", clearedByEdit: true }
+];
+const JOB_GROUPED = new Set(jobGroups({} as WorkspaceCapabilities).flatMap((group) => group.keys));
+
 export type ChangeReview = { allowed: boolean; denied: string[]; summary: string[] };
 
 /**
@@ -77,15 +92,20 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   const jobs = diff(before.data.jobOrders, after.data.jobOrders);
   if (jobs.added.length) need(can.createOrders, "create or remove job orders");
   if (jobs.removed.length) need(can.editOrders, "create or remove job orders");
+  // A new job order is created bare: any batch, testing, release or formula field it carries needs that right too.
+  for (const job of jobs.added) for (const group of jobGroups(can)) if (group.keys.some((key) => (job as Record<string, unknown>)[key] !== undefined)) need(group.allowed, group.what);
   for (const { before: old, after: job } of jobs.changed) {
-    // Production keys in the batch number; testing passes the batch; release releases it; the rest is orders.
+    // Each kind of field needs its own right, however the change is bundled: production keys in the batch
+    // number, testing passes the batch, release releases it, QA confirms a shared formula; the rest is orders.
     const keys = changedKeys(old, job);
-    if (only(keys, ["batchNumber", "batchNumberBy", "batchNumberAt"])) need(can.produce || can.editPlan, "enter batch numbers");
-    else if (only(keys, ["testedAt", "testedBy", "testResult"])) need(can.passTesting, "record testing results");
-    else if (only(keys, ["releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy", "poReleases"])) need(can.release, "release or reject batches");
-    // QA confirms that POs with different FG codes sharing a batch are the same formula.
-    else if (only(keys, ["formulaConfirmedBy", "formulaConfirmedAt"])) need(can.release, "confirm a shared batch's formula");
-    else need(can.editOrders, "edit job orders");
+    for (const group of jobGroups(can)) {
+      if (!keys.some((key) => group.keys.includes(key))) continue;
+      // A job order whose shares change loses its formula confirmation; clearing it is part of the edit.
+      if (group.clearedByEdit && group.keys.every((key) => (job as Record<string, unknown>)[key] === undefined)) need(can.editOrders || group.allowed, "edit job orders");
+      else need(group.allowed, group.what);
+    }
+    const rest = keys.filter((key) => !JOB_GROUPED.has(key));
+    if (rest.some((key) => !EDIT_STAMPS.includes(key)) || (rest.length && rest.length === keys.length)) need(can.editOrders, "edit job orders");
   }
   count("job orders added", jobs.added.length); count("job orders changed", jobs.changed.length); count("job orders removed", jobs.removed.length);
 
@@ -95,10 +115,15 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   if (lines.added.some((line) => !line.jobOrderId && !line.incomingWipId)) need(false, "add activities without a job order");
   if (lines.changed.some(({ before: old, after: line }) => old.jobOrderId && !line.jobOrderId)) need(false, "unlink activities from their job order");
   if (lines.removed.length) need(can.editPlan, "remove plan activities");
+  // Production results need production's right, whether set on a new activity or bundled with a plan change.
+  if (lines.added.some((line) => LINE_RESULTS.some((key) => (line as Record<string, unknown>)[key] !== undefined))) need(can.produce, "record production results");
   for (const { before: old, after: line } of lines.changed) {
-    // Production writes only its progress: start date, notes, completion time and actual quantity.
-    if (only(changedKeys(old, line), ["completedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "actualUnitVolumeMl", "shellWeightMg", "startedAt", "productionNotes", "progressQuantity", "progressUom", "progressUnitSize", "progressDestination"])) need(can.produce, "record production results");
-    else need(can.editPlan, "move or edit plan activities");
+    const keys = changedKeys(old, line);
+    if (keys.some((key) => LINE_RESULTS.includes(key))) need(can.produce, "record production results");
+    // When production reports another machine than planned, the planned one is kept on the activity.
+    const keptMachine = (key: string) => key === "plannedMachineIds" && old.plannedMachineIds === undefined && old.plannedMachineId === undefined;
+    const rest = keys.filter((key) => !LINE_RESULTS.includes(key) && !keptMachine(key));
+    if (rest.some((key) => !LINE_STAMPS.includes(key)) || (rest.length && rest.length === keys.length)) need(can.editPlan, "move or edit plan activities");
   }
   count("activities added", lines.added.length); count("activities changed", lines.changed.length); count("activities removed", lines.removed.length);
 

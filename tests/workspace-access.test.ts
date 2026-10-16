@@ -92,4 +92,59 @@ describe("workspace change review", () => {
     moved.data.lines.find((item) => item.id === line.id)!.plannedDate = "2026-10-09";
     expect(reviewWorkspaceChange(progressed, moved, role("schedule.edit")).denied).toContain("move or edit plan activities");
   });
+  it("refuses testing or release bundled with an ordinary job order edit", () => {
+    // Before: a mixed change needed only Orders edit, so notes + a pass went through.
+    const bundled = copy();
+    Object.assign(bundled.data.jobOrders[0], { notes: "Checked", testedAt: "2026-10-08T10:00:00.000Z", testedBy: "QC", testResult: "Passed" });
+    expect(reviewWorkspaceChange(base, bundled, planner).denied).toEqual(["record testing results"]);
+    expect(reviewWorkspaceChange(base, bundled, role("orders.edit", "testing.edit")).allowed).toBe(true);
+    const released = copy();
+    Object.assign(released.data.jobOrders[0], { quantity: released.data.jobOrders[0].quantity + 1, releaseQuantity: 10, releaseUom: "boxes", releasedAt: "2026-10-09T10:00:00.000Z", releasedBy: "QA" });
+    expect(reviewWorkspaceChange(base, released, planner).denied).toEqual(["release or reject batches"]);
+    const confirmed = copy();
+    Object.assign(confirmed.data.jobOrders[0], { notes: "x", formulaConfirmedBy: "QA", formulaConfirmedAt: "2026-10-09T10:00:00.000Z" });
+    expect(reviewWorkspaceChange(base, confirmed, planner).denied).toEqual(["confirm a shared batch's formula"]);
+    // Testing and release rights alone cannot edit the job order's figures.
+    expect(reviewWorkspaceChange(base, bundled, role("testing.edit")).denied).toEqual(["edit job orders"]);
+    // A stamp alone is still an edit.
+    const stamped = copy(); stamped.data.jobOrders[0].updatedBy = "Someone else";
+    expect(reviewWorkspaceChange(base, stamped, role("testing.edit")).denied).toEqual(["edit job orders"]);
+  });
+  it("lets an order editor clear a formula confirmation but not set one", () => {
+    const before = copy();
+    Object.assign(before.data.jobOrders[0], { formulaConfirmedBy: "QA", formulaConfirmedAt: "2026-10-09T10:00:00.000Z" });
+    const cleared = structuredClone(before);
+    delete cleared.data.jobOrders[0].formulaConfirmedBy; delete cleared.data.jobOrders[0].formulaConfirmedAt;
+    cleared.data.jobOrders[0].notes = "Shares changed";
+    expect(reviewWorkspaceChange(before, cleared, planner).allowed).toBe(true);
+  });
+  it("refuses a new job order that already carries testing, release or a batch number", () => {
+    const fresh = () => { const next = copy(); next.data.jobOrders.push({ ...structuredClone(base.data.jobOrders[0]), id: "job-new", number: "JO-NEW" }); return next.data.jobOrders.at(-1)!; };
+    const tested = copy(); tested.data.jobOrders.push({ ...fresh(), testedAt: "2026-10-08T10:00:00.000Z", testedBy: "QC", testResult: "Passed" });
+    expect(reviewWorkspaceChange(base, tested, planner).denied).toContain("record testing results");
+    const released = copy(); released.data.jobOrders.push({ ...fresh(), releasedAt: "2026-10-08T10:00:00.000Z", releasedBy: "QA", releaseQuantity: 1, releaseUom: "boxes" });
+    expect(reviewWorkspaceChange(base, released, planner).denied).toContain("release or reject batches");
+    const batch = copy(); batch.data.jobOrders.push({ ...fresh(), batchNumber: "B-1" });
+    expect(reviewWorkspaceChange(base, batch, role("orders.create")).denied).toContain("enter batch numbers");
+    const bare = copy(); const job = fresh();
+    for (const key of ["testedAt", "testedBy", "testResult", "releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy", "poReleases", "formulaConfirmedBy", "formulaConfirmedAt", "batchNumber", "batchNumberBy", "batchNumberAt"]) delete (job as Record<string, unknown>)[key];
+    bare.data.jobOrders.push(job);
+    expect(reviewWorkspaceChange(base, bare, role("orders.create")).allowed).toBe(true);
+  });
+  it("refuses production results bundled with a plan change or carried by a new activity", () => {
+    const bundled = copy();
+    Object.assign(bundled.data.lines.find((line) => line.id === openLine().id)!, { plannedDate: "2026-10-20", completedAt: "2026-10-08T10:00:00.000Z", yieldQuantity: 1 });
+    expect(reviewWorkspaceChange(base, bundled, planner).denied).toEqual(["record production results"]);
+    expect(reviewWorkspaceChange(base, bundled, production).denied).toContain("move or edit plan activities");
+    const added = copy();
+    added.data.lines.push({ ...openLine(), id: "new-line", completedAt: "2026-10-08T10:00:00.000Z", yieldQuantity: 5 });
+    expect(reviewWorkspaceChange(base, added, planner).denied).toEqual(["record production results"]);
+  });
+  it("lets production save results with its own stamp, but not a stamp alone", () => {
+    const next = copy();
+    Object.assign(next.data.lines.find((line) => line.id === openLine().id)!, { startedAt: "2026-10-07", updatedBy: "Kumar", updatedAt: "2026-10-07T08:00:00.000Z" });
+    expect(reviewWorkspaceChange(base, next, manager).allowed).toBe(true);
+    const forged = copy(); forged.data.lines.find((line) => line.id === openLine().id)!.updatedBy = "Someone else";
+    expect(reviewWorkspaceChange(base, forged, role("schedule.edit")).denied).toEqual(["move or edit plan activities"]);
+  });
 });

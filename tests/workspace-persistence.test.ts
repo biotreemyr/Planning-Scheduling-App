@@ -9,12 +9,16 @@ import { localPersistenceAllowed, sameLocalOrigin } from "../src/lib/persistence
 
 describe("workspace boundary", () => {
   it("allows only explicitly enabled loopback development access", () => {
-    const env = { NODE_ENV: "development", SCHEDULER_PERSISTENCE: "local", SCHEDULER_AUTH_MODE: "demo" };
+    const env = { NODE_ENV: "development", SCHEDULER_PERSISTENCE: "local", SCHEDULER_AUTH_MODE: "demo", DATABASE_URL: "postgresql://biotree@localhost:5432/bio_tree_scheduler_scratch?schema=public" };
     expect(localPersistenceAllowed("localhost:3001", env)).toBe(true);
     for (const host of ["attacker.example", "localhost.attacker.example", "10.0.0.1:3001", null]) expect(localPersistenceAllowed(host, env)).toBe(false);
     expect(localPersistenceAllowed("localhost", { ...env, NODE_ENV: "production" })).toBe(false);
     expect(localPersistenceAllowed("localhost", { ...env, SCHEDULER_AUTH_MODE: "core" })).toBe(false);
     expect(localPersistenceAllowed("localhost", { ...env, SCHEDULER_PERSISTENCE: undefined })).toBe(false);
+    // The demo has every right, so it never opens the live database, only a named copy.
+    expect(localPersistenceAllowed("localhost", { ...env, DATABASE_URL: "postgresql://biotree@localhost:5432/bio_tree_scheduler_mvp?schema=public" })).toBe(false);
+    expect(localPersistenceAllowed("localhost", { ...env, DATABASE_URL: undefined })).toBe(false);
+    expect(localPersistenceAllowed("localhost", { ...env, DATABASE_URL: "postgresql://biotree@localhost:5432/bio_tree_scheduler_preview" })).toBe(true);
     expect(sameLocalOrigin("localhost:3001", "http://localhost:3001")).toBe(true);
     expect(sameLocalOrigin("localhost:3001", "http://attacker.example")).toBe(false);
     expect(sameLocalOrigin("localhost:3001", null)).toBe(false);

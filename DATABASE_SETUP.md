@@ -30,13 +30,17 @@ restore/import UI. Closing or refreshing while unsaved triggers a browser warnin
 Requirements: Node.js 22+, PostgreSQL 16+, and pg_dump/psql/pg_restore on PATH.
 Create an empty database and set DATABASE_URL in the ignored .env file. Do not
 commit credentials. For localhost only, set SCHEDULER_AUTH_MODE=demo and
-SCHEDULER_PERSISTENCE=local.
+SCHEDULER_PERSISTENCE=local. Demo mode has no sign-in and every right, so it opens
+only a copy of the database: one whose name ends in `_scratch`, `_preview`, `_test`
+or `_dev` (for example `bio_tree_scheduler_scratch`). It refuses the live database.
 
     npm ci
     npm run db:migrate
     npm run dev -- --port 3001
 
-The dev server binds to 127.0.0.1. Database UI access is allowed only with a
+The dev server and `npm start` bind to 127.0.0.1 (`-H 127.0.0.1`); other machines
+reach the live site only through nginx and the Cloudflare tunnel. Any preview
+command must pass `-H 127.0.0.1` too. Database UI access is allowed only with a
 loopback Host in development mode. Writes additionally require a matching Origin
 and a server-generated session token. Client-supplied persona selection is NOT
 authentication. Production/Core mode cannot access this persistence endpoint.
