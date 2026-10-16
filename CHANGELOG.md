@@ -8,6 +8,8 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-16
+
 ### Added
 - **Yield** now shows each process's yield as a % of theoretical (what it made against what the batch formula gives at that process, as in the batch record), with the step yield beside it to show where a loss happened. Shown in Progress, the activity route and the production update.
 - **Capsulation update** has an optional empty shell weight (mg each) when filled capsules are weighed, with the ACG cellulose shell averages per size to pick from. The step yield is then worked out by powder (weighed less the shells), so overfill is not counted as a loss, and the average net fill shows against the unit weight on the PO. The last shell weight used for the product is offered again.
