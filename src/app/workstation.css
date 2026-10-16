@@ -929,3 +929,19 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 @media (max-width: 800px) { .ready-to-close li { grid-template-columns: 1fr; } }
 .ready-to-close .status-release-qty, .release-figures .status-release-qty { display: inline-flex; align-items: center; gap: 6px; }
 .ready-to-close .status-release-qty input, .release-figures .status-release-qty input { width: 110px; }
+
+/* Orders: view tabs above the table, and the print summary's options. */
+.order-views { display: flex; flex-wrap: wrap; margin: 4px 0 10px; width: fit-content; max-width: 100%; }
+.order-views button { display: inline-flex; align-items: center; gap: 6px; }
+.order-views button .badge { font-size: 11px; padding: 0 6px; }
+.order-views button[aria-selected="true"] { background: var(--blue-soft); color: var(--blue); font-weight: 700; }
+.order-views button + button { border-left: 1px solid var(--line); }
+.print-options { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 24px; margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); }
+.print-options fieldset { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 14px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.print-options legend { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.print-options fieldset label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.print-options fieldset label:has(input[type="date"]) { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.print-options-count { margin: 0; font-size: 13px; }
+.print-options-buttons { display: flex; gap: 8px; margin-left: auto; }
+.print-options fieldset label { white-space: nowrap; }
+.print-options input[type="checkbox"] { width: auto; min-width: 0; height: auto; min-height: 0; flex: none; margin: 0; }
