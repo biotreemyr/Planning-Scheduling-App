@@ -294,6 +294,9 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
   // Print summary first asks which orders: views, and when the PO was received.
   const [printSetup, setPrintSetup] = useState<{ views: OrderView[]; from: string; to: string } | null>(null);
   const [printRows, setPrintRows] = useState<string[] | null>(null);
+  // The print choices open in a pop-up window over the list.
+  const printDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const box = printDialog.current; if (!box) return; if (printSetup && !box.open) box.showModal(); if (!printSetup && box.open) box.close(); }, [printSetup]);
   const [month, setMonth] = useState("");
   const [basis, setBasis] = useState<MonthBasis>("scheduled");
   const [hidden, setHidden] = useState<string[]>([]);
@@ -372,7 +375,10 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
       <span className="result-count" aria-live="polite">{table.length} of {orders.length} orders</span>
       {action}
     </div>
+    <dialog ref={printDialog} className="activity-dialog print-dialog" aria-labelledby="print-dialog-title" onClose={() => setPrintSetup(null)}>
     {printSetup ? <div className="print-options" role="group" aria-label="Print summary options">
+      <div className="panel-title"><h2 id="print-dialog-title">Print summary</h2><button type="button" className="icon-button" aria-label="Close" title="Close" onClick={() => setPrintSetup(null)}><X size={18} /></button></div>
+      <p className="route-muted">Choose which orders to print. Searches and the month filter on the list apply too.</p>
       <fieldset><legend>Which orders</legend>
         {ORDER_VIEWS.map((item) => <label key={item.key} title={item.hint}><input type="checkbox" checked={printSetup.views.includes(item.key)} onChange={(event) => setPrintSetup({ ...printSetup, views: event.target.checked ? [...printSetup.views, item.key] : printSetup.views.filter((key) => key !== item.key) })} />{item.label}</label>)}
       </fieldset>
@@ -380,12 +386,13 @@ function OrdersTable({ nonProduction, action, printable, orders, customerRecords
         <label>From<input type="date" value={printSetup.from} onChange={(event) => setPrintSetup({ ...printSetup, from: event.target.value })} /></label>
         <label>To<input type="date" value={printSetup.to} onChange={(event) => setPrintSetup({ ...printSetup, to: event.target.value })} /></label>
       </fieldset>
-      <p className="print-options-count" aria-live="polite"><strong>{toPrint.length} order{toPrint.length === 1 ? "" : "s"}</strong>{toPrint.length ? ` · about ${Math.max(1, Math.ceil(toPrint.length / ORDERS_PER_PRINTED_PAGE))} page${Math.ceil(toPrint.length / ORDERS_PER_PRINTED_PAGE) > 1 ? "s" : ""}` : ""}{filtering ? " · your searches and month filter apply" : ""}</p>
+      <p className="print-options-count" aria-live="polite"><strong>{toPrint.length} order{toPrint.length === 1 ? "" : "s"}</strong>{toPrint.length ? ` · about ${Math.max(1, Math.ceil(toPrint.length / ORDERS_PER_PRINTED_PAGE))} page${Math.ceil(toPrint.length / ORDERS_PER_PRINTED_PAGE) > 1 ? "s" : ""}` : ""}</p>
       <div className="print-options-buttons">
-        <button type="button" className="primary-button" disabled={!toPrint.length} onClick={() => { setPrintRows(toPrint.map((row) => row.order.id)); setPrint((current) => ({ request: current.request + 1 })); setPrintSetup(null); }}><Printer size={16} />Print</button>
+        <button type="button" className="primary-button" disabled={!toPrint.length} onClick={() => { printDialog.current?.close(); setPrintRows(toPrint.map((row) => row.order.id)); setPrint((current) => ({ request: current.request + 1 })); setPrintSetup(null); }}><Printer size={16} />Print</button>
         <button type="button" className="calendar-button" onClick={() => setPrintSetup(null)}>Cancel</button>
       </div>
     </div> : null}
+    </dialog>
     <div className="view-switch order-views" role="tablist" aria-label="Show orders">
       <button type="button" role="tab" aria-selected={view === "all"} title="Every order, whatever its stage" onClick={() => chooseView("all")}>All <span className="badge neutral">{filtered.length}</span></button>
       {ORDER_VIEWS.map((item) => <button key={item.key} type="button" role="tab" aria-selected={view === item.key} title={item.hint} onClick={() => chooseView(item.key)}>{item.label} <span className="badge neutral">{counts[item.key]}</span></button>)}
