@@ -4,6 +4,7 @@ import type { WorkspaceSnapshot } from "@/lib/domain/workspace";
 import type { Customer, Product } from "@/lib/domain/types";
 import { customerFor, productFor, type MasterLists } from "@/lib/services/masterData";
 import type { WorkspaceCapabilities } from "./capabilities";
+import { bookingMoved } from "@/lib/services/planChanges";
 
 type Keyed = { id: string };
 function diff<T extends Keyed>(before: T[], after: T[]) {
@@ -129,11 +130,16 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
 
   const entries = diff(before.data.entries, after.data.entries);
   if (entries.added.length || entries.removed.length || entries.changed.length) need(can.produce || can.editPlan, "change machine bookings");
-  const previous = new Map(before.data.entries.map((entry) => [entry.id, entry.status]));
+  const previous = new Map(before.data.entries.map((entry) => [entry.id, entry]));
   for (const entry of [...entries.added, ...entries.changed.map((item) => item.after)]) {
-    if (entry.status === "Confirmed" && previous.get(entry.id) !== "Confirmed") need(can.approve, "confirm machine bookings");
-    if (entry.status === "Cancelled" && previous.get(entry.id) !== "Cancelled") need(can.cancel, "cancel machine bookings");
+    const was = previous.get(entry.id);
+    if (entry.status === "Confirmed" && was?.status !== "Confirmed") need(can.approve, "confirm machine bookings");
+    if (entry.status === "Cancelled" && was?.status !== "Cancelled") need(can.cancel, "cancel machine bookings");
+    // A confirmed booking keeps its machine and time unless an approver moves it (else it goes back to Draft).
+    if (was?.status === "Confirmed" && entry.status === "Confirmed" && bookingMoved(was, entry)) need(can.approve, "move confirmed machine bookings");
   }
+  // Deleting a booking past Draft takes it off the machine as cancelling would.
+  if (entries.removed.some((entry) => entry.status !== "Draft" && entry.status !== "Cancelled")) need(can.cancel, "cancel machine bookings");
   count("bookings added", entries.added.length); count("bookings changed", entries.changed.length); count("bookings removed", entries.removed.length);
 
   const actuals = diff(before.data.actuals.map((item) => ({ ...item, id: item.planLineId })), after.data.actuals.map((item) => ({ ...item, id: item.planLineId })));

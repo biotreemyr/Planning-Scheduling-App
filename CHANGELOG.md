@@ -11,6 +11,9 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 ### Added
 - **Late activities** show in red: an open activity whose planned day has passed is red in the order's Progress grid (marked "Late") and has a red edge in the Planner list, with a warning in the process-flow warnings.
 
+### Changed
+- **Machine bookings** that are confirmed can be moved to another machine or time only by someone who can approve bookings. When anyone else moves the activity, its confirmed bookings move with it and go back to Draft, to be confirmed again. Deleting a booking that is past Draft needs the right to cancel bookings.
+
 ### Fixed
 - **Job orders** are now counted against the PO in the PO's own unit, whatever unit their batch quantity is in. For example, job orders kept in capsules for a PO in boxes count by their boxes, so "in job orders" and "still to release" are right and a job order that would take the PO over its quantity is refused. A PO already over shows how much over it is.
 - **Reports** show the "Updated by" time, and Incoming WIP the "Sent by" time, as DD/MM/YYYY like everywhere else (it showed month first on some computers).

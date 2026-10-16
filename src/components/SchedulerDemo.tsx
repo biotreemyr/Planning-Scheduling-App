@@ -50,7 +50,7 @@ import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, wit
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
 import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
-import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
+import { moveActivity, reopenMovedBookings, resizeActivity } from "@/lib/services/planChanges";
 import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, lateWarnings, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 import type { Release } from "@/lib/services/releases";
@@ -735,7 +735,11 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   type WorkspaceData = { lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] };
   // Every change goes through here and is stamped with who made it and when (see stamps.ts).
   const setData = (update: WorkspaceData | ((current: WorkspaceData) => WorkspaceData)) =>
-    setRawData((current) => stampChanges(current, typeof update === "function" ? update(current) : update, member.name, new Date().toISOString()));
+    setRawData((current) => {
+      const next = typeof update === "function" ? update(current) : update;
+      const entries = reopenMovedBookings(current.entries, next.entries, caps.approve);
+      return stampChanges(current, entries === next.entries ? next : { ...next, entries }, member.name, new Date().toISOString());
+    });
   const { uoms, activities } = useSettings();
   const snapshot = { schemaVersion: 1, directory, products, workCentres, machines: storedMachines, measurements: { uoms, activities }, yieldLimits, data } as WorkspaceSnapshot;
   const persistenceStatus = useWorkspacePersistence(initial, snapshot, writeToken);
