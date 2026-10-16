@@ -50,6 +50,8 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   const count = (label: string, n: number) => { if (n) summary.push(`${label}: ${n}`); };
 
   const configuration = (["directory", "products", "workCentres", "machines", "measurements"] as const).filter((key) => !isDeepStrictEqual(before[key], after[key]));
+  // QA sets the acceptable yield ranges.
+  if (!isDeepStrictEqual(before.yieldLimits ?? { byProcess: {} }, after.yieldLimits ?? { byProcess: {} })) { need(can.release, "set yield limits"); summary.push("yield limits changed"); }
   const products = diff(before.products, after.products);
   const fromMasterData = [...products.added.map((item) => ({ before: undefined, after: item })), ...products.changed].filter((change) => productFromMasterData(change.before, change.after, lists));
   // A product keyed in on an R&D, trial or pilot order is added to the R&D list as part of creating the order.

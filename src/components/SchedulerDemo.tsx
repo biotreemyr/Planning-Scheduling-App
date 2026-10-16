@@ -43,6 +43,7 @@ import type {
 import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
+import type { YieldLimits } from "@/lib/services/yields";
 import { closeOrder, formulaPending, jobForOrder, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
@@ -725,6 +726,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const [products, setProducts] = useState<Product[]>(initial.snapshot.products);
   const [workCentres, setWorkCentres] = useState<WorkCentre[]>(initial.snapshot.workCentres);
   const [storedMachines, setMachines] = useState<Machine[]>(initial.snapshot.machines);
+  // QA's acceptable yield ranges, per process and for the final yield.
+  const [yieldLimits, setYieldLimits] = useState<YieldLimits>(initial.snapshot.yieldLimits ?? { byProcess: {} });
   // Shown and booked with Master Data's current Equipment ID, name and active state; saved as stored.
   const machines = useMemo(() => withMasterEquipment(storedMachines, equipment), [storedMachines, equipment]);
   const [data, setRawData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] }>(initial.snapshot.data);
@@ -733,7 +736,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const setData = (update: WorkspaceData | ((current: WorkspaceData) => WorkspaceData)) =>
     setRawData((current) => stampChanges(current, typeof update === "function" ? update(current) : update, member.name, new Date().toISOString()));
   const { uoms, activities } = useSettings();
-  const snapshot = { schemaVersion: 1, directory, products, workCentres, machines: storedMachines, measurements: { uoms, activities }, data } as WorkspaceSnapshot;
+  const snapshot = { schemaVersion: 1, directory, products, workCentres, machines: storedMachines, measurements: { uoms, activities }, yieldLimits, data } as WorkspaceSnapshot;
   const persistenceStatus = useWorkspacePersistence(initial, snapshot, writeToken);
   const scope = <T extends { calendarId?: string },>(records: T[]) => visibleCalendars.flatMap((item) => scopeCalendarRecords(records, member, item, directory));
   const entries = scope(data.entries);
@@ -1116,6 +1119,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
     return [];
   }
+  // QA sets the acceptable yield ranges.
+  function saveYieldLimits(next: YieldLimits) {
+    if (!caps.release) return ["Only QA can change the yield limits."];
+    setYieldLimits(next);
+    return [];
+  }
   // QA confirms that POs with different FG codes sharing a batch are the same formula.
   function confirmFormula(id: string) {
     if (!caps.release) return ["Your access does not include confirming a shared batch's formula."];
@@ -1188,7 +1197,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   }
   function applySnapshot(next: WorkspaceSnapshot) {
     if (!canManage) return;
-    setDirectory(next.directory); setProducts(next.products); setWorkCentres(next.workCentres); setMachines(next.machines); setRawData(next.data);
+    setDirectory(next.directory); setProducts(next.products); setWorkCentres(next.workCentres); setMachines(next.machines); setYieldLimits(next.yieldLimits ?? { byProcess: {} }); setRawData(next.data);
     setUnitSelection(""); setProcessSelection(null); setSelectedActivity(null);
   }
   function receiveWip(id: string) {
@@ -1229,7 +1238,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   </div>;
   return <main className="workstation">
     <AppHeader version={releases[0]?.version} badges={canEditOrders ? { orders: data.orders.filter((order) => !isNonProduction(order) && readyToClose(order, data.jobOrders)).length, trials: data.orders.filter((order) => isNonProduction(order) && readyToClose(order, data.jobOrders)).length } : {}} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAudit={caps.auditTrail} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
-      statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }] : [])]}
+      statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }, { id: "yield" as const, label: "Yield limits" }] : [])]}
       statusSection={statusSection} onStatusSection={setStatusSection} />
     <div className="workstation-content">
       <header className="workstation-topbar"><div className="topbar-title"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>{persistenceStatus}</div>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
@@ -1266,7 +1275,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers} directory={directory} onConfirmFormula={confirmFormula}
+      {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers} directory={directory} onConfirmFormula={confirmFormula} yieldLimits={yieldLimits} onYieldLimits={saveYieldLimits}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
         section={statusSection} onSection={setStatusSection} onTest={testJob} onRelease={releaseJob} onReject={rejectJob} /> : null}
       {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}

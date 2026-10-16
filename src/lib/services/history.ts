@@ -146,6 +146,17 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
 
   const setup = (["directory", "products", "workCentres", "machines", "measurements"] as const).filter((key) => !same(before[key], after[key]));
   if (setup.length) changes.push({ kind: "Setup", text: `Setup changed: ${setup.map((key) => ({ directory: "units, processes and people", products: "products", workCentres: "work centres", machines: "machines", measurements: "units of measure" })[key]).join(", ")}` });
+  // QA's yield limits: each range that changed, by process name, e.g. "Capsulation 97.0–101.0% (was none)".
+  type Range = { min?: number; max?: number };
+  const limitsOf = (value: Snapshot) => ((value as unknown as { yieldLimits?: { byProcess?: Record<string, Range>; final?: Range } }).yieldLimits ?? {});
+  const rangeText = (range?: Range) => !range || (range.min === undefined && range.max === undefined) ? "none" : `${range.min !== undefined ? range.min.toFixed(1) : "…"}–${range.max !== undefined ? range.max.toFixed(1) : "…"}%`;
+  const oldLimits = limitsOf(before), newLimits = limitsOf(after);
+  const processNames = new Map(((after as unknown as { directory?: { processes?: { id: string; name: string }[] } }).directory?.processes ?? []).map((item) => [item.id, item.name]));
+  const limitChanges = [...new Set([...Object.keys(oldLimits.byProcess ?? {}), ...Object.keys(newLimits.byProcess ?? {})])]
+    .filter((key) => rangeText(oldLimits.byProcess?.[key]) !== rangeText(newLimits.byProcess?.[key]))
+    .map((key) => `${processNames.get(key) ?? "A process"} ${rangeText(newLimits.byProcess?.[key])} (was ${rangeText(oldLimits.byProcess?.[key])})`);
+  if (rangeText(oldLimits.final) !== rangeText(newLimits.final)) limitChanges.push(`final yield ${rangeText(newLimits.final)} (was ${rangeText(oldLimits.final)})`);
+  if (limitChanges.length) changes.push({ kind: "Setup", text: `Yield limits set: ${limitChanges.join("; ")}` });
   return changes;
 }
 

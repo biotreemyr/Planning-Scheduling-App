@@ -4,12 +4,13 @@ import { createPortal } from "react-dom";
 import { CheckCircle2, PackageCheck, Printer, Search, XCircle } from "lucide-react";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
+import { limitText, type YieldLimits, type YieldRange } from "@/lib/services/yields";
 import { OTHER_USES, finalOutputFor, formulaPending, jobParts, needsFormulaCheck, releaseFor, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { finalOutput, finishedOn, packingNumber, releaseQueue, testingQueue, testResult, type JobOrder, type TestResult } from "@/lib/services/jobOrders";
 import type { PurchaseOrder } from "@/lib/services/orders";
 import { formatDate, formatDateTime } from "@/lib/services/dates";
 
-export type StatusSection = "testing" | "release";
+export type StatusSection = "testing" | "release" | "yield";
 export type StatusAccess = { viewTesting: boolean; passTesting: boolean; printTesting: boolean; viewRelease: boolean; release: boolean; printRelease: boolean };
 
 const day = (value?: string) => formatDate(value);
@@ -20,7 +21,9 @@ const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractio
  * output not yet passed; Pass moves it to Release. Release lists passed batches with the release
  * quantity (the final output, which can be changed); Release completes it. Only pending work shows.
  */
-export function StatusPanel({ jobOrders, orders, products, lines, transfers, directory, access, section: chosen, onSection, onTest, onRelease, onReject, onConfirmFormula }: {
+export function StatusPanel({ jobOrders, orders, products, lines, transfers, directory, access, section: chosen, onSection, onTest, onRelease, onReject, onConfirmFormula, yieldLimits, onYieldLimits }: {
+  // QA's acceptable step and final yield ranges, set under QA/QC.
+  yieldLimits: YieldLimits; onYieldLimits: (limits: YieldLimits) => string[];
   jobOrders: JobOrder[]; orders: PurchaseOrder[]; products: Product[]; lines: PlanLine[]; transfers: { sourceLineId: string }[]; directory: CalendarDirectory;
   access: StatusAccess;
   // The section picked under QA/QC in the sidebar.
@@ -33,7 +36,7 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   onConfirmFormula: (jobId: string) => string[];
 }) {
   // A section the person may not see falls back to the one they may.
-  const section: StatusSection = chosen === "release" ? access.viewRelease ? "release" : "testing" : access.viewTesting ? "testing" : "release";
+  const section: StatusSection = chosen === "yield" && access.viewRelease ? "yield" : chosen === "release" ? access.viewRelease ? "release" : "testing" : access.viewTesting ? "testing" : "release";
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [releasing, setReleasing] = useState<string | null>(null);
   const toConfirm = jobOrders.filter((job) => formulaPending(job, orders) && !job.releasedAt && !job.rejectedAt);
@@ -51,6 +54,7 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   };
   const report = (errors: string[], text: string) => setMessage(errors.length ? { text: errors.join(" "), error: true } : { text, error: false });
   if (!access.viewTesting && !access.viewRelease) return null;
+  if (section === "yield") return <YieldLimitsPanel directory={directory} limits={yieldLimits} editable={access.release} onSave={onYieldLimits} />;
 
   return <section className="workspace-panel status-panel">
     <div className="panel-title">
@@ -192,4 +196,55 @@ function ReleasePanel({ job, orders, lines, transfers, directory, formulaWaiting
     })}
     {open.length > 1 ? <div className="release-actions release-all"><button type="button" className="primary-button" disabled={formulaWaiting} onClick={() => onRelease(open.map((part) => entryFor(part.orderId)), `${job.number} released to ${open.length} POs.`)}><PackageCheck size={16} />Release whole batch ({open.length} POs)</button></div> : null}
   </div>;
+}
+
+/**
+ * QA's acceptable yield ranges: for each process (its step yield) and for the batch's final yield.
+ * Results within range show green, near a limit amber, outside red; production gives a deviation
+ * note when a step comes out outside. A blank minimum or maximum means no limit on that side.
+ */
+function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: CalendarDirectory; limits: YieldLimits; editable: boolean; onSave: (limits: YieldLimits) => string[] }) {
+  // Processes in the unit's route order, each once.
+  const processes = [...new Map(directory.calendars.map((calendar) => [calendar.processId, directory.processes.find((item) => item.id === calendar.processId)])).values()].filter((item): item is NonNullable<typeof item> => !!item);
+  const text = (value?: number) => value === undefined ? "" : String(value);
+  const [draft, setDraft] = useState<Record<string, { min: string; max: string }>>(() => ({
+    ...Object.fromEntries(processes.map((process) => [process.id, { min: text(limits.byProcess[process.id]?.min), max: text(limits.byProcess[process.id]?.max) }])),
+    final: { min: text(limits.final?.min), max: text(limits.final?.max) }
+  }));
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const read = (value: string) => value.trim() === "" ? undefined : Number(value);
+  const range = (key: string): YieldRange => ({ ...(read(draft[key].min) !== undefined ? { min: read(draft[key].min) } : {}), ...(read(draft[key].max) !== undefined ? { max: read(draft[key].max) } : {}) });
+  const row = (key: string, label: string, hint: string) => <tr key={key}>
+    <th scope="row">{label}<small>{hint}</small></th>
+    {(["min", "max"] as const).map((side) => <td key={side} className="numeric"><span className="yield-limit-input"><input type="number" min="0" max="200" step="0.1" disabled={!editable} aria-label={`${label} ${side === "min" ? "minimum" : "maximum"} %`}
+      value={draft[key][side]} placeholder="No limit" onChange={(event) => setDraft({ ...draft, [key]: { ...draft[key], [side]: event.target.value } })} />%</span></td>)}
+    <td>{limitText(range(key)) || <span className="route-muted">No limits</span>}</td>
+  </tr>;
+  return <section className="workspace-panel yield-limits">
+    <div className="panel-title"><h2>Yield limits</h2></div>
+    <p className="orders-help">The acceptable yield at each process (its step yield: what it made against what the process before handed over) and for the batch's final yield. Results within range show green, within reach of a limit amber, outside red. When a step comes out outside its range, production adds a deviation note as they save it.</p>
+    {message ? <p role={message.error ? "alert" : "status"} className={message.error ? undefined : "calendar-notice"}>{message.text}</p> : null}
+    <div className="orders-table-scroll" role="region" aria-label="Yield limits">
+      <table className="orders-table yield-limits-table">
+        <thead><tr><th scope="col">Process</th><th scope="col" className="numeric">Minimum</th><th scope="col" className="numeric">Maximum</th><th scope="col">Acceptable range</th></tr></thead>
+        <tbody>
+          {processes.map((process) => row(process.id, process.name, "Step yield"))}
+          <tr className="yield-limits-final-gap"><td colSpan={4} /></tr>
+          {row("final", "Final yield", "Last stage's good output ÷ batch quantity")}
+        </tbody>
+      </table>
+    </div>
+    {editable ? <div className="yield-limits-actions"><button type="button" className="primary-button" onClick={() => {
+      const keys = [...processes.map((process) => process.id), "final"];
+      for (const key of keys) {
+        const { min, max } = range(key);
+        const name = key === "final" ? "Final yield" : processes.find((process) => process.id === key)?.name ?? "A process";
+        if ([min, max].some((value) => value !== undefined && (!Number.isFinite(value) || value < 0 || value > 200))) { setMessage({ text: `${name}: limits are percentages from 0 to 200.`, error: true }); return; }
+        if (min !== undefined && max !== undefined && min > max) { setMessage({ text: `${name}: the minimum is above the maximum.`, error: true }); return; }
+      }
+      const next: YieldLimits = { byProcess: Object.fromEntries(processes.map((process) => [process.id, range(process.id)]).filter(([, value]) => Object.keys(value as object).length)), ...(Object.keys(range("final")).length ? { final: range("final") } : {}) };
+      const errors = onSave(next);
+      setMessage(errors.length ? { text: errors.join(" "), error: true } : { text: "Yield limits saved. Results across the scheduler follow them now.", error: false });
+    }}>Save yield limits</button></div> : <p className="route-muted">Only QA can change these limits.</p>}
+  </section>;
 }
