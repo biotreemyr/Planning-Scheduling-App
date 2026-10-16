@@ -43,6 +43,8 @@ import type {
 import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
 import { seedData } from "@/lib/seed";
 import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
+import { formatYield, limitText, stepYieldWith, yieldWarnings, type YieldLimits } from "@/lib/services/yields";
+import { YieldLimitsProvider } from "./YieldLimitsContext";
 import { closeOrder, formulaPending, jobForOrder, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
@@ -725,6 +727,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const [products, setProducts] = useState<Product[]>(initial.snapshot.products);
   const [workCentres, setWorkCentres] = useState<WorkCentre[]>(initial.snapshot.workCentres);
   const [storedMachines, setMachines] = useState<Machine[]>(initial.snapshot.machines);
+  // QA's acceptable yield ranges, per process and for the final yield.
+  const [yieldLimits, setYieldLimits] = useState<YieldLimits>(initial.snapshot.yieldLimits ?? { byProcess: {} });
   // Shown and booked with Master Data's current Equipment ID, name and active state; saved as stored.
   const machines = useMemo(() => withMasterEquipment(storedMachines, equipment), [storedMachines, equipment]);
   const [data, setRawData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] }>(initial.snapshot.data);
@@ -733,7 +737,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const setData = (update: WorkspaceData | ((current: WorkspaceData) => WorkspaceData)) =>
     setRawData((current) => stampChanges(current, typeof update === "function" ? update(current) : update, member.name, new Date().toISOString()));
   const { uoms, activities } = useSettings();
-  const snapshot = { schemaVersion: 1, directory, products, workCentres, machines: storedMachines, measurements: { uoms, activities }, data } as WorkspaceSnapshot;
+  const snapshot = { schemaVersion: 1, directory, products, workCentres, machines: storedMachines, measurements: { uoms, activities }, yieldLimits, data } as WorkspaceSnapshot;
   const persistenceStatus = useWorkspacePersistence(initial, snapshot, writeToken);
   const scope = <T extends { calendarId?: string },>(records: T[]) => visibleCalendars.flatMap((item) => scopeCalendarRecords(records, member, item, directory));
   const entries = scope(data.entries);
@@ -750,7 +754,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const canCreateOrders = caps.createOrders;
   const canEditOrders = caps.editOrders;
   // One set of process-flow warnings feeds the calendar, list, activity panel and orders.
-  const flow = [...checkProcessFlow(data.lines, data.entries, data.orders, products, directory), ...checkTally(data.lines, data.jobOrders, directory)];
+  const flow = [...checkProcessFlow(data.lines, data.entries, data.orders, products, directory), ...checkTally(data.lines, data.jobOrders, directory), ...yieldWarnings(data.jobOrders, data.lines, data.orders, directory)];
   const flowByLine = warningsByLine(flow);
   const route = selectedLine ? batchRoute(selectedLine, allowedLines, directory) : [];
   const routeLineIds = new Set(route.flatMap((step) => step.lines.map((item) => item.id)));
@@ -776,10 +780,25 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => ({ ...current, actuals: [...current.actuals.filter((item) => item.planLineId !== line.id), actual] }));
     return [];
   }
+  // The step yield an actual would give this activity's process, against QA's limits.
+  function stepYieldFor(line: PlanLine, quantity: number, uom: string) {
+    const job = data.jobOrders.find((item) => item.id === line.jobOrderId);
+    if (!job) return undefined;
+    const lines = data.lines.map((item) => item.id === line.id ? { ...item, yieldUom: uom } : item);
+    return stepYieldWith(job, line.productionOrderId ?? job.orderId, lines, data.orders, directory, line.id, quantity, yieldLimits);
+  }
+  // A step outside QA's limits is saved only with production's deviation note.
+  function deviationNeeded(line: PlanLine, input: CompletionInput) {
+    const stage = stepYieldFor(line, input.quantity, input.uom || line.uom || "");
+    return stage?.tone === "out" && !input.deviation?.trim()
+      ? `Step yield ${formatYield(stage.percent)} is outside QA's limits (${limitText(stage.limit)}). Add a deviation note before saving.` : "";
+  }
   function completeProduction(input: CompletionInput) {
     if (!selectedLine) return ["Activity not available."];
     const errors = validateCompletion(selectedLine, input, identity ? { ...member, role: "production" } : member, directory, !identity);
     if (errors.length) return errors;
+    const deviation = deviationNeeded(selectedLine, input);
+    if (deviation) return [deviation];
     const machine = machineChange(selectedLine, input.machineIds);
     if ("error" in machine) return [machine.error];
     // The completed day production keyed in, at the time of saving (or end of day for an earlier day).
@@ -796,7 +815,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => {
       if (current.lines.find((item) => item.id === line.id)?.completedAt) return current;
       const existingActual = current.actuals.find((item) => item.planLineId === line.id);
-      const actual: ProductionActual = { ...existingActual, planLineId: line.id, calendarId: line.calendarId, teamId: "", actualQuantity: input.quantity, plannedQuantity: line.quantity, uom, productionDate: input.completedDate || localDateKey(new Date(completedAt)), hasDeviation: existingActual?.hasDeviation ?? false, deviation: existingActual?.deviation ?? "", correctiveAction: existingActual?.correctiveAction ?? "", updatedAt: completedAt, updatedBy: member.name };
+      const actual: ProductionActual = { ...existingActual, planLineId: line.id, calendarId: line.calendarId, teamId: "", actualQuantity: input.quantity, plannedQuantity: line.quantity, uom, productionDate: input.completedDate || localDateKey(new Date(completedAt)), hasDeviation: input.deviation?.trim() ? true : existingActual?.hasDeviation ?? false, deviation: input.deviation?.trim() || existingActual?.deviation || "", correctiveAction: existingActual?.correctiveAction ?? "", updatedAt: completedAt, updatedBy: member.name };
       return {
         ...current,
         lines: current.lines.map((item) => item.id === line.id ? { ...withoutProgress(item), completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input), startedAt: item.startedAt ?? localDateKey(new Date(completedAt)) } : item),
@@ -826,6 +845,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     const outgoing = data.transfers.find((item) => item.sourceLineId === line.id);
     const errors = validateCorrection(line, input, outgoing, identity ? { ...member, role: "production" } : member, directory, !identity);
     if (errors.length) return errors;
+    const deviation = deviationNeeded(line, input);
+    if (deviation) return [deviation];
     const machine = machineChange(line, input.machineIds);
     if ("error" in machine) return [machine.error];
     const now = new Date();
@@ -840,7 +861,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
         return { ...rest, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input),
           startedAt: input.startedAt || input.completedDate!, ...(input.notes ? { productionNotes: input.notes } : {}) };
       });
-      const actuals = current.actuals.map((item) => item.planLineId === line.id ? { ...item, actualQuantity: input.quantity, uom, productionDate: input.completedDate!, updatedAt: now.toISOString(), updatedBy: member.name } : item);
+      const actuals = current.actuals.map((item) => item.planLineId === line.id ? { ...item, actualQuantity: input.quantity, uom, productionDate: input.completedDate!, updatedAt: now.toISOString(), updatedBy: member.name,
+        ...(input.deviation?.trim() ? { hasDeviation: true, deviation: input.deviation.trim() } : {}) } : item);
       let transfers = current.transfers;
       if (!handedOver) {
         transfers = transfers.filter((item) => item.sourceLineId !== line.id);
@@ -1116,6 +1138,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
     return [];
   }
+  // QA sets the acceptable yield ranges.
+  function saveYieldLimits(next: YieldLimits) {
+    if (!caps.release) return ["Only QA can change the yield limits."];
+    setYieldLimits(next);
+    return [];
+  }
   // QA confirms that POs with different FG codes sharing a batch are the same formula.
   function confirmFormula(id: string) {
     if (!caps.release) return ["Your access does not include confirming a shared batch's formula."];
@@ -1188,7 +1216,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   }
   function applySnapshot(next: WorkspaceSnapshot) {
     if (!canManage) return;
-    setDirectory(next.directory); setProducts(next.products); setWorkCentres(next.workCentres); setMachines(next.machines); setRawData(next.data);
+    setDirectory(next.directory); setProducts(next.products); setWorkCentres(next.workCentres); setMachines(next.machines); setYieldLimits(next.yieldLimits ?? { byProcess: {} }); setRawData(next.data);
     setUnitSelection(""); setProcessSelection(null); setSelectedActivity(null);
   }
   function receiveWip(id: string) {
@@ -1227,9 +1255,9 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       </fieldset>
     </ToolbarMenu>
   </div>;
-  return <main className="workstation">
+  return <YieldLimitsProvider value={yieldLimits}><main className="workstation">
     <AppHeader version={releases[0]?.version} badges={canEditOrders ? { orders: data.orders.filter((order) => !isNonProduction(order) && readyToClose(order, data.jobOrders)).length, trials: data.orders.filter((order) => isNonProduction(order) && readyToClose(order, data.jobOrders)).length } : {}} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAudit={caps.auditTrail} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
-      statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }] : [])]}
+      statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }, { id: "yield" as const, label: "Yield limits" }] : [])]}
       statusSection={statusSection} onStatusSection={setStatusSection} />
     <div className="workstation-content">
       <header className="workstation-topbar"><div className="topbar-title"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>{persistenceStatus}</div>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
@@ -1239,10 +1267,10 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine} onResizeLine={resizeLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
-      {activeTab === "planner" && selectedLine ? <ActivityWorkspace key={`${selectedLine.jobOrderId ?? selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
+      {activeTab === "planner" && selectedLine ? <ActivityWorkspace directory={directory} allLines={data.lines} key={`${selectedLine.jobOrderId ?? selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
         orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} transfers={data.transfers} visibleCalendarIds={allowedCalendars.map((item) => item.id)} canAssign={canAssign} canUpdate={canProduce} updating={activityUpdating} notice={activityNotice} onAssignMachine={assignMachine} onOpenLine={openActivity}
         jobOrders={data.jobOrders}>
-        {(inRow, equivalence) => <ProductionUpdate key={selectedLine.id} inRow={inRow} equivalence={equivalence} onCancel={() => setActivityUpdating(false)} line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
+        {(inRow, equivalence) => <ProductionUpdate key={selectedLine.id} previewYield={(quantity, uom) => stepYieldFor(selectedLine, quantity, uom)} inRow={inRow} equivalence={equivalence} onCancel={() => setActivityUpdating(false)} line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
           machines={unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? "") && (machine.active === "Active" || data.entries.some((entry) => entry.planLineId === selectedLine.id && entry.machineId === machine.id)))}
           machineIds={bookedMachineIds(data.entries, selectedLine.id)}
           onSaved={(message) => { setActivityUpdating(false); setActivityNotice(`${selectedLine.activityType ?? "Activity"} ${formatDate(selectedLine.plannedDate)}: ${message}`); }} />}
@@ -1266,7 +1294,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
           return [];
         }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
-      {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers} directory={directory} onConfirmFormula={confirmFormula}
+      {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers} directory={directory} onConfirmFormula={confirmFormula} yieldLimits={yieldLimits} onYieldLimits={saveYieldLimits}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
         section={statusSection} onSection={setStatusSection} onTest={testJob} onRelease={releaseJob} onReject={rejectJob} /> : null}
       {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
@@ -1280,5 +1308,5 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
         <ReportsPanel planLines={planLines} entries={entries} products={products} workCentres={workCentres} machines={calendarMachines} />
       </> : null}
     </div>
-  </main>;
+  </main></YieldLimitsProvider>;
 }

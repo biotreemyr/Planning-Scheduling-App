@@ -34,6 +34,9 @@ export const workspaceSchema = z.object({
   workCentres: z.array(record.extend({ code: name, description: text.optional(), active })),
   machines: z.array(record.extend({ code: name, workCentreId: id, unitId: id, processIds: z.array(id).min(1), setupMinutes: number.int().nonnegative(), capacity: number.positive().optional(), capacityUom: text.optional(), capacityNotes: text.optional(), active, masterDataId: z.string().uuid().optional() })),
   measurements: settings,
+  // QA's acceptable step yield per process (by process id) and final yield, in %. Older workspaces have none.
+  yieldLimits: z.object({ byProcess: z.record(id, z.object({ min: z.number().min(0).max(200).optional(), max: z.number().min(0).max(200).optional() })),
+    final: z.object({ min: z.number().min(0).max(200).optional(), max: z.number().min(0).max(200).optional() }).optional() }).default({ byProcess: {} }),
   data: z.object({
     lines: z.array(z.object({ id, plannedBy: text.optional(), plannedAt: timestamp.optional(), updatedBy: text.optional(), updatedAt: timestamp.optional(), plannedMachineId: id.optional(), plannedMachineIds: z.array(id).optional(), calendarId: id, planId: id, productId: id, quantity: number.positive(), plannedDate: date, endDate: date.optional(),
       priority: z.enum(["Low", "Normal", "High", "Urgent"]), status: z.enum(["Unscheduled", "Partially Scheduled", "Fully Scheduled"]),

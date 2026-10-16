@@ -8,6 +8,15 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-16
+
+### Added
+- **Step yield** at every process: what the process made against what the process before it handed over, converted to its own unit (kg to capsules or tablets by the unit weight, to blisters or bottles by the units per pack, to boxes by the units per box). It shows with one decimal in the order's Progress grid and in the activity window's production route; hover to see how it was worked out.
+- **Final yield** for each batch: the last process's good output, back in capsules or tablets, against the batch quantity. A shared batch shows it for each PO.
+- **Yield limits** under QA/QC: QA sets the acceptable range for each process and for the final yield. Results within range show green, near a limit amber, outside red.
+- **Deviation note**: when a process's step yield comes out outside QA's limits, production adds a deviation note as they complete or correct it. The note is kept with the production result.
+- **Planner warning** when a batch's yield can't be worked out because the unit weight, units per pack or units per box is missing, shown as soon as the batch is planned.
+
 ## [1.5.0] - 2026-10-16
 
 ### Added

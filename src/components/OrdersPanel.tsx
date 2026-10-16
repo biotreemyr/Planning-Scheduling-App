@@ -11,6 +11,8 @@ import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMa
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
 import { usePager } from "./Pager";
 import { ordersWorkbook } from "@/lib/services/ordersExcel";
+import { batchYield, formatYield, limitText, type YieldTone } from "@/lib/services/yields";
+import { useYieldLimits } from "./YieldLimitsContext";
 import { useDateCheck } from "./DateCheck";
 import { Who } from "./Who";
 import { batchUnits, fullPacks, isCounted, jobTotals, lastPackSize, leftOver } from "@/lib/services/jobQuantities";
@@ -843,7 +845,8 @@ const shortDate = (value: string) => formatDate(value.slice(0, 10));
 // The order's summary as its flow, one column per job order and the stages down the side:
 // Planning (job order, planned quantity, batch number), Production (one row per process: days,
 // status and actual quantity), QC testing (result) and QA release (released, released quantity).
-function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: PurchaseOrder; jobOrders: JobOrder[]; lines: PlanLine[]; transfers: { sourceLineId: string }[]; matrix: OrderBatchMatrix }) {
+function OrderFlow({ order, orders, directory, jobOrders, lines, transfers, matrix }: { order: PurchaseOrder; orders: PurchaseOrder[]; directory: CalendarDirectory; jobOrders: JobOrder[]; lines: PlanLine[]; transfers: { sourceLineId: string }[]; matrix: OrderBatchMatrix }) {
+  const limits = useYieldLimits();
   // Batches shared with other POs show here too, with this PO's packing and release.
   const jobs = [...jobsFor(order.id, jobOrders), ...jobsServing(order.id, jobOrders).filter((job) => job.orderId !== order.id)];
   const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
@@ -853,6 +856,9 @@ function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: Purc
   const row = (label: string, cell: (job: JobOrder) => ReactNode, total?: ReactNode, shade?: (job: JobOrder) => "done" | "planned" | "") => <tr><th scope="row" className="order-batch-process">{label}</th>
     {jobs.map((job) => { const tone = shade?.(job); return <td key={job.id} className={`order-batch-col${tone ? ` order-flow-${tone}` : ""}`}>{cell(job)}</td>; })}<td className="order-batch-summary">{total}</td></tr>;
   const states = new Map(jobs.map((job) => [job.id, batchStatus(job, lines, transfers)]));
+  // Each batch's step yield per process and its final yield, against QA's limits.
+  const yields = new Map(jobs.map((job) => [job.id, batchYield(job, order.id, lines, orders, directory, limits)]));
+  const chip = (percent: number | undefined, tone: YieldTone, title?: string, label = "") => <small className={`yield-chip yield-${tone}`} title={title}>{label}{formatYield(percent)}{tone === "out" ? " · outside limits" : ""}</small>;
   // Planned quantity in boxes (the job order's total packs), else its batch quantity.
   const plannedBoxes = (job: JobOrder) => processQuantity(jobForOrder(job, order.id), "packing") ?? { quantity: partFor(job, order.id)?.quantity ?? job.quantity, uom: job.uom };
   const plannedUoms = [...new Set(jobs.map((job) => plannedBoxes(job).uom))];
@@ -875,13 +881,22 @@ function OrderFlow({ order, jobOrders, lines, transfers, matrix }: { order: Purc
           const cell = process.cells[job.number];
           if (!cell) return null;
           const dates = cell.firstDate === cell.lastDate ? shortDate(cell.firstDate) : `${shortDate(cell.firstDate)} – ${shortDate(cell.lastDate)}`;
-          return <><span className="batch-dates">{dates}</span>{cell.daysDone ? <small>{cell.completed.toLocaleString()} {process.uom} made</small> : null}</>;
+          const stage = yields.get(job.id)?.stages.find((item) => item.calendarId === process.calendar.id);
+          return <><span className="batch-dates">{dates}</span>{cell.daysDone ? <small>{cell.completed.toLocaleString()} {process.uom} made</small> : null}
+            {stage?.percent !== undefined ? chip(stage.percent, stage.tone, `Step yield: ${stage.working}${stage.limit ? ` · QA limits ${limitText(stage.limit)}` : ""}`)
+              : stage?.missing ? <small className="yield-chip yield-missing" title={`Yield can't be worked out: ${stage.missing}`}>Yield – · figure missing</small> : null}</>;
         };
         return <Fragment key={process.calendar.id}>{row(process.processName, cellView,
           <><div className="batch-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={`${process.processName} ${percent}% complete`}><span style={{ width: `${percent}%` }} /></div>
             <small>{process.completed.toLocaleString()} / {process.planned.toLocaleString()} {process.uom} · {percent}%</small></>,
           (job) => { const cell = process.cells[job.number]; return !cell ? "" : cell.days > 0 && cell.daysDone === cell.days ? "done" : "planned"; })}</Fragment>;
       }) : row("Processes", () => null)}
+      {matrix.rows.length ? row("Final yield", (job) => {
+        const final = yields.get(job.id)?.final;
+        if (!final) return <span className="route-muted" title="Shown once every process of the batch is done">{yields.get(job.id)?.stages.some((item) => item.done) ? "After the last process" : "-"}</span>;
+        return final.percent !== undefined ? chip(final.percent, final.tone, `Final yield: ${final.working}${final.limit ? ` · QA limits ${limitText(final.limit)}` : ""}`)
+          : <small className="yield-chip yield-missing" title={`Final yield can't be worked out: ${final.missing}`}>– · figure missing</small>;
+      }, limitText(limits.final) ? <small>QA limits {limitText(limits.final)}</small> : null) : null}
       {stage("QC testing")}
       {row("Result", (job) => {
         const state = states.get(job.id);
@@ -933,7 +948,7 @@ function OrderDetail({ printable, orders, products, order, product, jobOrders, t
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <details className="order-section">
       <summary className="order-section-summary"><h3>Progress</h3><span className="route-muted">Planning · Production · QC testing · QA release</span></summary>
-      <OrderFlow order={order} jobOrders={jobOrders} lines={lines} transfers={transfers} matrix={matrix} />
+      <OrderFlow order={order} orders={orders} directory={directory} jobOrders={jobOrders} lines={lines} transfers={transfers} matrix={matrix} />
     </details>
     {jobActions ? <JobOrders directory={directory} orders={orders} order={order} product={product} products={products} format={format} jobOrders={jobOrders} transfers={transfers} lines={lines} actions={jobActions} /> : null}
     {editable ? <form className="order-edit" onSubmit={(event) => {

@@ -2,6 +2,9 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Maximize2, Minus, X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
+import { batchYield, formatYield, limitText, type BatchYield } from "@/lib/services/yields";
+import { useYieldLimits } from "./YieldLimitsContext";
+import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import { bookedMachineIds, machineLabels } from "@/lib/services/machines";
 import { MachinePicker } from "./MachinePicker";
 import { isNonProduction, orderNumbers, poLabel, type PurchaseOrder, type RouteStep } from "@/lib/services/orders";
@@ -14,7 +17,7 @@ import { useFloatingWindow } from "./useFloatingWindow";
 import { equivalence, factorsFor, type Factors } from "@/lib/services/equivalence";
 import type { WipTransfer } from "@/lib/services/productionFlow";
 
-export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, children, jobOrders = [], format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], transfers = [], visibleCalendarIds, canAssign = false, canUpdate = false, updating = false, notice = "", onAssignMachine, onOpenLine }: {
+export function ActivityWorkspace({ directory, allLines = [], onEditJobPlanning, line, product, onClose, children, jobOrders = [], format = "Other", warnings = [], orders = [], route = [], routeMachines = [], routeEntries = [], transfers = [], visibleCalendarIds, canAssign = false, canUpdate = false, updating = false, notice = "", onAssignMachine, onOpenLine }: {
   // Production's update for this activity: keyed in on its own row of the route while updating (inRow,
   // with the job's equivalence for the typed quantity), or on its own when there is no route.
   children?: (inRow: boolean, equivalence?: (quantity: number, uom: string) => string) => ReactNode;
@@ -23,6 +26,8 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, c
   jobOrders?: JobOrder[];
   // The batch's product format and any process-flow warnings for its activities.
   format?: ProductFormat; warnings?: FlowWarning[];
+  // The setup and every activity, so the step yields can follow the whole batch.
+  directory?: CalendarDirectory; allLines?: PlanLine[];
   orders?: PurchaseOrder[]; route?: RouteStep[]; routeMachines?: Machine[]; routeEntries?: ScheduleEntry[]; transfers?: WipTransfer[];
   canAssign?: boolean; canUpdate?: boolean; updating?: boolean; notice?: string;
   // The processes this person may see; others in the route show as not theirs rather than not planned.
@@ -38,6 +43,7 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, c
   const job = jobOrders.find((item) => item.id === line.jobOrderId);
   // A floating window like Production Planning: dragged by its title bar, minimised to it, so the
   // calendar behind stays in reach.
+  const limits = useYieldLimits();
   const { minimised, setMinimised, barProps, open, style } = useFloatingWindow(dialog);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { dialog.current?.show(); open(1340); }, []);
@@ -49,7 +55,7 @@ export function ActivityWorkspace({ onEditJobPlanning, line, product, onClose, c
       <button className="icon-button" type="button" aria-label={minimised ? "Restore" : "Minimise"} title={minimised ? "Restore" : "Minimise"} onClick={() => setMinimised(!minimised)}>{minimised ? <Maximize2 size={16} /> : <Minus size={18} />}</button>
       <button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></span></header>
     {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
-    {route.length ? <ProductionRoute line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} transfers={transfers} visibleCalendarIds={visibleCalendarIds} factors={factorsFor(order, job, format === "Capsule" ? "capsules" : format === "Sachet" ? "sachets" : "tablets")}
+    {route.length ? <ProductionRoute yields={job && directory ? batchYield(job, line.productionOrderId ?? job.orderId, allLines.length ? allLines : route.flatMap((step) => step.lines), orders, directory, limits) : undefined} line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} transfers={transfers} visibleCalendarIds={visibleCalendarIds} factors={factorsFor(order, job, format === "Capsule" ? "capsules" : format === "Sachet" ? "sachets" : "tablets")}
       editable={canAssign} canUpdate={canUpdate} updating={updating} update={children} onAssign={onAssignMachine} onOpenLine={onOpenLine} /> : children?.(false)}
   </dialog>;
 }
@@ -66,7 +72,9 @@ export function MachineConfiguration({ machines, onSave }: { machines: Machine[]
  * used, remarks, where the output went), each with who did it. Update turns that day's Actual cells
  * into production's inputs, right on its row.
  */
-function ProductionRoute({ line, route, format, warnings, machines, entries, transfers, visibleCalendarIds, factors, editable, canUpdate, updating, update, onAssign, onOpenLine }: {
+function ProductionRoute({ line, route, format, warnings, machines, entries, transfers, visibleCalendarIds, factors, editable, canUpdate, updating, update, onAssign, onOpenLine, yields }: {
+  // The batch's step yields and final yield, against QA's limits.
+  yields?: BatchYield;
   line: PlanLine; route: RouteStep[]; format: ProductFormat; warnings: FlowWarning[]; machines: Machine[]; entries: ScheduleEntry[]; transfers: WipTransfer[]; visibleCalendarIds?: string[]; factors: Factors;
   editable: boolean; canUpdate: boolean; updating: boolean; update?: (inRow: boolean, equivalence?: (quantity: number, uom: string) => string) => ReactNode;
   onAssign?: (lineIds: string[], machineIds: string[]) => string[]; onOpenLine?: (id: string, update?: boolean) => void;
@@ -75,7 +83,7 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
   const day = (value: string) => formatDate(value.slice(0, 10));
   const amount = (value: number) => value.toLocaleString("en-GB", { maximumFractionDigits: 3 });
   const machineNames = (ids: string[]) => machineLabels(machines, ids);
-  const COLUMNS = 13;
+  const COLUMNS = 14;
   // Who planned or updated a day shows in a small box right beside the cell pointed at.
   const [tip, setTip] = useState<{ text: string; left: number; top: number } | null>(null);
   const hover = (text?: string) => text ? {
@@ -93,7 +101,7 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <div className="route-table-scroll"><table className="route-table">
       <thead>
-        <tr><th scope="col" rowSpan={2} className="route-plan-mark">Plan</th><th scope="col" rowSpan={2}>Process</th><th scope="colgroup" colSpan={4} className="route-group planned">Planned</th><th scope="colgroup" colSpan={6} className="route-group actual">Actual</th><th scope="col" rowSpan={2}><span className="admin-sr-only">Update</span></th></tr>
+        <tr><th scope="col" rowSpan={2} className="route-plan-mark">Plan</th><th scope="col" rowSpan={2}>Process</th><th scope="colgroup" colSpan={4} className="route-group planned">Planned</th><th scope="colgroup" colSpan={6} className="route-group actual">Actual</th><th scope="col" rowSpan={2}><span className="admin-sr-only">Update</span></th><th scope="col" rowSpan={2} className="route-yield" title="What the process made against what the process before handed over">Step yield</th></tr>
         <tr><th scope="col">Date planned</th><th scope="col" className="numeric">Qty planned</th><th scope="col">Planned equivalence</th><th scope="col">Machine planned</th>
           <th scope="col">Actual run date</th><th scope="col" className="numeric">Actual quantity</th><th scope="col">Actual equivalence</th><th scope="col">Machine used</th><th scope="col">Remarks</th><th scope="col">Send to next process</th></tr>
       </thead>
@@ -139,10 +147,18 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
               <td {...open()}>{next || <span className="route-muted">-</span>}</td>
               <td>{canUpdate ? <button type="button" className="calendar-button" onClick={() => onOpenLine?.(item.id, true)}>{item.completedAt ? "Correct" : "Update"}</button> : null}</td>
             </>}
+            {index === 0 ? <td rowSpan={step.lines.length} className="route-yield">{(() => {
+              const stage = yields?.stages.find((entry) => entry.calendarId === step.calendar.id);
+              if (stage?.percent !== undefined) return <span className={`yield-chip yield-${stage.tone}`} title={`${stage.working}${stage.limit ? ` · QA limits ${limitText(stage.limit)}` : ""}`}>{formatYield(stage.percent)}{stage.tone === "out" ? " · outside limits" : ""}</span>;
+              if (stage?.missing) return <span className="yield-chip yield-missing" title={`Yield can't be worked out: ${stage.missing}`}>– figure missing</span>;
+              return <span className="route-muted">{stage?.started && !stage.done ? "In progress" : "-"}</span>;
+            })()}</td> : null}
           </tr>];
           return rows;
         });
       })}</tbody>
+      {yields?.final ? <tfoot><tr className="route-final-yield"><th scope="row" colSpan={COLUMNS - 1}>Final yield<small>{yields.final.working ?? (yields.final.missing ? `Can't be worked out: ${yields.final.missing}` : "")}</small></th>
+        <td className="route-yield">{yields.final.percent !== undefined ? <span className={`yield-chip yield-${yields.final.tone}`} title={yields.final.limit ? `QA limits ${limitText(yields.final.limit)}` : undefined}>{formatYield(yields.final.percent)}{yields.final.tone === "out" ? " · outside limits" : ""}</span> : <span className="yield-chip yield-missing">–</span>}</td></tr></tfoot> : null}
     </table></div>
   </section>;
 }
