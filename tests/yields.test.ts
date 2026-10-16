@@ -34,6 +34,28 @@ describe("step yield", () => {
     expect(result.missing).toEqual([]);
   });
 
+  it("gives each stage's % of theoretical against the batch formula, the last one equal to the final yield", () => {
+    const result = batchYield(job, "po", lines, [order], directory);
+    expect(result.stages.map((stage) => [stage.processName, formatYield(stage.ofTheoretical)])).toEqual([
+      ["Dispensing", "99.5%"], // 43.3 ÷ 43.5 kg batch size
+      ["Blending", "98.9%"], // 43.0 ÷ 43.5 kg
+      ["Capsulation", "98.0%"], // 59,200 ÷ 60,417 capsules
+      ["Filling", "97.7%"], // 5,900 ÷ 6,041.7 blisters
+      ["Packing", "97.4%"] // 327 ÷ 335.65 boxes, the same as the final yield
+    ]);
+    expect(result.stages[2].theoreticalWorking).toBe("59,200 ÷ 60,417 capsules theoretical");
+  });
+
+  it("compares weighed capsules by powder when the empty shell weight is given", () => {
+    // 59,200 filled capsules weighed at 850 mg each = 50.32 kg; less 59,200 shells of 127 mg = 42.8016 kg powder.
+    const weighed = lines.map((line) => line.id === "capsulation" ? { ...line, weighedQuantity: 50.32, weighedUom: "kg", actualUnitWeightMg: 850, shellWeightMg: 127 } : line);
+    const stage = batchYield(job, "po", weighed, [order], directory).stages[2];
+    expect(stage).toMatchObject({ percent: 99.5, ofTheoretical: 98, powder: { fillMg: 723, targetMg: 720 } });
+    expect(stage.working).toBe("42.802 kg powder in capsules (weighed less 59,200 empty shells) ÷ 43 kg from Blending");
+    // Without the shell weight it compares by count.
+    expect(batchYield(job, "po", lines, [order], directory).stages[2].percent).toBe(99.1);
+  });
+
   it("waits until every day of a stage is completed, and the next stage waits for it", () => {
     const open = lines.map((line) => line.id === "blending" ? { ...line, completedAt: undefined, yieldQuantity: undefined } : line);
     const result = batchYield(job, "po", open, [order], directory);
@@ -57,7 +79,8 @@ describe("step yield", () => {
     const result = batchYield(job, "po", lines, [order], directory, limits);
     expect([result.stages[2].tone, result.final?.tone]).toEqual(["out", "out"]);
     // What production is about to save, checked before it is saved.
-    expect(stepYieldWith(job, "po", lines, [order], directory, "capsulation", 60000, limits)).toMatchObject({ percent: 100.5, tone: "ok" });
+    // QA's limits apply to % of theoretical: 60,417 of 60,417 is 100.0%, though the step is 101.2%.
+    expect(stepYieldWith(job, "po", lines, [order], directory, "capsulation", 60417, limits)).toMatchObject({ ofTheoretical: 100, percent: 101.2, tone: "ok" });
   });
 });
 

@@ -15,9 +15,9 @@ export function withoutProgress<T extends { progressQuantity?: number; progressU
   return rest;
 }
 export type CompletionInput = { quantity: number; destinationId: string; notes: string; completedDate?: string; wipRoom?: boolean; uom?: string; machineIds?: string[];
-  // Production's deviation note, needed when the step yield is outside QA's limits.
+  // Production's deviation note, needed when the yield (% of theoretical) is outside QA's limits.
   deviation?: string;
-  weighed?: { quantity: number; uom: string; unitWeightMg: number } };
+  weighed?: { quantity: number; uom: string; unitWeightMg: number; shellWeightMg?: number } };
 export type WipTransfer = {
   id: string; sourceLineId: string; sourceCalendarId: string; calendarId: string;
   productId: string; quantity: number; uom: string; orderReference?: string; notes: string;

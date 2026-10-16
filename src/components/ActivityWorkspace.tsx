@@ -101,7 +101,7 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <div className="route-table-scroll"><table className="route-table">
       <thead>
-        <tr><th scope="col" rowSpan={2} className="route-plan-mark">Plan</th><th scope="col" rowSpan={2}>Process</th><th scope="colgroup" colSpan={4} className="route-group planned">Planned</th><th scope="colgroup" colSpan={6} className="route-group actual">Actual</th><th scope="col" rowSpan={2}><span className="admin-sr-only">Update</span></th><th scope="col" rowSpan={2} className="route-yield" title="What the process made against what the process before handed over">Step yield</th></tr>
+        <tr><th scope="col" rowSpan={2} className="route-plan-mark">Plan</th><th scope="col" rowSpan={2}>Process</th><th scope="colgroup" colSpan={4} className="route-group planned">Planned</th><th scope="colgroup" colSpan={6} className="route-group actual">Actual</th><th scope="col" rowSpan={2}><span className="admin-sr-only">Update</span></th><th scope="col" rowSpan={2} className="route-yield" title="% of theoretical: what the process made against the batch formula, with QA's limits. Step: against what the process before handed over">Yield</th></tr>
         <tr><th scope="col">Date planned</th><th scope="col" className="numeric">Qty planned</th><th scope="col">Planned equivalence</th><th scope="col">Machine planned</th>
           <th scope="col">Actual run date</th><th scope="col" className="numeric">Actual quantity</th><th scope="col">Actual equivalence</th><th scope="col">Machine used</th><th scope="col">Remarks</th><th scope="col">Send to next process</th></tr>
       </thead>
@@ -149,7 +149,10 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
             </>}
             {index === 0 ? <td rowSpan={step.lines.length} className="route-yield">{(() => {
               const stage = yields?.stages.find((entry) => entry.calendarId === step.calendar.id);
-              if (stage?.percent !== undefined) return <span className={`yield-chip yield-${stage.tone}`} title={`${stage.working}${stage.limit ? ` · QA limits ${limitText(stage.limit)}` : ""}`}>{formatYield(stage.percent)}{stage.tone === "out" ? " · outside limits" : ""}</span>;
+              if (stage?.ofTheoretical !== undefined || stage?.percent !== undefined) return <>
+                {stage.ofTheoretical !== undefined ? <span className={`yield-chip yield-${stage.tone}`} title={`% of theoretical: ${stage.theoreticalWorking}${stage.limit ? ` · QA limits ${limitText(stage.limit)}` : ""}`}>{formatYield(stage.ofTheoretical)}{stage.tone === "out" ? " · outside limits" : ""}</span> : null}
+                {stage.percent !== undefined ? <small className="yield-step" title={`Step yield: ${stage.working}`}>Step {formatYield(stage.percent)}{stage.powder ? " by powder" : ""}</small> : null}
+                {stage.powder?.targetMg ? <small className="yield-step" title="Average net fill per capsule (filled weight less the empty shell) against the unit weight on the PO">Fill {stage.powder.fillMg.toLocaleString("en-MY", { maximumFractionDigits: 1 })} mg · target {stage.powder.targetMg.toLocaleString()}</small> : null}</>;
               if (stage?.missing) return <span className="yield-chip yield-missing" title={`Yield can't be worked out: ${stage.missing}`}>– figure missing</span>;
               return <span className="route-muted">{stage?.started && !stage.done ? "In progress" : "-"}</span>;
             })()}</td> : null}

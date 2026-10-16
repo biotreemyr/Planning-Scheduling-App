@@ -9,11 +9,16 @@ import { isPerOrderLine, isShared, jobForOrder, jobParts, partFor } from "./shar
 /**
  * Yield at each stage of a batch, as production records it down the process route.
  *
- * Step yield = what a stage made ÷ what the stage before it handed over, converted to this stage's
- * unit (the first stage compares with the job order's batch size). Converting needs the unit weight
- * (kg to capsules or tablets), the units per pack (to blisters, bottles, sachets) and the units per
- * box (to boxes). Final yield = the last stage's good output, back in capsules or tablets, ÷ the
- * batch quantity. QA sets acceptable ranges per process and for the final yield.
+ * Two figures per stage:
+ * - % of theoretical (the batch-record yield) = what a stage made ÷ what the batch formula gives at
+ *   that stage with no loss (the batch size in kg, the batch quantity in capsules or tablets, and that
+ *   in packs and boxes). QA's limits apply to it.
+ * - Step yield = what a stage made ÷ what the stage before it handed over, converted to this stage's
+ *   unit (the first stage compares with the job order's batch size). It shows where a loss happened.
+ *   Capsules weighed with the empty shell weight are compared by powder: weighed − shells ÷ powder in.
+ * Converting needs the unit weight (kg to capsules or tablets), the units per pack (to blisters,
+ * bottles, sachets) and the units per box (to boxes). Final yield = the last stage's good output, back
+ * in capsules or tablets, ÷ the batch quantity.
  */
 export type YieldRange = { min?: number; max?: number };
 export type YieldLimits = { byProcess: Record<string, YieldRange>; final?: YieldRange };
@@ -24,9 +29,15 @@ export type StageYield = {
   calendarId: string; processName: string; uom: string; kind: Kind;
   // The stage's total over its days; undefined until every day of it is completed.
   actual?: number; done: boolean; started: boolean;
-  expected?: number; percent?: number; tone: YieldTone; limit?: YieldRange;
+  // Step yield: against what the stage before handed over.
+  expected?: number; percent?: number;
   // How it was worked out, e.g. "59,200 ÷ (42.8 kg × 1,000,000 ÷ 720 mg = 59,444)".
   working?: string; missing?: string;
+  // % of theoretical: against the batch formula. The tone and QA's limit go with it.
+  theoretical?: number; ofTheoretical?: number; theoreticalWorking?: string;
+  tone: YieldTone; limit?: YieldRange;
+  // Capsules weighed with their empty shell weight: step yield by powder, and the average net fill.
+  powder?: { kg: number; fillMg: number; targetMg?: number };
 };
 export type FinalYield = { percent?: number; tone: YieldTone; limit?: YieldRange; working?: string; missing?: string };
 export type BatchYield = { stages: StageYield[]; final?: FinalYield; missing: string[] };
@@ -81,6 +92,7 @@ export function batchYield(job: JobOrder, orderId: string, lines: PlanLine[], or
     return typeof units === "string" ? units : fromUnits(units, to);
   };
 
+  const part = partFor(job, orderId) ?? jobParts(job)[0];
   const missing = new Set<string>();
   const stages: StageYield[] = [];
   let previous: StageYield | undefined;
@@ -98,7 +110,25 @@ export function batchYield(job: JobOrder, orderId: string, lines: PlanLine[], or
     }, 0).toPrecision(12)) : undefined;
     const limit = limits?.byProcess[calendar.processId];
     const stage: StageYield = { calendarId: calendar.id, processName: calendarProcessName(directory, calendar.id), uom: kind === "weight" ? "kg" : uom, kind, actual, done, started, tone: "none", limit };
+    // Capsules weighed with the empty shell weight: the powder in them is what was weighed less the shells.
+    const shelled = kind === "count" && items.every((line) => line.weighedQuantity !== undefined && (line.weighedUom ?? "").toLowerCase() in KG && line.shellWeightMg);
+    if (done && shelled && actual) {
+      const kg = items.reduce((sum, line) => sum + line.weighedQuantity! * KG[(line.weighedUom ?? "").toLowerCase()] - line.yieldQuantity! * line.shellWeightMg! / 1e6, 0);
+      stage.powder = { kg: Number(kg.toPrecision(12)), fillMg: Math.round(kg * 1e6 / actual * 100) / 100, ...(unitWeight ? { targetMg: unitWeight } : {}) };
+    }
     if (actual !== undefined) {
+      // Against the batch formula: the whole batch at the common stages, this PO's part at its own.
+      const perOrder = isShared(job) && items.some((line) => isPerOrderLine(line, directory));
+      const formula = perOrder ? part.quantity : job.quantity;
+      const theoretical = kind === "weight" && !perOrder && job.batchSizeKg ? job.batchSizeKg
+        : (() => { const units = isCounted(job.uom) ? formula : toUnits(formula, "weight"); return typeof units === "string" ? units : convert(units, "count", kind); })();
+      if (typeof theoretical === "string") missing.add(theoretical);
+      else if (theoretical > 0) {
+        stage.theoretical = theoretical;
+        stage.ofTheoretical = round1(actual / theoretical * 100);
+        stage.theoreticalWorking = `${amount(actual)} ÷ ${amount(round1(theoretical))} ${stage.uom} theoretical`;
+        stage.tone = yieldTone(stage.ofTheoretical, limit);
+      }
       if (!previous) {
         // The first stage compares with what the job order planned for it.
         const planned = items.reduce((sum, line) => sum + line.quantity, 0);
@@ -106,13 +136,18 @@ export function batchYield(job: JobOrder, orderId: string, lines: PlanLine[], or
         stage.working = `${amount(actual)} ÷ ${amount(planned)} ${stage.uom} planned`;
       } else if (previous.actual !== undefined) {
         const expected = convert(previous.actual, previous.kind, kind);
-        if (typeof expected === "string") { stage.missing = expected; missing.add(expected); }
+        if (stage.powder && previous.kind === "weight") {
+          // By powder: overfill no longer counts as a loss.
+          stage.expected = previous.actual;
+          stage.percent = round1(stage.powder.kg / previous.actual * 100);
+          stage.working = `${amount(Number(stage.powder.kg.toFixed(3)))} kg powder in capsules (weighed less ${amount(actual)} empty shells) ÷ ${amount(previous.actual)} kg from ${previous.processName}`;
+        } else if (typeof expected === "string") { stage.missing = expected; missing.add(expected); }
         else {
           stage.expected = expected;
           stage.working = `${amount(actual)} ÷ ${previous.kind === kind ? `${amount(expected)} ${stage.uom} from ${previous.processName}` : `(${amount(previous.actual)} ${previous.uom} from ${previous.processName} = ${amount(round1(expected))} ${stage.uom})`}`;
         }
       }
-      if (stage.expected) { stage.percent = round1(actual / stage.expected * 100); stage.tone = yieldTone(stage.percent, limit); }
+      if (stage.expected && stage.percent === undefined) stage.percent = round1(actual / stage.expected * 100);
     }
     stages.push(stage);
     // A stage with no result yet leaves the next stage nothing to compare with.
@@ -122,7 +157,6 @@ export function batchYield(job: JobOrder, orderId: string, lines: PlanLine[], or
   // Final yield: the last stage's output back in single units, ÷ this PO's share of the batch.
   let final: FinalYield | undefined;
   const last = stages.at(-1);
-  const part = partFor(job, orderId) ?? jobParts(job)[0];
   if (last?.done && last.actual !== undefined && stages.every((stage) => stage.done)) {
     const made = toUnits(last.actual, last.kind);
     const base = isCounted(job.uom) ? part.quantity : typeof toUnits(part.quantity, "weight") === "number" ? toUnits(part.quantity, "weight") as number : need.unitWeight;
@@ -135,9 +169,12 @@ export function batchYield(job: JobOrder, orderId: string, lines: PlanLine[], or
   return { stages, final, missing: [...missing] };
 }
 
-/** The step yield a stage would have with this total actual, for checking QA's limits when production saves it. */
-export function stepYieldWith(job: JobOrder, orderId: string, lines: PlanLine[], orders: PurchaseOrder[], directory: CalendarDirectory, lineId: string, actual: number, limits?: YieldLimits) {
-  const changed = lines.map((line) => line.id === lineId ? { ...line, completedAt: line.completedAt ?? new Date().toISOString(), yieldQuantity: actual } : line);
+/**
+ * The yields a stage would have with this total actual (and what was weighed, with the shell weight),
+ * for checking QA's limits when production saves it.
+ */
+export function stepYieldWith(job: JobOrder, orderId: string, lines: PlanLine[], orders: PurchaseOrder[], directory: CalendarDirectory, lineId: string, actual: number, limits?: YieldLimits, recorded: Partial<PlanLine> = {}) {
+  const changed = lines.map((line) => line.id === lineId ? { ...line, ...recorded, completedAt: line.completedAt ?? new Date().toISOString(), yieldQuantity: actual } : line);
   const line = changed.find((item) => item.id === lineId);
   return batchYield(job, orderId, changed, orders, directory, limits).stages.find((stage) => stage.calendarId === line?.calendarId);
 }

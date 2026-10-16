@@ -97,7 +97,7 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   if (lines.removed.length) need(can.editPlan, "remove plan activities");
   for (const { before: old, after: line } of lines.changed) {
     // Production writes only its progress: start date, notes, completion time and actual quantity.
-    if (only(changedKeys(old, line), ["completedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "actualUnitVolumeMl", "startedAt", "productionNotes", "progressQuantity", "progressUom", "progressUnitSize", "progressDestination"])) need(can.produce, "record production results");
+    if (only(changedKeys(old, line), ["completedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "actualUnitVolumeMl", "shellWeightMg", "startedAt", "productionNotes", "progressQuantity", "progressUom", "progressUnitSize", "progressDestination"])) need(can.produce, "record production results");
     else need(can.editPlan, "move or edit plan activities");
   }
   count("activities added", lines.added.length); count("activities changed", lines.changed.length); count("activities removed", lines.removed.length);
