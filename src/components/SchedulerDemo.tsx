@@ -780,19 +780,24 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => ({ ...current, actuals: [...current.actuals.filter((item) => item.planLineId !== line.id), actual] }));
     return [];
   }
-  // The step yield an actual would give this activity's process, against QA's limits.
-  function stepYieldFor(line: PlanLine, quantity: number, uom: string) {
+  // The yields an actual would give this activity's process, against QA's limits.
+  function stepYieldFor(line: PlanLine, quantity: number, uom: string, weighed?: CompletionInput["weighed"]) {
     const job = data.jobOrders.find((item) => item.id === line.jobOrderId);
     if (!job) return undefined;
     const lines = data.lines.map((item) => item.id === line.id ? { ...item, yieldUom: uom } : item);
-    return stepYieldWith(job, line.productionOrderId ?? job.orderId, lines, data.orders, directory, line.id, quantity, yieldLimits);
+    const { weighedQuantity: _q, weighedUom: _u, actualUnitWeightMg: _m, actualUnitVolumeMl: _v, shellWeightMg: _s, ...rest } = line;
+    const recorded = weighed ? { ...rest, ...weighedFields({ quantity, destinationId: "", notes: "", weighed }) } : rest;
+    return stepYieldWith(job, line.productionOrderId ?? job.orderId, lines, data.orders, directory, line.id, quantity, yieldLimits, recorded);
   }
-  // A step outside QA's limits is saved only with production's deviation note.
+  // A yield outside QA's limits (% of theoretical) is saved only with production's deviation note.
   function deviationNeeded(line: PlanLine, input: CompletionInput) {
-    const stage = stepYieldFor(line, input.quantity, input.uom || line.uom || "");
+    const stage = stepYieldFor(line, input.quantity, input.uom || line.uom || "", input.weighed);
     return stage?.tone === "out" && !input.deviation?.trim()
-      ? `Step yield ${formatYield(stage.percent)} is outside QA's limits (${limitText(stage.limit)}). Add a deviation note before saving.` : "";
+      ? `Yield ${formatYield(stage.ofTheoretical)} of theoretical is outside QA's limits (${limitText(stage.limit)}). Add a deviation note before saving.` : "";
   }
+  // The empty shell weight last used for this product's capsules, offered again.
+  const lastShellWeight = (line: PlanLine) => data.lines.filter((item) => item.productId === line.productId && item.shellWeightMg && item.completedAt)
+    .sort((a, b) => b.completedAt!.localeCompare(a.completedAt!))[0]?.shellWeightMg;
   function completeProduction(input: CompletionInput) {
     if (!selectedLine) return ["Activity not available."];
     const errors = validateCompletion(selectedLine, input, identity ? { ...member, role: "production" } : member, directory, !identity);
@@ -828,7 +833,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   }
   // Output reported by weight keeps what was weighed and the weight of one unit beside the count.
   const weighedFields = (input: CompletionInput) => !input.weighed ? {} : { weighedQuantity: input.weighed.quantity, weighedUom: input.weighed.uom,
-    ...(isVolume(input.weighed.uom) ? { actualUnitVolumeMl: input.weighed.unitWeightMg } : { actualUnitWeightMg: input.weighed.unitWeightMg }) };
+    ...(isVolume(input.weighed.uom) ? { actualUnitVolumeMl: input.weighed.unitWeightMg } : { actualUnitWeightMg: input.weighed.unitWeightMg }),
+    ...(input.weighed.shellWeightMg ? { shellWeightMg: input.weighed.shellWeightMg } : {}) };
   // Production's machine choice in its update: the bookings this save starts from, with the machine
   // changed when it differs (undefined when no choice was sent).
   function machineChange(line: PlanLine, machineIds?: string[]): { entries?: ScheduleEntry[] } | { error: string } {
@@ -857,7 +863,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => {
       const lines = current.lines.map((item) => {
         if (item.id !== line.id) return item;
-        const { yieldUom: _u, startedAt: _s, productionNotes: _n, weighedQuantity: _wq, weighedUom: _wu, actualUnitWeightMg: _wm, actualUnitVolumeMl: _wv, ...rest } = item;
+        const { yieldUom: _u, startedAt: _s, productionNotes: _n, weighedQuantity: _wq, weighedUom: _wu, actualUnitWeightMg: _wm, actualUnitVolumeMl: _wv, shellWeightMg: _sw, ...rest } = item;
         return { ...rest, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input),
           startedAt: input.startedAt || input.completedDate!, ...(input.notes ? { productionNotes: input.notes } : {}) };
       });
@@ -1270,7 +1276,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace directory={directory} allLines={data.lines} key={`${selectedLine.jobOrderId ?? selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
         orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} transfers={data.transfers} visibleCalendarIds={allowedCalendars.map((item) => item.id)} canAssign={canAssign} canUpdate={canProduce} updating={activityUpdating} notice={activityNotice} onAssignMachine={assignMachine} onOpenLine={openActivity}
         jobOrders={data.jobOrders}>
-        {(inRow, equivalence) => <ProductionUpdate key={selectedLine.id} previewYield={(quantity, uom) => stepYieldFor(selectedLine, quantity, uom)} inRow={inRow} equivalence={equivalence} onCancel={() => setActivityUpdating(false)} line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
+        {(inRow, equivalence) => <ProductionUpdate key={selectedLine.id} previewYield={(quantity, uom, weighed) => stepYieldFor(selectedLine, quantity, uom, weighed)} lastShellWeightMg={lastShellWeight(selectedLine)} inRow={inRow} equivalence={equivalence} onCancel={() => setActivityUpdating(false)} line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
           machines={unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? "") && (machine.active === "Active" || data.entries.some((entry) => entry.planLineId === selectedLine.id && entry.machineId === machine.id)))}
           machineIds={bookedMachineIds(data.entries, selectedLine.id)}
           onSaved={(message) => { setActivityUpdating(false); setActivityNotice(`${selectedLine.activityType ?? "Activity"} ${formatDate(selectedLine.plannedDate)}: ${message}`); }} />}

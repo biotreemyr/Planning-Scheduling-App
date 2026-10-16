@@ -112,6 +112,8 @@ export type PlanLine = {
   // coated tablet / filled capsule production keyed in; yieldQuantity is then the count it gives.
   // Measured by volume (L, mL) instead, the volume of one unit is in actualUnitVolumeMl.
   weighedQuantity?: number; weighedUom?: string; actualUnitWeightMg?: number; actualUnitVolumeMl?: number;
+  // Capsules weighed filled: one empty shell's weight in mg, so the powder in them can be worked out.
+  shellWeightMg?: number;
   incomingWipId?: string;
   uom?: string;
   activityType?: string;

@@ -12,9 +12,14 @@ import { REPORT_UOMS, calendarSettings } from "@/lib/services/processSetup";
 import { countFromWeight, unitSizeUom } from "@/lib/services/measurements";
 import { formatDate } from "@/lib/services/dates";
 
+// Average empty shell weights from ACG's Cellulose Capsule Shells dimension summary (ACPL0002, rev 05), ±10%.
+const SHELL_SIZES = [["000", 163], ["00", 127], ["0", 102], ["1", 78], ["2", 65], ["3", 50], ["4", 39]] as const;
+
 // Today as YYYY-MM-DD in local time.
 const today = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
 const display = (value: string) => formatDate(value.slice(0, 10));
+// Net fill against the target, e.g. "+1.2%".
+const fillDiff = (fill: number, target: number) => { const diff = (fill - target) / target * 100; return Math.abs(diff) < 0.05 ? "on target" : `${diff > 0 ? "+" : "−"}${Math.abs(diff).toFixed(1)}%`; };
 // A stored timestamp's local day, YYYY-MM-DD.
 const localDay = (value: string) => { const date = new Date(value); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; };
 
@@ -23,9 +28,11 @@ const localDay = (value: string) => { const date = new Date(value); return `${da
  * actual quantity, notes on any issue, and where the output goes: the next process of the job's
  * route, the WIP room (held for that process), or nowhere when it is the final output.
  */
-export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineIds = [], inRow = false, onCancel, equivalence, previewYield }: {
-  // The step yield this actual would give, against QA's limits; outside them a deviation note is needed.
-  previewYield?: (quantity: number, uom: string) => StageYield | undefined;
+export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineIds = [], inRow = false, onCancel, equivalence, previewYield, lastShellWeightMg }: {
+  // The yields this actual would give, against QA's limits; outside them a deviation note is needed.
+  previewYield?: (quantity: number, uom: string, weighed?: CompletionInput["weighed"]) => StageYield | undefined;
+  // The empty shell weight last used for this product, offered for capsules weighed filled.
+  lastShellWeightMg?: number;
   line: PlanLine; uom: string; directory: CalendarDirectory; editable: boolean;
   // Keyed in on the activity's own row of the route table: renders that row's Actual cells and buttons.
   inRow?: boolean; onCancel?: () => void;
@@ -69,6 +76,10 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const sizeUom = unitSizeUom(chosenUom);
   const weighing = !!countUom && !!sizeUom;
   const unitLabel = `${unitName} ${sizeUom === "mL" ? "volume" : "weight"}`;
+  // Filled capsules weighed: the empty shell weight gives the powder in them (optional).
+  const shelling = weighing && step === "capsulation" && sizeUom === "mg";
+  const [shellMg, setShellMg] = useState(String(line.shellWeightMg ?? lastShellWeightMg ?? ""));
+  const shell = shelling && Number(shellMg) > 0 ? Number(shellMg) : undefined;
   const counted = weighing && quantityText.trim() !== "" ? countFromWeight(Number(quantityText), chosenUom, Number(unitMg)) : undefined;
   // The actual quantity follows the weights until production types over it (it can still be changed).
   const storedCount = line.weighedQuantity !== undefined ? countFromWeight(line.weighedQuantity, line.weighedUom ?? "", line.actualUnitWeightMg ?? line.actualUnitVolumeMl ?? 0) : undefined;
@@ -89,7 +100,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     <dl className="production-facts">
       <div><dt>Started</dt><dd>{line.startedAt ? display(line.startedAt) : "-"}</dd></div>
       <div><dt>Completed</dt><dd>{display(completedDay)}</dd></div>
-      <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {doneUom}{line.weighedQuantity !== undefined ? <small> · {line.actualUnitVolumeMl ? "measured" : "weighed"} {line.weighedQuantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {line.weighedUom} at {(line.actualUnitVolumeMl ?? line.actualUnitWeightMg)?.toLocaleString()} {line.actualUnitVolumeMl ? "mL" : "mg"} each</small> : null}{doneUom === uom && line.quantity > 0 ? <small> ({((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1)}% of plan)</small> : <small> (planned {line.quantity.toLocaleString()} {uom})</small>}</dd></div>
+      <div><dt>Actual quantity</dt><dd>{line.yieldQuantity?.toLocaleString()} {doneUom}{line.weighedQuantity !== undefined ? <small> · {line.actualUnitVolumeMl ? "measured" : "weighed"} {line.weighedQuantity.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {line.weighedUom} at {(line.actualUnitVolumeMl ?? line.actualUnitWeightMg)?.toLocaleString()} {line.actualUnitVolumeMl ? "mL" : "mg"} each{line.shellWeightMg ? `, empty shell ${line.shellWeightMg.toLocaleString()} mg` : ""}</small> : null}{doneUom === uom && line.quantity > 0 ? <small> ({((line.yieldQuantity ?? 0) / line.quantity * 100).toFixed(1)}% of plan)</small> : <small> (planned {line.quantity.toLocaleString()} {uom})</small>}</dd></div>
       <div><dt>Machine</dt><dd>{machineLabels(machines, machineIds) || "Not assigned"}</dd></div>
       <div><dt>Output</dt><dd>{outgoing ? `${outgoing.wipRoom ? "WIP room, for " : "Transferred to "}${processName(outgoing.calendarId)} · ${outgoing.receivedAt ? `received by ${outgoing.receivedBy}` : "awaiting receipt"}` : "Final output - no transfer"}</dd></div>
     </dl>
@@ -109,19 +120,26 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
     {handedOver ? <input form={formId} type="hidden" name="yieldUom" value={chosenUom} /> : null}
     {weighing ? <>
       <label>{unitLabel} ({sizeUom} each)<input form={formId} name="unitWeightMg" type="number" min="0" step="any" required value={unitMg} onChange={(event) => setUnitMg(event.target.value)} readOnly={handedOver} placeholder={sizeUom === "mL" ? "e.g. 5" : "e.g. 350"} /></label>
+      {shelling ? <label>Empty shell (mg each)<input form={formId} name="shellWeightMg" type="number" min="0" step="any" list="shell-sizes" value={shellMg} onChange={(event) => setShellMg(event.target.value)} readOnly={handedOver} placeholder="e.g. 127"
+        title="One empty capsule shell, in mg: weigh 20 and divide, or pick the supplier's average for the size. Gives the powder in the capsules, so overfill is not counted as a loss." />
+        <datalist id="shell-sizes">{SHELL_SIZES.map(([size, mg]) => <option key={size} value={mg}>Size {size} · ACG cellulose average</option>)}</datalist></label> : null}
       <label>Actual quantity ({countUom})<input form={formId} name="actualQuantity" type="number" min="0" step="1" value={actualShown} readOnly={handedOver} placeholder={`Planned ${line.quantity.toLocaleString()}`}
         onChange={(event) => { setActualText(event.target.value); setActualEdited(true); }} /></label>
     </> : null}</div>;
+  // The yields the typed actual gives, shown as it is keyed in; outside QA's limits it needs a deviation note.
+  const previewQuantity = weighing ? (actualShown.trim() ? Number(actualShown) : undefined) : quantityText.trim() ? Number(quantityText) : undefined;
+  const weighedNow = weighing && quantityText.trim() && Number(unitMg) > 0 ? { quantity: Number(quantityText), uom: chosenUom, unitWeightMg: Number(unitMg), ...(shell ? { shellWeightMg: shell } : {}) } : undefined;
+  const preview = previewQuantity !== undefined && Number.isFinite(previewQuantity) ? previewYield?.(previewQuantity, weighing ? countUom ?? uom : chosenUom, weighedNow) : undefined;
   const weighedNote = weighing ? <p className="weighed-count" role="status">{actualEdited && counted !== undefined && actualShown !== String(counted)
     ? <>Calculated from the {sizeUom === "mL" ? "volume" : "weight"}: {counted.toLocaleString()} {countUom} · <button type="button" className="link-button" onClick={() => setActualEdited(false)}>Use calculated</button></>
-    : <span className="route-muted">Actual quantity is worked out from the {sizeUom === "mL" ? "volume" : "weight"}; change it if needed.</span>}</p> : null;
+    : <span className="route-muted">Actual quantity is worked out from the {sizeUom === "mL" ? "volume" : "weight"}; change it if needed.</span>}
+    {shell && Number(unitMg) > shell ? <span className="route-muted"> Net fill {(Number(unitMg) - shell).toLocaleString("en-MY", { maximumFractionDigits: 2 })} mg per capsule{preview?.powder?.targetMg ? ` (target ${preview.powder.targetMg.toLocaleString()} mg, ${fillDiff(Number(unitMg) - shell, preview.powder.targetMg)})` : ""}.</span> : null}
+    {shell && Number(unitMg) > 0 && Number(unitMg) <= shell ? <span role="alert"> The empty shell is heavier than the filled capsule: check both weights.</span> : null}</p> : null;
   // Not a <label>: a label around the picker would tick its first machine when its title is clicked.
   const machineField = <div className="picker-field"><span>Machine</span><MachinePicker label="Machines" machines={machines} defaultValue={machineIds} name="machine" form={formId} /></div>;
-  // The step yield the typed actual gives, shown as it is keyed in; outside QA's limits it needs a deviation note.
-  const previewQuantity = weighing ? (actualShown.trim() ? Number(actualShown) : undefined) : quantityText.trim() ? Number(quantityText) : undefined;
-  const preview = previewQuantity !== undefined && Number.isFinite(previewQuantity) ? previewYield?.(previewQuantity, weighing ? countUom ?? uom : chosenUom) : undefined;
-  const yieldField = preview?.percent !== undefined ? <div className="production-yield">
-    <span className={`yield-chip yield-${preview.tone}`} title={preview.working}>Step yield {formatYield(preview.percent)}{preview.tone === "out" ? " · outside QA limits" : ""}</span>
+  const yieldField = preview?.ofTheoretical !== undefined || preview?.percent !== undefined ? <div className="production-yield">
+    {preview.ofTheoretical !== undefined ? <span className={`yield-chip yield-${preview.tone}`} title={preview.theoreticalWorking}>Yield {formatYield(preview.ofTheoretical)} of theoretical{preview.tone === "out" ? " · outside QA limits" : ""}</span> : null}
+    {preview.percent !== undefined ? <small className="route-muted" title={preview.working}>Step yield {formatYield(preview.percent)}{preview.powder ? " by powder" : ""}</small> : null}
     {preview.limit ? <small className="route-muted">QA limits {limitText(preview.limit)}</small> : null}
     {preview.tone === "out" ? <label className="production-deviation">Deviation note<textarea form={formId} name="deviation" required maxLength={500} placeholder="What happened and what was done, e.g. powder loss at the hopper; QA informed" /></label> : null}
   </div> : null;
@@ -155,7 +173,8 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       const machine = data.getAll("machine").map(String);
       const reported = String(data.get("yieldUom") ?? "") || uom;
       if ((typed || correcting) && weighing && !(Number(unitMg) > 0)) { setErrors([`Enter the ${unitLabel.toLowerCase()} in ${sizeUom} to convert ${reported} to ${countUom}.`]); return; }
-      const weighed = typed && weighing ? { quantity: Number(typed), uom: reported, unitWeightMg: Number(unitMg) } : undefined;
+      if (shelling && shell && Number(unitMg) <= shell) { setErrors(["The empty shell weight must be less than the filled capsule weight."]); return; }
+      const weighed = typed && weighing ? { quantity: Number(typed), uom: reported, unitWeightMg: Number(unitMg), ...(shell ? { shellWeightMg: shell } : {}) } : undefined;
       const quantityText = weighed ? actualShown.trim() : typed;
       const deviation = String(data.get("deviation") ?? "").trim();
       const output = { quantity: Number(quantityText), uom: weighed ? countUom! : reported, ...(weighed ? { weighed } : {}), completedDate, notes, destinationId: kind === "final" ? "" : destinationId, wipRoom: kind === "wip", machineIds: machine, ...(deviation ? { deviation } : {}) };

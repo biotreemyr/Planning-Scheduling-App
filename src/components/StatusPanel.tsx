@@ -199,9 +199,9 @@ function ReleasePanel({ job, orders, lines, transfers, directory, formulaWaiting
 }
 
 /**
- * QA's acceptable yield ranges: for each process (its step yield) and for the batch's final yield.
- * Results within range show green, near a limit amber, outside red; production gives a deviation
- * note when a step comes out outside. A blank minimum or maximum means no limit on that side.
+ * QA's acceptable yield ranges: for each process (its % of theoretical) and for the batch's final
+ * yield. Results within range show green, near a limit amber, outside red; production gives a
+ * deviation note when a process comes out outside. A blank minimum or maximum means no limit on that side.
  */
 function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: CalendarDirectory; limits: YieldLimits; editable: boolean; onSave: (limits: YieldLimits) => string[] }) {
   // Processes in the unit's route order, each once.
@@ -222,13 +222,13 @@ function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: 
   </tr>;
   return <section className="workspace-panel yield-limits">
     <div className="panel-title"><h2>Yield limits</h2></div>
-    <p className="orders-help">The acceptable yield at each process (its step yield: what it made against what the process before handed over) and for the batch's final yield. Results within range show green, within reach of a limit amber, outside red. When a step comes out outside its range, production adds a deviation note as they save it.</p>
+    <p className="orders-help">The acceptable yield at each process, as a % of theoretical (what it made against what the batch formula gives at that process with no loss, as in the batch record), and for the batch's final yield. Results within range show green, within reach of a limit amber, outside red. When a process comes out outside its range, production adds a deviation note as they save it. The step yield (against what the process before handed over) is shown beside it to find where a loss happened; it has no limits.</p>
     {message ? <p role={message.error ? "alert" : "status"} className={message.error ? undefined : "calendar-notice"}>{message.text}</p> : null}
     <div className="orders-table-scroll" role="region" aria-label="Yield limits">
       <table className="orders-table yield-limits-table">
         <thead><tr><th scope="col">Process</th><th scope="col" className="numeric">Minimum</th><th scope="col" className="numeric">Maximum</th><th scope="col">Acceptable range</th></tr></thead>
         <tbody>
-          {processes.map((process) => row(process.id, process.name, "Step yield"))}
+          {processes.map((process) => row(process.id, process.name, "% of theoretical"))}
           <tr className="yield-limits-final-gap"><td colSpan={4} /></tr>
           {row("final", "Final yield", "Last stage's good output ÷ batch quantity")}
         </tbody>
