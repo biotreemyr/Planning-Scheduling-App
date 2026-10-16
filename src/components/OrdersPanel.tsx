@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, F
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
-import { MAX_POS_PER_JOB, shortYield, closedSummary, formulaPending, jobForOrder, jobParts, jobsServing, orderViewLines, partFor, readyToClose, releaseFor, releasedToOrder, type JobShare } from "@/lib/services/sharedJobs";
+import { MAX_POS_PER_JOB, shortYield, closedSummary, formulaPending, jobForOrder, jobParts, jobsServing, orderViewLines, orderedInJobs, partFor, readyToClose, releaseFor, releasedToOrder, type JobShare } from "@/lib/services/sharedJobs";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, isNonProduction, nextRndCode, ORDER_CATEGORIES, type OrderCategory, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
@@ -576,7 +576,8 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
   // This PO item's own job orders first, then batches other PO items share with it.
   const jobs = [...jobsFor(order.id, jobOrders), ...jobsServing(order.id, jobOrders).filter((job) => job.orderId !== order.id)];
   const [shareDrafts, setShareDrafts] = useState<ShareDraft[]>([]);
-  const released = jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + (partFor(job, order.id)?.quantity ?? 0), 0);
+  // Counted in the PO's unit whatever unit the batch quantity is in (capsules for a PO in boxes).
+  const { total: released, uncounted } = orderedInJobs(order, jobOrders);
   const remaining = Math.max(0, Number((order.quantity - released).toPrecision(12)));
   const allowable = product?.batchQuantity;
   const report = (result: string[], success: string) => { setErrors(result); setNotice(result.length ? "" : success); return !result.length; };
@@ -606,7 +607,9 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
   return <section className="job-orders" aria-label={`Job orders for ${order.poNumber}`}>
     <details className="order-section">
     <summary className="order-section-summary"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
-      <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span></summary>
+      <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span>
+      {released > order.quantity ? <span className="order-warning">{(released - order.quantity).toLocaleString()} {order.uom} more than the PO</span> : null}
+      {uncounted.length ? <span className="order-warning">{uncounted.map((job) => job.number).join(", ")}: no figure in {order.uom}, not counted</span> : null}</summary>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
       <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col">PJO no.<small>Packing</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col">Batch number</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
       <tbody>{jobs.map((job) => {

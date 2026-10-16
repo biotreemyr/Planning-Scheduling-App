@@ -1,7 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
-import { jobForOrder, jobsServing, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
+import { jobForOrder, jobsServing, orderedInJobs, overOrderedText, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
 
@@ -70,11 +70,10 @@ export function validateBatchNumber(value: string, job: JobOrder, jobs: JobOrder
 
 // The job orders' total in the PO item's own unit may not pass the ordered quantity. A shared batch
 // counts only each PO's share: the first PO keeps what the other POs' shares leave.
+// Every job order is counted in the PO's unit (boxes, bottles...), whatever unit its batch quantity is in.
 function overOrdered(order: PurchaseOrder, jobs: JobOrder[]) {
-  const shareOf = (job: JobOrder) => job.orderId === order.id ? job.quantity - (job.shares ?? []).reduce((sum, share) => sum + share.quantity, 0)
-    : (job.shares ?? []).filter((share) => share.orderId === order.id).reduce((sum, share) => sum + share.quantity, 0);
-  const total = Number(jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + shareOf(job), 0).toPrecision(12));
-  return total > order.quantity ? `Job orders for ${order.poNumber} would add up to ${total.toLocaleString()} ${order.uom}, more than the ${order.quantity.toLocaleString()} ordered.` : "";
+  const { total } = orderedInJobs(order, jobs);
+  return total > order.quantity + 1e-9 ? overOrderedText(order, total) : "";
 }
 
 /**

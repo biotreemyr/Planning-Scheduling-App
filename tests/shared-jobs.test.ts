@@ -4,7 +4,7 @@ import type { CalendarDirectory } from "../src/lib/domain/calendarAccess";
 import type { PlanLine } from "../src/lib/domain/types";
 import type { JobOrder } from "../src/lib/services/jobOrders";
 import type { PurchaseOrder } from "../src/lib/services/orders";
-import { closeOrder, closedSummary, finalOutputFor, jobForOrder, jobParts, needsFormulaCheck, orderViewLines, readyToClose, releasedToOrder, releaseToOrders, sharesAfterYield, sharesProblem } from "../src/lib/services/sharedJobs";
+import { closeOrder, closedSummary, finalOutputFor, jobForOrder, jobParts, needsFormulaCheck, orderedInJobs, orderViewLines, readyToClose, releasedToOrder, releaseToOrders, sharesAfterYield, sharesProblem } from "../src/lib/services/sharedJobs";
 
 // Customer A's Vitamin C (FG-001, 30s bottles) and customer B's same formula (FG-002, 60s blisters).
 const po = (id: string, extra: Partial<PurchaseOrder> = {}): PurchaseOrder => ({ id, poNumber: id.toUpperCase(), productId: "fg-001", quantity: 2000, uom: "bottles", format: "Tablet", expectedDates: {}, createdAt: "2026-10-15T00:00:00.000Z", createdBy: "Planner", ...extra });
@@ -126,5 +126,17 @@ describe("short yield shown to planning", () => {
     const made = [line("comp", "c-comp", "po-a", { quantity: 120000, completedAt: "2026-10-20T09:00:00.000Z", yieldQuantity: 110000, uom: "tablets" })];
     expect(shortYield(job, made, orders, plannedOf)).toEqual({ made: 110000, shares: [{ orderId: "po-b", planned: 60000, available: 60000 }, { orderId: "po-a", planned: 60000, available: 50000 }] });
     expect(shortYield(job, [{ ...made[0], yieldQuantity: 120000 }], orders, plannedOf)).toBeUndefined();
+  });
+  it("counts job orders in the PO's unit, whatever unit their batch quantity is in", () => {
+    // PWL005114: a PO in boxes, its job orders in capsules with the boxes keyed in.
+    const boxes = po("po-box", { quantity: 2000, uom: "boxes", format: "Capsule", unitsPerPack: 60 });
+    const capsules = (id: string, extra: Partial<JobOrder>): JobOrder => ({ id, number: id.toUpperCase(), orderId: "po-box", sequence: 1, quantity: 20100, uom: "capsules", createdAt: "2026-10-15T00:00:00.000Z", createdBy: "Planner", ...extra });
+    const jobs = [1, 2, 3, 4, 5].map((n) => capsules(`jo-${n}`, { boxQuantity: 335 })).concat(capsules("jo-6", { quantity: 20100 }));
+    // Five by their boxes, the sixth by capsules / 60 per box.
+    expect(orderedInJobs(boxes, jobs)).toEqual({ total: 5 * 335 + 335, uncounted: [] });
+    expect(orderedInJobs({ ...boxes, unitsPerPack: undefined }, jobs).uncounted.map((item) => item.id)).toEqual(["jo-6"]);
+    // The bottles of a shared batch count by each PO's own pack quantity.
+    expect(orderedInJobs(poA, [job]).total).toBe(2000);
+    expect(orderedInJobs(poB, [job]).total).toBe(1000);
   });
 });
