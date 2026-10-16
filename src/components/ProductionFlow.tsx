@@ -28,7 +28,7 @@ const localDay = (value: string) => { const date = new Date(value); return `${da
  * actual quantity, notes on any issue, and where the output goes: the next process of the job's
  * route, the WIP room (held for that process), or nowhere when it is the final output.
  */
-export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, machines = [], machineIds = [], inRow = false, onCancel, equivalence, previewYield, lastShellWeightMg }: {
+export function ProductionUpdate({ line, uom, directory: d, editable, nextCalendarId, onProgress, onComplete, onCorrect, onSaved, outgoing, incoming = [], onReceive, machines = [], machineIds = [], inRow = false, onCancel, equivalence, previewYield, lastShellWeightMg }: {
   // The yields this actual would give, against QA's limits; outside them a deviation note is needed.
   previewYield?: (quantity: number, uom: string, weighed?: CompletionInput["weighed"]) => StageYield | undefined;
   // The empty shell weight last used for this product, offered for capsules weighed filled.
@@ -49,6 +49,8 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   // Present when a completed update may be corrected.
   onCorrect?: (input: CorrectionInput) => string[];
   outgoing?: WipTransfer;
+  // Work in progress handed over to this activity and not yet received: it must be received before it starts.
+  incoming?: WipTransfer[]; onReceive?: (id: string) => void;
 }) {
   const checkDates = useDateCheck();
   const [errors, setErrors] = useState<string[]>([]);
@@ -195,6 +197,11 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const help = correcting ? handedOver ? `${processName(outgoing!.calendarId)} has already received this output, so its quantity and destination stay as they are. Dates and notes can still be corrected.` : "Correct anything keyed in by mistake. The handover to the next process follows the correction."
     : `Save progress records the start date, the amount run so far, notes and where the output goes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`;
 
+  const receipts = incoming.length && !line.completedAt ? <div className="wip-receipt">{incoming.map((item) => <p key={item.id}>
+    <strong>Awaiting receipt:</strong> {item.quantity.toLocaleString()} {item.uom} from {processName(item.sourceCalendarId)}, sent by {item.createdBy} · {formatDateTime(item.createdAt)}{item.wipRoom ? " · in the WIP room" : ""}
+    {editable && onReceive ? <> <button type="button" className="calendar-button" onClick={() => onReceive(item.id)}>Acknowledge receipt</button></> : null}</p>)}
+    <small className="route-muted">Receive the handover before starting this process, so who took over the material is recorded.</small></div> : null;
+
   // In the route table: one cell per Actual column, then the buttons.
   if (inRow) {
     const typed = weighing ? (actualShown.trim() ? Number(actualShown) : undefined) : quantityText.trim() ? Number(quantityText) : undefined;
@@ -206,11 +213,11 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       <td className="route-edit">{machineField}</td>
       <td className="route-edit">{notesField}{yieldField}</td>
       <td className="route-edit">{destination}</td>
-      <td className="route-edit route-edit-actions">{form(<>{actions}{messages}</>)}<small className="route-muted" title={help}>{correcting ? "Correcting" : "Updating"} this day</small></td>
+      <td className="route-edit route-edit-actions">{receipts}{form(<>{actions}{messages}</>)}<small className="route-muted" title={help}>{correcting ? "Correcting" : "Updating"} this day</small></td>
     </>;
   }
   return <section className="production-update"><h3>{correcting ? "Correct production update" : "Production update"}</h3>
-    {form(<>{started}{completed}{quantity}{weighedNote}{yieldField}{machineField}{notesField}{destination}{actions}{messages}<p className="route-muted">{help}</p></>)}
+    {receipts}{form(<>{started}{completed}{quantity}{weighedNote}{yieldField}{machineField}{notesField}{destination}{actions}{messages}<p className="route-muted">{help}</p></>)}
   </section>;
 }
 

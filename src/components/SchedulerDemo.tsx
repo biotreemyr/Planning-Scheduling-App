@@ -23,9 +23,9 @@ import { OrdersPanel } from "@/components/OrdersPanel";
 import { StatusPanel, type StatusSection } from "@/components/StatusPanel";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { inUnit, type JobPlan } from "@/components/JobPlanDialog";
-import { calendarSettings, unitRoute, type ProcessSettings } from "@/lib/services/processSetup";
+import { calendarProcessName, calendarSettings, unitRoute, type ProcessSettings } from "@/lib/services/processSetup";
 import { batchRoute, isNonProduction, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
-import { validateCompletion, validateCorrection, withoutProgress, type CompletionInput, type Progress, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
+import { awaitingReceipt, validateCompletion, validateCorrection, withoutProgress, type CompletionInput, type Progress, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
 import { validateActual, type ProductionActual } from "@/lib/services/actuals";
@@ -802,8 +802,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   // The empty shell weight last used for this product's capsules, offered again.
   const lastShellWeight = (line: PlanLine) => data.lines.filter((item) => item.productId === line.productId && item.shellWeightMg && item.completedAt)
     .sort((a, b) => b.completedAt!.localeCompare(a.completedAt!))[0]?.shellWeightMg;
+  // Handovers into this activity must be received before it starts or completes.
+  const receiptNeeded = (line: PlanLine) => awaitingReceipt(line, data.lines, data.transfers).map((item) =>
+    `Acknowledge receipt of ${item.quantity.toLocaleString()} ${item.uom} from ${calendarProcessName(directory, item.sourceCalendarId)} (sent by ${item.createdBy}) before starting this process.`);
   function completeProduction(input: CompletionInput) {
     if (!selectedLine) return ["Activity not available."];
+    if (receiptNeeded(selectedLine).length) return receiptNeeded(selectedLine);
     const errors = validateCompletion(selectedLine, input, identity ? { ...member, role: "production" } : member, directory, !identity);
     if (errors.length) return errors;
     const deviation = deviationNeeded(selectedLine, input);
@@ -890,6 +894,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     if (!line || !canProduce) return ["Production access to this activity is required."];
     if (line.completedAt) return ["This activity is already complete."];
     if (startedAt && !/^\d{4}-\d{2}-\d{2}$/.test(startedAt)) return ["Choose the date production started."];
+    if (startedAt && !line.startedAt && receiptNeeded(line).length) return receiptNeeded(line);
     const machine = machineChange(line, machineIds);
     if ("error" in machine) return [machine.error];
     setData((previous) => { const current = machine.entries ? { ...previous, entries: machine.entries } : previous; return { ...current,
@@ -1280,7 +1285,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace directory={directory} allLines={data.lines} key={`${selectedLine.jobOrderId ?? selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
         orders={data.orders} route={route} format={selectedFormat} warnings={flow.filter((warning) => warning.lineIds.some((id) => routeLineIds.has(id)))} routeMachines={unitMachines} routeEntries={data.entries} transfers={data.transfers} visibleCalendarIds={allowedCalendars.map((item) => item.id)} canAssign={canAssign} canUpdate={canProduce} updating={activityUpdating} notice={activityNotice} onAssignMachine={assignMachine} onOpenLine={openActivity}
         jobOrders={data.jobOrders}>
-        {(inRow, equivalence) => <ProductionUpdate key={selectedLine.id} previewYield={(quantity, uom, weighed) => stepYieldFor(selectedLine, quantity, uom, weighed)} lastShellWeightMg={lastShellWeight(selectedLine)} inRow={inRow} equivalence={equivalence} onCancel={() => setActivityUpdating(false)} line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
+        {(inRow, equivalence) => <ProductionUpdate key={selectedLine.id} previewYield={(quantity, uom, weighed) => stepYieldFor(selectedLine, quantity, uom, weighed)} lastShellWeightMg={lastShellWeight(selectedLine)} inRow={inRow} equivalence={equivalence} onCancel={() => setActivityUpdating(false)} line={selectedLine} outgoing={data.transfers.find((item) => item.sourceLineId === selectedLine.id)} incoming={awaitingReceipt(selectedLine, data.lines, data.transfers)} onReceive={receiveWip} uom={selectedLine.uom ?? products.find((product) => product.id === selectedLine.productId)?.uom ?? ""} directory={directory} editable={canProduce} nextCalendarId={nextCalendarId} onProgress={saveProgress} onComplete={completeProduction} onCorrect={correctProduction}
           machines={unitMachines.filter((machine) => machine.processIds?.includes(activityCalendar?.processId ?? "") && (machine.active === "Active" || data.entries.some((entry) => entry.planLineId === selectedLine.id && entry.machineId === machine.id)))}
           machineIds={bookedMachineIds(data.entries, selectedLine.id)}
           onSaved={(message) => { setActivityUpdating(false); setActivityNotice(`${selectedLine.activityType ?? "Activity"} ${formatDate(selectedLine.plannedDate)}: ${message}`); }} />}
