@@ -51,7 +51,7 @@ import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
 import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
-import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
+import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, lateWarnings, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 import type { Release } from "@/lib/services/releases";
 import { ReleaseNotes } from "./ReleaseNotes";
@@ -754,7 +754,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const canCreateOrders = caps.createOrders;
   const canEditOrders = caps.editOrders;
   // One set of process-flow warnings feeds the calendar, list, activity panel and orders.
-  const flow = [...checkProcessFlow(data.lines, data.entries, data.orders, products, directory), ...checkTally(data.lines, data.jobOrders, directory), ...yieldWarnings(data.jobOrders, data.lines, data.orders, directory)];
+  const flow = [...checkProcessFlow(data.lines, data.entries, data.orders, products, directory), ...checkTally(data.lines, data.jobOrders, directory), ...yieldWarnings(data.jobOrders, data.lines, data.orders, directory), ...lateWarnings(data.lines, data.jobOrders, directory, localDateKey(new Date()))];
   const flowByLine = warningsByLine(flow);
   const route = selectedLine ? batchRoute(selectedLine, allowedLines, directory) : [];
   const routeLineIds = new Set(route.flatMap((step) => step.lines.map((item) => item.id)));

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { rejectBatch, recordTest, testResult, batchStatus, orderStatusSummary, passTesting, releaseBatch, releaseQueue, testingQueue, activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { rejectBatch, recordTest, testResult, batchStatus, orderStatusSummary, passTesting, releaseBatch, releaseQueue, testingQueue, activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, lateWarnings, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { validateOrder } from "../src/lib/services/orders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
@@ -245,5 +245,13 @@ describe("job orders", () => {
     next.data.jobOrders = next.data.jobOrders.map((item) => item.id === rejected.id ? rejected : item);
     expect(() => parseWorkspace(next)).not.toThrow();
   });
+  it("warns about activities still open after their planned days, not today's", () => {
+    const open = state.data.lines.filter((line) => !line.completedAt);
+    const late = lateWarnings(state.data.lines, state.data.jobOrders, state.directory, "2026-12-31");
+    expect(late.length).toBe(open.length);
+    expect(late[0].message).toMatch(/^Late: .+ was planned for \d{2}\/\d{2}\/2026.* and is not completed\.$/);
+    const first = [...open].sort((a, b) => a.plannedDate.localeCompare(b.plannedDate))[0];
+    expect(lateWarnings([{ ...first, endDate: undefined }], state.data.jobOrders, state.directory, first.plannedDate)).toEqual([]);
+    expect(lateWarnings([{ ...first, endDate: undefined, completedAt: "2026-10-01T10:00:00.000Z" }], state.data.jobOrders, state.directory, "2026-12-31")).toEqual([]);
+  });
 });
-

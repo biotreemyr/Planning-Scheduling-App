@@ -856,7 +856,7 @@ function OrderFlow({ order, orders, directory, jobOrders, lines, transfers, matr
   const day = (value?: string) => value ? shortDate(value.slice(0, 10)) : "";
   if (!jobs.length) return <p className="order-empty">No job orders yet. Key them in under Job orders, then plan them on the Planner Board.</p>;
   const stage = (label: string) => <tr className="order-flow-stage"><th scope="rowgroup" colSpan={jobs.length + 2}>{label}</th></tr>;
-  const row = (label: string, cell: (job: JobOrder) => ReactNode, total?: ReactNode, shade?: (job: JobOrder) => "done" | "planned" | "") => <tr><th scope="row" className="order-batch-process">{label}</th>
+  const row = (label: string, cell: (job: JobOrder) => ReactNode, total?: ReactNode, shade?: (job: JobOrder) => "done" | "planned" | "late" | "") => <tr><th scope="row" className="order-batch-process">{label}</th>
     {jobs.map((job) => { const tone = shade?.(job); return <td key={job.id} className={`order-batch-col${tone ? ` order-flow-${tone}` : ""}`}>{cell(job)}</td>; })}<td className="order-batch-summary">{total}</td></tr>;
   const states = new Map(jobs.map((job) => [job.id, batchStatus(job, lines, transfers)]));
   // Each batch's step yield per process and its final yield, against QA's limits.
@@ -879,13 +879,13 @@ function OrderFlow({ order, orders, directory, jobOrders, lines, transfers, matr
       {stage("Production")}
       {matrix.rows.length ? matrix.rows.map((process) => {
         const percent = process.planned ? Math.min(100, Math.round(process.completed / process.planned * 100)) : 0;
-        // No status words: the cell's colour says it (green done, light yellow planned, white not planned).
+        // The cell's colour says it (green done, light yellow planned, red late, white not planned); late also says so.
         const cellView = (job: JobOrder) => {
           const cell = process.cells[job.number];
           if (!cell) return null;
           const dates = cell.firstDate === cell.lastDate ? shortDate(cell.firstDate) : `${shortDate(cell.firstDate)} – ${shortDate(cell.lastDate)}`;
           const stage = yields.get(job.id)?.stages.find((item) => item.calendarId === process.calendar.id);
-          return <><span className="batch-dates">{dates}</span>{cell.daysDone ? <small>{cell.completed.toLocaleString()} {process.uom} made</small> : null}
+          return <><span className="batch-dates">{dates}</span>{cell.late && cell.daysDone < cell.days ? <strong className="order-flow-late-label" title="Planned on a day that has passed and not completed yet">Late</strong> : null}{cell.daysDone ? <small>{cell.completed.toLocaleString()} {process.uom} made</small> : null}
             {stage?.ofTheoretical !== undefined ? chip(stage.ofTheoretical, stage.tone, `% of theoretical: ${stage.theoreticalWorking}${stage.limit ? ` · QA limits ${limitText(stage.limit)}` : ""}`, "Yield ") : null}
             {stage?.percent !== undefined ? <small className="yield-step" title={`Step yield: ${stage.working}`}>Step {formatYield(stage.percent)}{stage.powder ? " by powder" : ""}</small>
               : stage?.missing ? <small className="yield-chip yield-missing" title={`Yield can't be worked out: ${stage.missing}`}>Yield – · figure missing</small> : null}
@@ -894,7 +894,7 @@ function OrderFlow({ order, orders, directory, jobOrders, lines, transfers, matr
         return <Fragment key={process.calendar.id}>{row(process.processName, cellView,
           <><div className="batch-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={`${process.processName} ${percent}% complete`}><span style={{ width: `${percent}%` }} /></div>
             <small>{process.completed.toLocaleString()} / {process.planned.toLocaleString()} {process.uom} · {percent}%</small></>,
-          (job) => { const cell = process.cells[job.number]; return !cell ? "" : cell.days > 0 && cell.daysDone === cell.days ? "done" : "planned"; })}</Fragment>;
+          (job) => { const cell = process.cells[job.number]; return !cell ? "" : cell.days > 0 && cell.daysDone === cell.days ? "done" : cell.late ? "late" : "planned"; })}</Fragment>;
       }) : row("Processes", () => null)}
       {matrix.rows.length ? row("Final yield", (job) => {
         const final = yields.get(job.id)?.final;

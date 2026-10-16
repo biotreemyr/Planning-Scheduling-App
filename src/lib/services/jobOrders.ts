@@ -4,6 +4,8 @@ import type { PurchaseOrder } from "./orders";
 import { jobForOrder, jobsServing, orderedInJobs, overOrderedText, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
+import { lineEnd } from "./scheduling";
+import { formatDate } from "./dates";
 
 /**
  * A job order is one batch of one PO item, released to production. Planning keys in its number
@@ -233,6 +235,21 @@ export function checkTally(lines: PlanLine[], jobs: JobOrder[], directory: Calen
       return [{ kind: "tally" as const, lineIds: items.map((line) => line.id), orderId: job.orderId, batch: job.number,
         message: `${batch}: ${calendarProcessName(directory, calendarId)} is planned for ${otherUnit ? items.map((line) => `${amount(line.quantity)} ${line.uom ?? ""}`.trim()).join(" + ") : `${amount(planned)} ${expected.uom}`} but the job order's ${measureName(source)} is ${amount(expected.quantity)} ${expected.uom}.` }];
     });
+  });
+}
+
+/**
+ * Activities still open after the last day they were planned for. Today's work is not late yet;
+ * received WIP not yet planned is not an activity. Warns, never blocks.
+ */
+export function lateWarnings(lines: PlanLine[], jobs: JobOrder[], directory: CalendarDirectory, today: string): FlowWarning[] {
+  return lines.filter((line) => !line.completedAt && lineEnd(line) < today).map((line) => {
+    const job = jobs.find((item) => item.id === line.jobOrderId);
+    const what = job ? job.number : line.orderReference?.trim() || "An activity";
+    const end = lineEnd(line);
+    const days = end === line.plannedDate ? formatDate(end) : `${formatDate(line.plannedDate)} – ${formatDate(end)}`;
+    return { kind: "late" as const, lineIds: [line.id], orderId: line.productionOrderId, batch: job?.number,
+      message: `Late: ${what} ${calendarProcessName(directory, line.calendarId)} was planned for ${days} and is not completed.` };
   });
 }
 
