@@ -15,6 +15,7 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 - **Machine bookings** that are confirmed can be moved to another machine or time only by someone who can approve bookings. When anyone else moves the activity, its confirmed bookings move with it and go back to Draft, to be confirmed again. Deleting a booking that is past Draft needs the right to cancel bookings.
 
 ### Fixed
+- **Who did it** (added by, tested by, released by, batch number by and the like) is always the person signed in when the record is saved. Names already on records are unchanged.
 - **Job orders** are now counted against the PO in the PO's own unit, whatever unit their batch quantity is in. For example, job orders kept in capsules for a PO in boxes count by their boxes, so "in job orders" and "still to release" are right and a job order that would take the PO over its quantity is refused. A PO already over shows how much over it is.
 - **Reports** show the "Updated by" time, and Incoming WIP the "Sent by" time, as DD/MM/YYYY like everywhere else (it showed month first on some computers).
 - **Testing, release and production results** can only be recorded by people with that right, also when they are saved together with another change, or come with a newly added job order or activity. Before, someone with only Orders edit or Planning rights could slip them in that way. Existing records are unchanged.
