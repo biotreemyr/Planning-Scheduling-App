@@ -233,7 +233,7 @@ Use this standard for Inventory Bank, Receiving, Purchasing, Planning, QA/QC que
 | Search | Search across real user lookup fields such as code, item, GRN, PO, batch, supplier, certificate |
 | Filters | Use dropdown filters, not click-to-cycle chips |
 | Sorting | Table headers should be clickable where sorting is meaningful |
-| Dates | Display operational dates as `DD/MM/YYYY` (with a time: `DD/MM/YYYY HH:MM`), in numbers, everywhere: screens, prints, PDFs and Excel |
+| Dates | **Always `DD/MM/YYYY`** (with a time: `DD/MM/YYYY HH:MM`, 24-hour), in numbers, everywhere: screens, tooltips, audit trails, reports, prints, PDFs and Excel. Never `MM/DD/YYYY` or a browser-default format: format dates explicitly (e.g. `en-GB`) rather than relying on `toLocaleString()` with no locale |
 | Row detail | Open details in a focused window, drawer, split view, or page |
 | Actions | Use explicit buttons such as Upload COA, View COA, Print, Reprint, Export, Preview, Sign & submit |
 | Restricted fields | Hide restricted fields from UI, API, export, print, PDF, and download |
@@ -497,6 +497,7 @@ Before another app says it follows Bio Tree UI/UX, confirm:
 - It uses compliance-readiness language accurately.
 - It has visible audit and approval expectations for critical records.
 - It works on mobile and desktop.
+- Every date it shows, prints or exports is `DD/MM/YYYY` (with a time: `DD/MM/YYYY HH:MM`), with no exceptions.
 - It passes visual review and beta/UAT review for the workflow.
 
 ## Copy/Paste Prompt For Other Apps
@@ -509,6 +510,8 @@ The app should feel like Bio Tree: warm science, calm precision, premium but pra
 For public or client-facing surfaces, use the Brand Experience Layer: editorial layout, forest/sage/ivory/navy/gold palette, transformation story of Seed -> Sprout -> Fermentation -> Product -> Consumer, clear B2B wellness copy, and no unsupported compliance or certification claims.
 
 For internal workflow surfaces, use the Operations Workstation Layer: SOP-driven screens, compact workstation shell, module sidebar, top search, dropdown filters, sortable tables, status chips, focused detail windows, audit-ready critical actions, and mobile-first shopfloor equivalents.
+
+Dates are always DD/MM/YYYY (with a time: DD/MM/YYYY HH:MM), on every screen, print, PDF and Excel file; never MM/DD/YYYY or a browser-default date format.
 
 Do not create generic dashboards. Do not expose restricted fields. Do not claim 21 CFR Part 11 compliance; use compliance-ready/e-signature-ready language unless validation and controlled operation are complete.
 ```
