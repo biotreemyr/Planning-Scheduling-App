@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { localPersistenceAllowed, sameLocalOrigin } from "@/lib/persistence/access";
 import { db, validWriteToken } from "@/lib/persistence/database";
-import { workspaceRepository, RevisionConflict, ChangeNotAllowed, type SaveActor, type ReviewChange } from "@/lib/persistence/repository";
+import { workspaceRepository, RevisionConflict, ChangeNotAllowed, type SaveActor, type ReviewChange, type RestoreHidden } from "@/lib/persistence/repository";
 import { parseWorkspace } from "@/lib/domain/workspace";
 import { ensureDailyBackup } from "@/lib/persistence/backup";
 import { getAppUrl, getAuthMode } from "@/lib/auth/config";
@@ -9,6 +9,7 @@ import { AccessError, requireAnyPermission } from "@/lib/auth/guards";
 import { boardPermissions, effectivePermissions } from "@/lib/auth/permissions";
 import { capabilitiesFromPermissions } from "@/lib/auth/capabilities";
 import { reviewWorkspaceChange } from "@/lib/auth/workspaceAccess";
+import { restoreHidden } from "@/lib/auth/workspaceView";
 import { loadMasterLists } from "@/lib/masterdata/catalog";
 
 export const runtime = "nodejs";
@@ -17,7 +18,7 @@ const response = (body: unknown, status = 200) => NextResponse.json(body, { stat
 
 // Core mode: the signed-in Core user, a request from this app's own origin, and the
 // page's write token. Every change is then checked against the user's Core permissions.
-async function coreAccess(request: NextRequest): Promise<{ actor: SaveActor; review: ReviewChange } | NextResponse> {
+async function coreAccess(request: NextRequest): Promise<{ actor: SaveActor; review: ReviewChange; restore: RestoreHidden } | NextResponse> {
   let user;
   try { user = await requireAnyPermission(boardPermissions); } catch (error) {
     const code = error instanceof AccessError ? error.code : "unavailable";
@@ -32,11 +33,13 @@ async function coreAccess(request: NextRequest): Promise<{ actor: SaveActor; rev
   // Read here, not from the browser, so an order can only take a record exactly as Master Data has it.
   // Unreachable, it is empty: saves still work, but taking a new product from it needs Admin.
   const lists = await loadMasterLists().catch(() => null) ?? { products: [], customers: [] };
-  return { actor: { id: user.id, clerkId: user.clerkUserId, name: user.name ?? "Bio Tree user" }, review: (before, after) => reviewWorkspaceChange(before, after, can, lists) };
+  return { actor: { id: user.id, clerkId: user.clerkUserId, name: user.name ?? "Bio Tree user" }, review: (before, after) => reviewWorkspaceChange(before, after, can, lists),
+    // The page was sent only what this person may view; the rest is kept as stored.
+    restore: (stored, received) => restoreHidden(stored, received, can) };
 }
 
 export async function PUT(request: NextRequest) {
-  let access: { actor?: SaveActor; review?: ReviewChange };
+  let access: { actor?: SaveActor; review?: ReviewChange; restore?: RestoreHidden };
   let mode: "demo" | "core";
   try { mode = getAuthMode(); } catch { return response({ error: "Scheduler configuration is invalid. Changes were not saved." }, 503); }
   if (mode === "core") {

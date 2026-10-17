@@ -4,6 +4,8 @@ import SchedulerDemo from "@/components/SchedulerDemo";
 import { AccessError, requireAnyPermission } from "@/lib/auth/guards";
 import { getAuthMode, getSignInUrl } from "@/lib/auth/config";
 import { APP_KEY, boardPermissions, effectivePermissions, type BioTreeUser } from "@/lib/auth/permissions";
+import { capabilitiesFromPermissions } from "@/lib/auth/capabilities";
+import { visibleWorkspace } from "@/lib/auth/workspaceView";
 import { headers } from "next/headers";
 import { localPersistenceAllowed } from "@/lib/persistence/access";
 import { db, writeToken } from "@/lib/persistence/database";
@@ -48,8 +50,10 @@ export default async function Home() {
   // The verified Core user replaces the demo's person picker; every save is rechecked on the server.
   try {
     if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
-    const [initial, catalog, equipment, releases] = await Promise.all([workspaceRepository(db).load(), loadOrderCatalog(), loadEquipmentCatalog(), loadReleases()]);
+    const [stored, catalog, equipment, releases] = await Promise.all([workspaceRepository(db).load(), loadOrderCatalog(), loadEquipmentCatalog(), loadReleases()]);
     const identity = { id: user.id, name: user.name ?? "Bio Tree user", permissions: effectivePermissions(user.apps.find((app) => app.appKey === APP_KEY)?.permissions ?? []) };
+    // Only what this person's Core rights let them view leaves the server; saves put the rest back.
+    const initial = { ...stored, snapshot: visibleWorkspace(stored.snapshot, capabilitiesFromPermissions(identity.permissions)) };
     return <SchedulerDemo initial={initial} writeToken={writeToken()} identity={identity} catalog={catalog} equipment={equipment} releases={releases} />;
   } catch {
     return <AccessMessage title="Scheduler unavailable" message="The scheduling database could not be reached. No data has been changed. Contact your administrator." />;

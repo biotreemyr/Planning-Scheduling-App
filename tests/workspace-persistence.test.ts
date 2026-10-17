@@ -6,6 +6,9 @@ import { createDatabase } from "../src/lib/persistence/client";
 import { schedulerAuditEvent, schedulerWorkspace, schedulerWorkspaceRevision } from "../src/lib/persistence/schema";
 import { workspaceRepository, RevisionConflict } from "../src/lib/persistence/repository";
 import { localPersistenceAllowed, sameLocalOrigin } from "../src/lib/persistence/access";
+import { capabilitiesFromPermissions } from "../src/lib/auth/capabilities";
+import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
+import { restoreHidden, visibleWorkspace } from "../src/lib/auth/workspaceView";
 
 describe("workspace boundary", () => {
   it("allows only explicitly enabled loopback development access", () => {
@@ -97,6 +100,26 @@ describe.skipIf(!enabled)("PostgreSQL round trips", () => {
     expect(await repository.save(initial.snapshot, 0, mutation, { actor })).toBe(1);
     expect((await repository.load()).snapshot.data.orders[0].createdBy).toBe("Aida");
     expect(await repository.save(initial.snapshot, 0, mutation, { actor })).toBe(1);
+  });
+  it("keeps what a person's page was not sent when they save", async () => {
+    const { repository } = create(); const initial = await repository.load();
+    initial.snapshot.products.push({ id: "product", sku: "P-001", name: "Tablet", uom: "tablets", productType: "Finished Good", active: "Active" });
+    initial.snapshot.data.customers.push({ id: "customer", code: "C-1", name: "Confidential Sdn Bhd", active: "Active" });
+    initial.snapshot.data.orders.push({ id: "po", poNumber: "PO-1", customerId: "customer", customerName: "Confidential Sdn Bhd", soNumber: "SO-9", notes: "Price RM 1.20", productId: "product", quantity: 1, uom: "tablets", expectedDates: {}, createdAt: "2026-10-17T00:00:00Z", createdBy: "Planner" });
+    initial.snapshot.data.jobOrders.push({ id: "jo", number: "JO-1", orderId: "po", sequence: 1, quantity: 1, uom: "tablets", notes: "Hold for QA", createdAt: "2026-10-17T00:00:00Z", createdBy: "Planner" });
+    expect(await repository.save(initial.snapshot, 0, randomUUID())).toBe(1);
+    const stored = (await repository.load()).snapshot;
+    const production = capabilitiesFromPermissions(["scheduler.planning.view", "scheduler.schedule.view", "scheduler.schedule.edit"]);
+    const sent = visibleWorkspace(stored, production);
+    expect(sent.data.customers).toEqual([]);
+    expect(sent.data.orders[0]).not.toHaveProperty("customerName");
+    sent.data.jobOrders[0].batchNumber = "B-1";
+    const options = { actor: { id: "core-user", name: "Ali" }, review: (before: typeof stored, after: typeof stored) => reviewWorkspaceChange(before, after, production), restore: (before: typeof stored, after: typeof stored) => restoreHidden(before, after, production) };
+    expect(await repository.save(sent, 1, randomUUID(), options)).toBe(2);
+    const saved = (await repository.load()).snapshot;
+    expect(saved.data.customers).toEqual(stored.data.customers);
+    expect(saved.data.orders).toEqual(stored.data.orders);
+    expect(saved.data.jobOrders[0]).toMatchObject({ batchNumber: "B-1", notes: "Hold for QA" });
   });
   it("leaves saved data unchanged after invalid input", async () => {
     const { repository } = create(); const initial = await repository.load();
