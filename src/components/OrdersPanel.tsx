@@ -567,6 +567,8 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
 const FILL_UOMS = ["blisters", "bottles", "sachets"];
 const COUNT_UOMS = ["tablets", "capsules"];
 // A capsule, tablet or sachet batch is counted in its own units; an existing job order keeps the unit it has.
+// Dispensing more than this % over the order's total kg is flagged.
+const DISPENSING_OVERAGE_LIMIT = 1;
 const FORM_UNITS: Partial<Record<ProductFormat, string[]>> = { Capsule: ["capsules"], Tablet: ["tablets"], Sachet: ["sachets"] };
 function JobOrders({ orders, order, product, products, format, jobOrders, transfers, lines, actions, directory }: { directory: CalendarDirectory; orders: PurchaseOrder[]; order: PurchaseOrder; product?: Product; products: Product[]; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
   const [errors, setErrors] = useState<string[]>([]);
@@ -614,7 +616,7 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
     <details className="order-section">
     <summary className="order-section-summary"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
       <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span>
-      {overage !== undefined ? <span className="route-muted" title="Batch sizes keyed in on the job orders against the order's total weight">{formatKg(dispensedKg)} for dispensing against the order's {formatKg(orderTotalKg!)} · {overage >= 0 ? `${overage.toFixed(1)}% overage` : `${(-overage).toFixed(1)}% short`}</span> : null}
+      {overage !== undefined ? <span className={overage > DISPENSING_OVERAGE_LIMIT ? "order-warning" : "route-muted"} title="Batch sizes keyed in on the job orders against the order's total weight">{formatKg(dispensedKg)} for dispensing against the order's {formatKg(orderTotalKg!)} · {overage >= 0 ? `${overage.toFixed(1)}% overage${overage > DISPENSING_OVERAGE_LIMIT ? `, above the ${DISPENSING_OVERAGE_LIMIT}% limit` : ""}` : `${(-overage).toFixed(1)}% short`}</span> : null}
       {released > order.quantity ? <span className="order-warning">{(released - order.quantity).toLocaleString()} {order.uom} more than the PO</span> : null}
       {uncounted.length ? <span className="order-warning">{uncounted.map((job) => job.number).join(", ")}: no figure in {order.uom}, not counted</span> : null}</summary>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">

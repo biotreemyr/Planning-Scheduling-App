@@ -10,7 +10,7 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ### Added
 - **Testing and Release lists** show each batch's final yield against QA's limits, say when no limits are set, and flag processes that came out outside them.
-- **Job orders** show the kilograms planned for dispensing against the order's total weight, with the overage (or shortfall) as a %.
+- **Job orders** show the kilograms planned for dispensing against the order's total weight, with the overage (or shortfall) as a %. More than 1% over is shown as a warning.
 - **Late activities** show in red: an open activity whose planned day has passed is red in the order's Progress grid (marked "Late") and has a red edge in the Planner list, with a warning in the process-flow warnings.
 
 ### Changed
