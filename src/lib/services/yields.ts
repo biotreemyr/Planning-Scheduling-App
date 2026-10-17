@@ -3,7 +3,7 @@ import type { PlanLine } from "@/lib/domain/types";
 import { isCounted } from "./jobQuantities";
 import type { JobOrder } from "./jobOrders";
 import { orderWeightKind, type PurchaseOrder } from "./orders";
-import { calendarProcessName, calendarSettings } from "./processSetup";
+import { calendarProcessName, calendarSettings, plannedOrder } from "./processSetup";
 import { isPerOrderLine, isShared, jobForOrder, jobParts, partFor } from "./sharedJobs";
 
 /**
@@ -96,7 +96,9 @@ export function batchYield(job: JobOrder, orderId: string, lines: PlanLine[], or
   const missing = new Set<string>();
   const stages: StageYield[] = [];
   let previous: StageYield | undefined;
-  for (const calendar of directory.calendars) {
+  // In the unit's order, except blending and granulation, which follow their planned days.
+  const calendars = plannedOrder(directory.calendars, (calendar) => calendarProcessName(directory, calendar.id), (calendar) => own.filter((line) => line.calendarId === calendar.id).map((line) => line.plannedDate).sort()[0]);
+  for (const calendar of calendars) {
     const items = own.filter((line) => line.calendarId === calendar.id);
     if (!items.length) continue;
     const uom = items[0].uom ?? "";

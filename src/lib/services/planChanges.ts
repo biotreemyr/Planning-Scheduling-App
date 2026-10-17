@@ -6,6 +6,26 @@ import type { PurchaseOrder } from "./orders";
 import { OPTIONAL_STEPS, ROUTES, routeLabel, stepLabel, stepOf, type ProductFormat, type RouteStepName } from "./processRules";
 import type { PlannedSource, ProcessSettings } from "./processSetup";
 
+// Where and when a booking runs. A confirmed booking moved off it is no longer what was approved.
+export const bookingMoved = (before: ScheduleEntry, after: ScheduleEntry) => before.machineId !== after.machineId || before.workCentreId !== after.workCentreId || before.startAt !== after.startAt || before.endAt !== after.endAt;
+
+/**
+ * Someone who cannot approve bookings may still move an activity: its confirmed bookings that move
+ * with it go back to Draft, to be confirmed again.
+ */
+export function reopenMovedBookings<E extends ScheduleEntry>(before: E[], after: E[], canApprove: boolean): E[] {
+  if (canApprove || before === after) return after;
+  const old = new Map(before.map((entry) => [entry.id, entry]));
+  let changed = false;
+  const next = after.map((entry) => {
+    const was = old.get(entry.id);
+    if (!was || was.status !== "Confirmed" || entry.status !== "Confirmed" || !bookingMoved(was, entry)) return entry;
+    changed = true;
+    return { ...entry, status: "Draft" as const };
+  });
+  return changed ? next : after;
+}
+
 /**
  * Move an activity to a new date. Its open machine bookings move by the same number of
  * days, so the calendar, list, machine schedule, orders and reports all stay in step.

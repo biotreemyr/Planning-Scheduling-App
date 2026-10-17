@@ -26,6 +26,16 @@ export type WipTransfer = {
   wipRoom?: boolean;
 };
 
+/**
+ * Handovers into an activity not yet received: output of the same job order sent to this activity's
+ * process. The next process may start only once it is received, so who took over the material is recorded.
+ */
+export function awaitingReceipt(line: PlanLine, lines: PlanLine[], transfers: WipTransfer[]) {
+  if (!line.jobOrderId) return [];
+  return transfers.filter((item) => !item.receivedAt && !item.plannedLineId && item.calendarId === line.calendarId && item.sourceLineId !== line.id
+    && lines.some((source) => source.id === item.sourceLineId && source.jobOrderId === line.jobOrderId && (!source.productionOrderId || !line.productionOrderId || source.productionOrderId === line.productionOrderId)));
+}
+
 // Core has no team model, so in Core mode the receiving process need not have a named production person.
 export function validateCompletion(line: PlanLine, input: CompletionInput, person: CalendarPerson, directory: CalendarDirectory, requireReceivingTeam = true) {
   const source = directory.calendars.find((calendar) => calendar.id === line.calendarId);

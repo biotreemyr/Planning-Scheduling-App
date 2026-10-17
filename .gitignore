@@ -10,3 +10,4 @@ coverage
 *.log
 tsconfig.tsbuildinfo
 .next-preview/
+.next-scratch/

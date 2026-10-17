@@ -2,7 +2,7 @@ import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product, ScheduleEntry } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
 import { lineEnd } from "./scheduling";
-import { unitRoute, unitRouteLabel } from "./processSetup";
+import { plannedOrder, unitRoute, unitRouteLabel } from "./processSetup";
 import { formatDate } from "./dates";
 
 export const PRODUCT_FORMATS = ["Capsule", "Tablet", "Sachet", "Other"] as const;
@@ -61,7 +61,7 @@ export function inferFormat(product?: Pick<Product, "name" | "uom"> & { sku?: st
   return "Other";
 }
 
-export type FlowWarning = { kind: "route" | "missing" | "sequence" | "booking" | "tally" | "yield"; lineIds: string[]; orderId?: string; batch?: string; message: string };
+export type FlowWarning = { kind: "route" | "missing" | "sequence" | "booking" | "tally" | "yield" | "late"; lineIds: string[]; orderId?: string; batch?: string; message: string };
 
 const pretty = (date: string) => formatDate(date.slice(0, 10));
 function bookingDate(value: string) {
@@ -95,16 +95,18 @@ export function checkProcessFlow(lines: PlanLine[], entries: ScheduleEntry[], or
     if (format === "Other") continue;
     // The route is the unit's processes used for this dosage form, in the unit's order (Admin).
     const unitId = directory.calendars.find((item) => item.id === first.calendarId)?.unitId;
-    const route = unitRoute(directory, unitId, format);
+    const unitOrder = unitRoute(directory, unitId, format);
     const label = unitRouteLabel(directory, unitId, format);
     const batch = first.orderReference?.trim() || undefined;
     const prefix = batch ? `${order ? `${order.poNumber} ` : ""}${batch}: ` : "";
     const byStep = new Map<string, PlanLine[]>();
     const outside = new Map<string, PlanLine[]>();
     for (const line of group) {
-      if (!route.some((entry) => entry.calendar.id === line.calendarId)) { outside.set(processName(line), [...outside.get(processName(line)) ?? [], line]); continue; }
+      if (!unitOrder.some((entry) => entry.calendar.id === line.calendarId)) { outside.set(processName(line), [...outside.get(processName(line)) ?? [], line]); continue; }
       byStep.set(line.calendarId!, [...byStep.get(line.calendarId!) ?? [], line]);
     }
+    // Blending may come before or after granulation: those follow their planned days.
+    const route = plannedOrder(unitOrder, (entry) => entry.name, (entry) => byStep.get(entry.calendar.id)?.map((line) => line.plannedDate).sort()[0]);
     // One warning per wrong process per batch, however many days it runs.
     for (const [name, wrong] of outside) warnings.push({ kind: "route", lineIds: wrong.map((line) => line.id), orderId: order?.id, batch, message: `${prefix}${name || "This process"} is not part of the ${format.toLowerCase()} route (${label}).` });
     const present = route.filter((entry) => byStep.has(entry.calendar.id));

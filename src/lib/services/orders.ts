@@ -2,7 +2,7 @@ import type { CalendarDirectory, UnitCalendar } from "@/lib/domain/calendarAcces
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { ProductFormat } from "./processRules";
 import { lineDays, lineEnd } from "./scheduling";
-import { calendarSettings, type ProcessSettings } from "./processSetup";
+import { calendarSettings, plannedOrder, type ProcessSettings } from "./processSetup";
 
 // One product line item of a customer purchase order. A PO with several products is several of
 // these sharing a PO number, numbered by `item`. Plan lines link to one through `productionOrderId`.
@@ -131,10 +131,12 @@ export function batchRoute(line: PlanLine, lines: PlanLine[], directory: Calenda
   const unitId = directory.calendars.find((item) => item.id === line.calendarId)?.unitId;
   const sameBatch = (other: PlanLine) => other.id === line.id || (!!line.orderReference?.trim() && other.productId === line.productId &&
     other.orderReference?.trim() === line.orderReference.trim() && other.productionOrderId === line.productionOrderId);
-  return directory.calendars.filter((calendar) => calendar.unitId === unitId).map((calendar) => ({
+  const steps = directory.calendars.filter((calendar) => calendar.unitId === unitId).map((calendar) => ({
     calendar, processName: directory.processes.find((item) => item.id === calendar.processId)?.name ?? calendar.name, settings: calendarSettings(directory, calendar.id),
     lines: lines.filter((other) => other.calendarId === calendar.id && sameBatch(other)).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate))
   }));
+  // Blending before or after granulation shows where it was planned.
+  return plannedOrder(steps, (step) => step.processName, (step) => step.lines[0]?.plannedDate);
 }
 
 export type OrderStatus = "Not scheduled" | "Scheduled" | "In production" | "Completed";

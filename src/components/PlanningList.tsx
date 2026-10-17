@@ -231,7 +231,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
                     const facts = activityFacts(line, jobOrders, product?.uom);
                     const batch = [facts.batchNumber, facts.jobNumber].filter(Boolean).join(" · ");
                     const detail = facts.quantity;
-                    return <div key={line.id} data-movable={movable || undefined} data-span-id={lineDays(line) > 1 ? line.id : undefined} className={`plan-grid-item${lineDays(line) > 1 ? " plan-grid-spanning" : ""}${number ? "" : " no-order"}${line.completedAt ? " completed" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
+                    return <div key={line.id} data-movable={movable || undefined} data-span-id={lineDays(line) > 1 ? line.id : undefined} className={`plan-grid-item${lineDays(line) > 1 ? " plan-grid-spanning" : ""}${number ? "" : " no-order"}${line.completedAt ? " completed" : lineEnd(line) < today ? " late" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
                       style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
                       onPointerDown={(event) => pointerDown(event, line, name)} onContextMenu={(event) => { if (drag.current?.touch) event.preventDefault(); }}>
                       {movable ? <button type="button" className="icon-button plan-list-grip" title={`Move ${name}`} aria-label={`Move ${name}`} aria-describedby="list-move-help"

@@ -65,9 +65,24 @@ describe("workspace change review", () => {
     expect(reviewWorkspaceChange(before, confirmed, everything).allowed).toBe(true);
     const cancelled = structuredClone(before); cancelled.data.entries.find((entry) => entry.id === draft.id)!.status = "Cancelled";
     expect(reviewWorkspaceChange(before, cancelled, admin).denied).toEqual(["cancel machine bookings"]);
-    // Moving an already confirmed booking is ordinary editing.
+    // Moving a confirmed booking needs approve, unless it goes back to Draft to be confirmed again.
     const moved = copy(); moved.data.entries.find((entry) => entry.id === draft.id)!.startAt = "2026-10-09T08:00";
-    expect(reviewWorkspaceChange(base, moved, manager).allowed).toBe(true);
+    expect(reviewWorkspaceChange(base, moved, manager).denied).toEqual(["move confirmed machine bookings"]);
+    expect(reviewWorkspaceChange(base, moved, everything).allowed).toBe(true);
+    const reopened = structuredClone(moved); reopened.data.entries.find((entry) => entry.id === draft.id)!.status = "Draft";
+    expect(reviewWorkspaceChange(base, reopened, manager).allowed).toBe(true);
+    // Production moving it along (In Progress) is not a move.
+    const started = copy(); started.data.entries.find((entry) => entry.id === draft.id)!.status = "In Progress";
+    expect(reviewWorkspaceChange(base, started, manager).allowed).toBe(true);
+  });
+  it("needs cancel to delete a booking past Draft", () => {
+    const confirmed = base.data.entries.find((entry) => entry.status === "Confirmed")!;
+    const deleted = copy(); deleted.data.entries = deleted.data.entries.filter((entry) => entry.id !== confirmed.id);
+    expect(reviewWorkspaceChange(base, deleted, manager).denied).toEqual(["cancel machine bookings"]);
+    expect(reviewWorkspaceChange(base, deleted, everything).allowed).toBe(true);
+    const before = copy(); before.data.entries.find((entry) => entry.id === confirmed.id)!.status = "Draft";
+    const draftDeleted = structuredClone(before); draftDeleted.data.entries = draftDeleted.data.entries.filter((entry) => entry.id !== confirmed.id);
+    expect(reviewWorkspaceChange(before, draftDeleted, manager).allowed).toBe(true);
   });
   it("keeps configuration and sample data to master data managers", () => {
     const next = copy(); next.directory.units[0].name = "Renamed";

@@ -1,7 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { PlanLine } from "@/lib/domain/types";
 import { finalOutput, packingNumber, testResult, type JobOrder, type ProcessQuantity } from "./jobOrders";
-import type { PurchaseOrder } from "./orders";
+import { orderWeightKind, type PurchaseOrder } from "./orders";
 import { calendarSettings, type PlannedSource } from "./processSetup";
 
 /**
@@ -38,6 +38,31 @@ export const servesOrder = (job: Pick<JobOrder, "orderId" | "shares">, orderId: 
 export const jobsServing = (orderId: string, jobs: JobOrder[]) => jobs.filter((job) => servesOrder(job, orderId));
 export const partFor = (job: JobOrder, orderId: string) => jobParts(job).find((part) => part.orderId === orderId);
 
+const sameUnit = (a?: string, b?: string) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+const BOX_UOMS = ["box", "boxes", "carton", "cartons"];
+const COUNT_UOMS = ["tablet", "tablets", "capsule", "capsules", "sachet", "sachets"];
+/**
+ * A PO's part of a batch in the PO's own unit, so job orders can be compared with the PO however
+ * their batch quantity is kept: the batch quantity itself, the pack quantity, the boxes, or capsules
+ * or tablets divided by the PO's units per pack. Undefined when it cannot be told.
+ */
+export function partInOrderUnit(job: JobOrder, order: PurchaseOrder): number | undefined {
+  const part = partFor(job, order.id);
+  if (!part) return undefined;
+  if (sameUnit(job.uom, order.uom)) return part.quantity;
+  if (sameUnit(part.packUom, order.uom) && part.packQuantity !== undefined) return part.packQuantity;
+  if (part.boxQuantity !== undefined && BOX_UOMS.includes(order.uom.trim().toLowerCase())) return part.boxQuantity;
+  if (orderWeightKind(order.uom) === "pack" && order.unitsPerPack && COUNT_UOMS.includes(job.uom.trim().toLowerCase())) return Math.floor(part.quantity / order.unitsPerPack);
+  return undefined;
+}
+/** What a PO's job orders add up to in its unit, and the job orders that could not be counted. */
+export function orderedInJobs(order: PurchaseOrder, jobs: JobOrder[]) {
+  const serving = jobsServing(order.id, jobs);
+  const figures = serving.map((job) => partInOrderUnit(job, order));
+  return { total: Number(figures.reduce<number>((sum, value) => sum + (value ?? 0), 0).toPrecision(12)), uncounted: serving.filter((_, index) => figures[index] === undefined) };
+}
+export const overOrderedText = (order: PurchaseOrder, total: number) => `Job orders for ${order.poNumber} would add up to ${total.toLocaleString()} ${order.uom}, more than the ${order.quantity.toLocaleString()} ordered.`;
+
 /**
  * The job order as one PO sees it: that PO's share and packing in place of the first PO's, so a
  * per-PO process (filling, packing) plans with that PO's pack quantity and boxes.
@@ -62,7 +87,7 @@ export const formulaPending = (job: JobOrder, orders: PurchaseOrder[]) => needsF
 /**
  * Checks for the POs a batch serves: at most 5, each once, each still a PO item, the same dosage
  * form as the first, a share above zero for every PO (the first keeps the rest of the batch), and
- * no PO given more than it ordered across all its job orders (where the units match).
+ * no PO given more than it ordered across all its job orders (counted in the PO's own unit).
  */
 export function sharesProblem(job: JobOrder, orders: PurchaseOrder[], jobs: JobOrder[], formatOf: (order: PurchaseOrder) => string): string {
   const shares = job.shares ?? [];
@@ -91,9 +116,8 @@ export function sharesProblem(job: JobOrder, orders: PurchaseOrder[], jobs: JobO
   if (new Set(jobParts(job).map((part) => part.packingNumber.toLowerCase())).size !== shares.length + 1) return "Give each PO its own packing job order number.";
   for (const part of jobParts(job)) {
     const order = orders.find((item) => item.id === part.orderId)!;
-    if (job.uom !== order.uom) continue;
-    const total = jobs.filter((other) => other.id !== job.id).flatMap((other) => jobParts(other).filter((item) => item.orderId === order.id)).reduce((sum, item) => sum + item.quantity, part.quantity);
-    if (total > order.quantity + 1e-9) return `Job orders for ${order.poNumber} would add up to ${Number(total.toPrecision(12)).toLocaleString()} ${order.uom}, more than the ${order.quantity.toLocaleString()} ordered.`;
+    const { total } = orderedInJobs(order, [...jobs.filter((other) => other.id !== job.id), job]);
+    if (total > order.quantity + 1e-9) return overOrderedText(order, total);
   }
   return "";
 }

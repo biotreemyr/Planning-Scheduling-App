@@ -141,6 +141,8 @@
 .access-checks legend { font-weight: 600; }
 .access-checks label { display: flex; align-items: center; gap: 8px; font-weight: 400; }
 .access-checks input { width: 18px; height: 18px; flex: 0 0 18px; }
+.wip-receipt { border: 1px solid #f0c36d; background: #fff8e6; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-size: 13px; }
+.wip-receipt p { margin: 0 0 6px; }
 .wip-inbox { border-block: 1px solid var(--line); padding: 20px 0; margin-bottom: 24px; }
 .wip-inbox h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .wip-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; border-top: 1px solid var(--line); padding: 18px 0; }
@@ -248,6 +250,8 @@
 /* No PO: no tab colour, a dashed outline instead (light grey is order colour 8). */
 .workstation .plan-grid-item.no-order { border-left-color: transparent; background: #fff; outline: 1px dashed #adb5bd; outline-offset: -1px; }
 .workstation .plan-grid-item.completed { background: var(--gray-soft); }
+/* Open after its planned day: a red edge, with the late warning on the ⚠. */
+.workstation .plan-grid-item.late { box-shadow: inset 3px 0 0 #b42318; }
 .workstation .plan-grid-item.completed .plan-list-product strong { color: #4f5a60; }
 .workstation .plan-grid-item[data-movable], .workstation .plan-grid-item[data-movable] .plan-list-product { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .workstation .plan-grid-item.is-dragging { opacity: 0.4; }
@@ -650,6 +654,8 @@
 .order-flow-grid td small, .order-flow-grid th small { display: block; color: var(--muted); font-weight: 400; }
 .order-flow-grid td.order-flow-done { background: #d3f0dc; } .order-flow-grid td.order-flow-done .badge.success { background: #2b8a3e; color: #fff; }
 .order-flow-grid td.order-flow-planned { background: #fff6cc; }
+.order-flow-grid td.order-flow-late { background: #fde2e1; }
+.order-flow-late-label { display: block; color: #b42318; font-size: 12px; }
 /* Admin: a unit's route order, and a process's settings. */
 .route-order { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
 .route-order ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }

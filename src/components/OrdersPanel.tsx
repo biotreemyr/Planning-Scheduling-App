@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Columns3, F
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import { type ManualJob, batchStatus, defaultPackingNumber, orderStatusSummary, jobsFor, linesForJob, packingNumber, processQuantity, type JobOrder } from "@/lib/services/jobOrders";
-import { MAX_POS_PER_JOB, shortYield, closedSummary, formulaPending, jobForOrder, jobParts, jobsServing, orderViewLines, partFor, readyToClose, releaseFor, releasedToOrder, type JobShare } from "@/lib/services/sharedJobs";
+import { MAX_POS_PER_JOB, shortYield, closedSummary, formulaPending, jobForOrder, jobParts, jobsServing, orderViewLines, orderedInJobs, partFor, readyToClose, releaseFor, releasedToOrder, type JobShare } from "@/lib/services/sharedJobs";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { formatKg, lastOrderWeights, orderKg, orderWeightKind, type OrderBatchMatrix, nextOrderNumber, nextPoItem, poItem, poItems, poLabel, orderBatchMatrix, orderColor, orderInMonth, orderNumbers, orderProcessRows, orderProgress, validateOrder, isNonProduction, nextRndCode, ORDER_CATEGORIES, type OrderCategory, type BatchCell, type MonthBasis, type OrderProcessRow, type OrderProgress, type OrderStatus, type PurchaseOrder } from "@/lib/services/orders";
 import { RecordPicker, type PickerColumn } from "./RecordPicker";
@@ -566,6 +566,10 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
 // every process makes. Planning them happens on the Planner Board.
 const FILL_UOMS = ["blisters", "bottles", "sachets"];
 const COUNT_UOMS = ["tablets", "capsules"];
+// A capsule, tablet or sachet batch is counted in its own units; an existing job order keeps the unit it has.
+// Dispensing more than this % over the order's total kg is flagged.
+const DISPENSING_OVERAGE_LIMIT = 1;
+const FORM_UNITS: Partial<Record<ProductFormat, string[]>> = { Capsule: ["capsules"], Tablet: ["tablets"], Sachet: ["sachets"] };
 function JobOrders({ orders, order, product, products, format, jobOrders, transfers, lines, actions, directory }: { directory: CalendarDirectory; orders: PurchaseOrder[]; order: PurchaseOrder; product?: Product; products: Product[]; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
@@ -576,7 +580,12 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
   // This PO item's own job orders first, then batches other PO items share with it.
   const jobs = [...jobsFor(order.id, jobOrders), ...jobsServing(order.id, jobOrders).filter((job) => job.orderId !== order.id)];
   const [shareDrafts, setShareDrafts] = useState<ShareDraft[]>([]);
-  const released = jobs.filter((job) => job.uom === order.uom).reduce((sum, job) => sum + (partFor(job, order.id)?.quantity ?? 0), 0);
+  // Counted in the PO's unit whatever unit the batch quantity is in (capsules for a PO in boxes).
+  const { total: released, uncounted } = orderedInJobs(order, jobOrders);
+  // What dispensing weighs out for this PO (its share of each batch) against the order's total kg.
+  const orderTotalKg = orderKg(order);
+  const dispensedKg = jobs.reduce((sum, job) => sum + (job.batchSizeKg ?? 0) * (partFor(job, order.id)?.quantity ?? 0) / job.quantity, 0);
+  const overage = orderTotalKg && dispensedKg ? (dispensedKg - orderTotalKg) / orderTotalKg * 100 : undefined;
   const remaining = Math.max(0, Number((order.quantity - released).toPrecision(12)));
   const allowable = product?.batchQuantity;
   const report = (result: string[], success: string) => { setErrors(result); setNotice(result.length ? "" : success); return !result.length; };
@@ -606,7 +615,10 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
   return <section className="job-orders" aria-label={`Job orders for ${order.poNumber}`}>
     <details className="order-section">
     <summary className="order-section-summary"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
-      <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span></summary>
+      <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span>
+      {overage !== undefined ? <span className={overage > DISPENSING_OVERAGE_LIMIT ? "order-warning" : "route-muted"} title="Batch sizes keyed in on the job orders against the order's total weight">{formatKg(dispensedKg)} for dispensing against the order's {formatKg(orderTotalKg!)} · {overage >= 0 ? `${overage.toFixed(1)}% overage${overage > DISPENSING_OVERAGE_LIMIT ? `, above the ${DISPENSING_OVERAGE_LIMIT}% limit` : ""}` : `${(-overage).toFixed(1)}% short`}</span> : null}
+      {released > order.quantity ? <span className="order-warning">{(released - order.quantity).toLocaleString()} {order.uom} more than the PO</span> : null}
+      {uncounted.length ? <span className="order-warning">{uncounted.map((job) => job.number).join(", ")}: no figure in {order.uom}, not counted</span> : null}</summary>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
       <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col">PJO no.<small>Packing</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col">Batch number</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
       <tbody>{jobs.map((job) => {
@@ -825,7 +837,7 @@ function JobOrderFields({ job, order, format, countSteps, factors, countUom, def
       {values.batchSizeUom === "kg" && isCounted(values.uom) && !factors.unitWeightMg ? <small className="route-muted">Add the unit weight on the PO item to work out the {values.uom}</small> : null}</fieldset>
     <fieldset className="job-measure"><legend title={`Batch quantity, for ${countSteps || "production"}`}>Batch quantity<span> · {countSteps || "Production"}</span></legend>
       <input name="quantity" type="number" min="0" step="any" required aria-label="Batch quantity" value={quantity} onChange={(event) => type("quantity", event.target.value)} />
-      <select name="uom" aria-label="Batch quantity UOM" value={values.uom} onChange={(event) => set("uom", event.target.value)}>{options([order.uom, countUom, ...COUNT_UOMS, "sachets"], values.uom).map((name) => <option key={name}>{name}</option>)}</select>
+      <select name="uom" aria-label="Batch quantity UOM" value={values.uom} onChange={(event) => set("uom", event.target.value)}>{options(FORM_UNITS[format] ?? [order.uom, countUom, ...COUNT_UOMS, "sachets"], values.uom).map((name) => <option key={name}>{name}</option>)}</select>
       {note(auto.quantity && worked.quantity !== undefined, `≈ ${values.batchSize} kg ÷ ${factors.unitWeightMg} mg`)}</fieldset>
     <fieldset className="job-measure job-number"><legend title="Packing job order number; follows the job order number with PJO in front unless keyed in">Packing JO no.<span> · Packing</span></legend>
       <input name="packingNumber" maxLength={60} autoComplete="off" aria-label="Packing job order no." defaultValue={job?.packingNumber} placeholder={job ? defaultPackingNumber(job.number) : "PJO + job order no."} /></fieldset>
@@ -853,7 +865,7 @@ function OrderFlow({ order, orders, directory, jobOrders, lines, transfers, matr
   const day = (value?: string) => value ? shortDate(value.slice(0, 10)) : "";
   if (!jobs.length) return <p className="order-empty">No job orders yet. Key them in under Job orders, then plan them on the Planner Board.</p>;
   const stage = (label: string) => <tr className="order-flow-stage"><th scope="rowgroup" colSpan={jobs.length + 2}>{label}</th></tr>;
-  const row = (label: string, cell: (job: JobOrder) => ReactNode, total?: ReactNode, shade?: (job: JobOrder) => "done" | "planned" | "") => <tr><th scope="row" className="order-batch-process">{label}</th>
+  const row = (label: string, cell: (job: JobOrder) => ReactNode, total?: ReactNode, shade?: (job: JobOrder) => "done" | "planned" | "late" | "") => <tr><th scope="row" className="order-batch-process">{label}</th>
     {jobs.map((job) => { const tone = shade?.(job); return <td key={job.id} className={`order-batch-col${tone ? ` order-flow-${tone}` : ""}`}>{cell(job)}</td>; })}<td className="order-batch-summary">{total}</td></tr>;
   const states = new Map(jobs.map((job) => [job.id, batchStatus(job, lines, transfers)]));
   // Each batch's step yield per process and its final yield, against QA's limits.
@@ -876,13 +888,13 @@ function OrderFlow({ order, orders, directory, jobOrders, lines, transfers, matr
       {stage("Production")}
       {matrix.rows.length ? matrix.rows.map((process) => {
         const percent = process.planned ? Math.min(100, Math.round(process.completed / process.planned * 100)) : 0;
-        // No status words: the cell's colour says it (green done, light yellow planned, white not planned).
+        // The cell's colour says it (green done, light yellow planned, red late, white not planned); late also says so.
         const cellView = (job: JobOrder) => {
           const cell = process.cells[job.number];
           if (!cell) return null;
           const dates = cell.firstDate === cell.lastDate ? shortDate(cell.firstDate) : `${shortDate(cell.firstDate)} – ${shortDate(cell.lastDate)}`;
           const stage = yields.get(job.id)?.stages.find((item) => item.calendarId === process.calendar.id);
-          return <><span className="batch-dates">{dates}</span>{cell.daysDone ? <small>{cell.completed.toLocaleString()} {process.uom} made</small> : null}
+          return <><span className="batch-dates">{dates}</span>{cell.late && cell.daysDone < cell.days ? <strong className="order-flow-late-label" title="Planned on a day that has passed and not completed yet">Late</strong> : null}{cell.daysDone ? <small>{cell.completed.toLocaleString()} {process.uom} made</small> : null}
             {stage?.ofTheoretical !== undefined ? chip(stage.ofTheoretical, stage.tone, `% of theoretical: ${stage.theoreticalWorking}${stage.limit ? ` · QA limits ${limitText(stage.limit)}` : ""}`, "Yield ") : null}
             {stage?.percent !== undefined ? <small className="yield-step" title={`Step yield: ${stage.working}`}>Step {formatYield(stage.percent)}{stage.powder ? " by powder" : ""}</small>
               : stage?.missing ? <small className="yield-chip yield-missing" title={`Yield can't be worked out: ${stage.missing}`}>Yield – · figure missing</small> : null}
@@ -891,7 +903,7 @@ function OrderFlow({ order, orders, directory, jobOrders, lines, transfers, matr
         return <Fragment key={process.calendar.id}>{row(process.processName, cellView,
           <><div className="batch-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={`${process.processName} ${percent}% complete`}><span style={{ width: `${percent}%` }} /></div>
             <small>{process.completed.toLocaleString()} / {process.planned.toLocaleString()} {process.uom} · {percent}%</small></>,
-          (job) => { const cell = process.cells[job.number]; return !cell ? "" : cell.days > 0 && cell.daysDone === cell.days ? "done" : "planned"; })}</Fragment>;
+          (job) => { const cell = process.cells[job.number]; return !cell ? "" : cell.days > 0 && cell.daysDone === cell.days ? "done" : cell.late ? "late" : "planned"; })}</Fragment>;
       }) : row("Processes", () => null)}
       {matrix.rows.length ? row("Final yield", (job) => {
         const final = yields.get(job.id)?.final;

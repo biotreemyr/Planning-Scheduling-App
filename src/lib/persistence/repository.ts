@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import type { Database } from "./client";
 import { schedulerAuditEvent, schedulerWorkspace, schedulerWorkspaceRevision } from "./schema";
+import { stampWho } from "./stampWho";
 import { newWorkspace, parseWorkspace, type WorkspaceEnvelope, type WorkspaceSnapshot } from "@/lib/domain/workspace";
 
 export class RevisionConflict extends Error {}
@@ -19,14 +20,18 @@ export function workspaceRepository(db: Database, workspaceId = "local-pilot") {
       return { revision: row.revision, snapshot: parseWorkspace(row.snapshot) };
     },
     async save(input: unknown, revision: number, mutationId: string, options: { actor?: SaveActor; review?: ReviewChange } = {}): Promise<number> {
-      const snapshot = parseWorkspace(input);
+      const received = parseWorkspace(input);
+      // A verified user (Core sign-in) is named on every record they change; the local demo keeps its personas.
+      const signedIn = options.actor?.id ? options.actor.name : undefined;
       if (!Number.isSafeInteger(revision) || revision < 0 || !mutationId || mutationId.length > 100) throw new Error("Invalid revision");
       return db.transaction(async (tx) => {
         const [row] = await tx.select().from(schedulerWorkspace).where(eq(schedulerWorkspace.id, workspaceId));
         if (!row) throw new Error(`No workspace ${workspaceId}`);
-        if (row.lastMutationId === mutationId && row.revision === revision + 1 && isDeepStrictEqual(parseWorkspace(row.snapshot), snapshot)) return row.revision;
+        const stored = parseWorkspace(row.snapshot);
+        if (row.lastMutationId === mutationId && row.revision === revision + 1 && isDeepStrictEqual(stored, signedIn ? stampWho(stored, received, signedIn) : received)) return row.revision;
         if (row.revision !== revision) throw new RevisionConflict("Another tab has saved changes. Reload before editing.");
-        const review = options.review?.(parseWorkspace(row.snapshot), snapshot) ?? { denied: [], summary: [] };
+        const snapshot = signedIn ? stampWho(stored, received, signedIn) : received;
+        const review = options.review?.(stored, snapshot) ?? { denied: [], summary: [] };
         if (review.denied.length) throw new ChangeNotAllowed(review.denied);
         const changed = await tx.update(schedulerWorkspace).set({ snapshot, revision: sql`${schedulerWorkspace.revision} + 1`, lastMutationId: mutationId })
           .where(and(eq(schedulerWorkspace.id, workspaceId), eq(schedulerWorkspace.revision, revision))).returning({ id: schedulerWorkspace.id });

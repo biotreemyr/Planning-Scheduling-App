@@ -8,7 +8,22 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Added
+- **Testing and Release lists** show each batch's final yield against QA's limits, say when no limits are set, and flag processes that came out outside them.
+- **Job orders** show the kilograms planned for dispensing against the order's total weight, with the overage (or shortfall) as a %. More than 1% over is shown as a warning.
+- **Late activities** show in red: an open activity whose planned day has passed is red in the order's Progress grid (marked "Late") and has a red edge in the Planner list, with a warning in the process-flow warnings.
+
+### Changed
+- **Production route** lets a batch be blended before or after Granulation (Granulation stays optional, Blending stays required, once per batch). The process-flow warnings, step yields and the activity window follow the planned days for those two. Other processes keep the order set in Admin.
+- **Job orders** for a capsule, tablet or sachet PO offer only capsules, tablets or sachets as the batch quantity unit. Existing job orders keep the unit they have.
+- **Production update** can start or complete a process only after the work in progress handed over to it from the process before is received. The handover shows in the activity window with an **Acknowledge receipt** button, so who took over the material is recorded. Handovers already received are unchanged; ones still waiting must be received before their next process starts.
+- **Machine bookings** that are confirmed can be moved to another machine or time only by someone who can approve bookings. When anyone else moves the activity, its confirmed bookings move with it and go back to Draft, to be confirmed again. Deleting a booking that is past Draft needs the right to cancel bookings.
+
 ### Fixed
+- **Machine conflicts** now include a draft, confirmed or in-progress booking that overlaps a completed one on the same machine (before, completed bookings were skipped, so such a double booking showed 0 conflicts).
+- **Who did it** (added by, tested by, released by, batch number by and the like) is always the person signed in when the record is saved. Names already on records are unchanged.
+- **Job orders** are now counted against the PO in the PO's own unit, whatever unit their batch quantity is in. For example, job orders kept in capsules for a PO in boxes count by their boxes, so "in job orders" and "still to release" are right and a job order that would take the PO over its quantity is refused. A PO already over shows how much over it is.
+- **Reports** show the "Updated by" time, and Incoming WIP the "Sent by" time, as DD/MM/YYYY like everywhere else (it showed month first on some computers).
 - **Testing, release and production results** can only be recorded by people with that right, also when they are saved together with another change, or come with a newly added job order or activity. Before, someone with only Orders edit or Planning rights could slip them in that way. Existing records are unchanged.
 
 ## [1.7.0] - 2026-10-16

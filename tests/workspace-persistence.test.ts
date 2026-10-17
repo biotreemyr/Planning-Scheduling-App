@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { createDatabase } from "../src/lib/persistence/client";
-import { schedulerWorkspace, schedulerWorkspaceRevision } from "../src/lib/persistence/schema";
+import { schedulerAuditEvent, schedulerWorkspace, schedulerWorkspaceRevision } from "../src/lib/persistence/schema";
 import { workspaceRepository, RevisionConflict } from "../src/lib/persistence/repository";
 import { localPersistenceAllowed, sameLocalOrigin } from "../src/lib/persistence/access";
 
@@ -22,6 +22,11 @@ describe("workspace boundary", () => {
     expect(sameLocalOrigin("localhost:3001", "http://localhost:3001")).toBe(true);
     expect(sameLocalOrigin("localhost:3001", "http://attacker.example")).toBe(false);
     expect(sameLocalOrigin("localhost:3001", null)).toBe(false);
+  });
+  it("refuses a save with more records in a list than the scheduler allows", () => {
+    const huge = newWorkspace();
+    (huge.data as { lines: unknown[] }).lines = Array.from({ length: 20001 }, () => ({}));
+    expect(() => parseWorkspace(huge)).toThrow("Too many records");
   });
   it("rejects future schemas rather than resetting or downgrading records", () => {
     expect(() => parseWorkspace({ ...newWorkspace(), schemaVersion: 2 })).toThrow();
@@ -45,7 +50,7 @@ describe.skipIf(!enabled)("PostgreSQL round trips", () => {
   const ids: string[] = [];
   const create = () => { const id = `test-${randomUUID()}`; ids.push(id); return { id, repository: workspaceRepository(db, id) }; };
   afterAll(async () => {
-    for (const id of ids) { await db.delete(schedulerWorkspaceRevision).where(eq(schedulerWorkspaceRevision.workspaceId, id)); await db.delete(schedulerWorkspace).where(eq(schedulerWorkspace.id, id)); }
+    for (const id of ids) { await db.delete(schedulerAuditEvent).where(eq(schedulerAuditEvent.workspaceId, id)); await db.delete(schedulerWorkspaceRevision).where(eq(schedulerWorkspaceRevision.workspaceId, id)); await db.delete(schedulerWorkspace).where(eq(schedulerWorkspace.id, id)); }
     await db.$client.end();
   });
   it("saves and reloads configuration and measurement settings without reseeding", async () => {
@@ -83,6 +88,15 @@ describe.skipIf(!enabled)("PostgreSQL round trips", () => {
     snapshot.data.transfers.push({ id: "transfer", sourceLineId: "source", sourceCalendarId: "c1", calendarId: "c2", productId: "product", quantity: 95000, uom: "tablets", notes: "Ready to pack", createdAt: "2026-09-13T16:00:00Z", createdBy: "Production", receivedAt: "2026-09-13T17:00:00Z", receivedBy: "Packing", plannedLineId: "incoming" });
     await repository.save(snapshot, 0, randomUUID());
     expect((await repository.load()).snapshot).toEqual(snapshot);
+  });
+  it("names the signed-in user on what a save sets, and still accepts a retried save", async () => {
+    const { repository } = create(); const initial = await repository.load();
+    initial.snapshot.products.push({ id: "product", sku: "P-001", name: "Tablet", uom: "tablets", productType: "Finished Good", active: "Active" });
+    initial.snapshot.data.orders.push({ id: "po", poNumber: "PO-1", productId: "product", quantity: 1, uom: "tablets", expectedDates: {}, createdAt: "2026-10-17T00:00:00Z", createdBy: "Someone else" });
+    const mutation = randomUUID(), actor = { id: "core-user", name: "Aida" };
+    expect(await repository.save(initial.snapshot, 0, mutation, { actor })).toBe(1);
+    expect((await repository.load()).snapshot.data.orders[0].createdBy).toBe("Aida");
+    expect(await repository.save(initial.snapshot, 0, mutation, { actor })).toBe(1);
   });
   it("leaves saved data unchanged after invalid input", async () => {
     const { repository } = create(); const initial = await repository.load();
