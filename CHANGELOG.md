@@ -8,6 +8,9 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-17
+Fixes from the 17/10/2026 security and workflow review.
+
 ### Added
 - **Testing and Release lists** show each batch's final yield against QA's limits, say when no limits are set, and flag processes that came out outside them.
 - **Job orders** show the kilograms planned for dispensing against the order's total weight, with the overage (or shortfall) as a %. More than 1% over is shown as a warning.
