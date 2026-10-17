@@ -12,6 +12,8 @@ export class ChangeNotAllowed extends Error {
 export type SaveActor = { id?: string; clerkId?: string; name: string };
 // Runs inside the save transaction against the snapshot actually being replaced.
 export type ReviewChange = (before: WorkspaceSnapshot, after: WorkspaceSnapshot) => { denied: string[]; summary: string[] };
+// Puts back what the person's page was not sent (see visibleWorkspace), from the snapshot being replaced.
+export type RestoreHidden = (stored: WorkspaceSnapshot, received: WorkspaceSnapshot) => WorkspaceSnapshot;
 export function workspaceRepository(db: Database, workspaceId = "local-pilot") {
   return {
     async load(): Promise<WorkspaceEnvelope> {
@@ -19,8 +21,8 @@ export function workspaceRepository(db: Database, workspaceId = "local-pilot") {
       const [row] = await db.select().from(schedulerWorkspace).where(eq(schedulerWorkspace.id, workspaceId));
       return { revision: row.revision, snapshot: parseWorkspace(row.snapshot) };
     },
-    async save(input: unknown, revision: number, mutationId: string, options: { actor?: SaveActor; review?: ReviewChange } = {}): Promise<number> {
-      const received = parseWorkspace(input);
+    async save(input: unknown, revision: number, mutationId: string, options: { actor?: SaveActor; review?: ReviewChange; restore?: RestoreHidden } = {}): Promise<number> {
+      const sent = parseWorkspace(input);
       // A verified user (Core sign-in) is named on every record they change; the local demo keeps its personas.
       const signedIn = options.actor?.id ? options.actor.name : undefined;
       if (!Number.isSafeInteger(revision) || revision < 0 || !mutationId || mutationId.length > 100) throw new Error("Invalid revision");
@@ -28,6 +30,7 @@ export function workspaceRepository(db: Database, workspaceId = "local-pilot") {
         const [row] = await tx.select().from(schedulerWorkspace).where(eq(schedulerWorkspace.id, workspaceId));
         if (!row) throw new Error(`No workspace ${workspaceId}`);
         const stored = parseWorkspace(row.snapshot);
+        const received = options.restore ? parseWorkspace(options.restore(stored, sent)) : sent;
         if (row.lastMutationId === mutationId && row.revision === revision + 1 && isDeepStrictEqual(stored, signedIn ? stampWho(stored, received, signedIn) : received)) return row.revision;
         if (row.revision !== revision) throw new RevisionConflict("Another tab has saved changes. Reload before editing.");
         const snapshot = signedIn ? stampWho(stored, received, signedIn) : received;
