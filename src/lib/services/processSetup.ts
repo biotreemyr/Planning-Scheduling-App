@@ -53,6 +53,18 @@ export const calendarSettings = (d: CalendarDirectory, calendarId?: string) => {
 export const calendarProcessName = (d: CalendarDirectory, calendarId?: string) => processOfCalendar(d, calendarId)?.name ?? d.calendars.find((item) => item.id === calendarId)?.name ?? "";
 
 export type RouteEntry = { calendar: UnitCalendar; name: string; settings: ProcessSettings };
+
+// Processes a batch may run in either order: blending before granulation or after it (as the final
+// blend). Within a batch they follow their planned days; everything else keeps the unit's order.
+const EITHER_ORDER = new Set(["blending", "final blending", "granulation", "wet granulation", "dry granulation"]);
+export function plannedOrder<T>(items: T[], name: (item: T) => string, firstDay: (item: T) => string | undefined): T[] {
+  const slots = items.map((item, index) => ({ item, index })).filter(({ item }) => EITHER_ORDER.has(name(item).trim().toLowerCase()));
+  if (slots.length < 2) return items;
+  const sorted = [...slots].sort((a, b) => (firstDay(a.item) ?? "\uffff").localeCompare(firstDay(b.item) ?? "\uffff") || a.index - b.index);
+  const result = [...items];
+  slots.forEach((slot, position) => { result[slot.index] = sorted[position].item; });
+  return result;
+}
 // A unit's route for a dosage form: its processes in the unit's order that are used for that form.
 export function unitRoute(d: CalendarDirectory, unitId: string | undefined, format: ProductFormat): RouteEntry[] {
   if (format === "Other" || !unitId) return [];
