@@ -566,6 +566,8 @@ function OrderPrintDetail({ row, lines, directory, visibleCalendarIds, printed }
 // every process makes. Planning them happens on the Planner Board.
 const FILL_UOMS = ["blisters", "bottles", "sachets"];
 const COUNT_UOMS = ["tablets", "capsules"];
+// A capsule, tablet or sachet batch is counted in its own units; an existing job order keeps the unit it has.
+const FORM_UNITS: Partial<Record<ProductFormat, string[]>> = { Capsule: ["capsules"], Tablet: ["tablets"], Sachet: ["sachets"] };
 function JobOrders({ orders, order, product, products, format, jobOrders, transfers, lines, actions, directory }: { directory: CalendarDirectory; orders: PurchaseOrder[]; order: PurchaseOrder; product?: Product; products: Product[]; format: ProductFormat; jobOrders: JobOrder[]; transfers: { sourceLineId: string }[]; lines: PlanLine[]; actions: JobActions }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
@@ -578,6 +580,10 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
   const [shareDrafts, setShareDrafts] = useState<ShareDraft[]>([]);
   // Counted in the PO's unit whatever unit the batch quantity is in (capsules for a PO in boxes).
   const { total: released, uncounted } = orderedInJobs(order, jobOrders);
+  // What dispensing weighs out for this PO (its share of each batch) against the order's total kg.
+  const orderTotalKg = orderKg(order);
+  const dispensedKg = jobs.reduce((sum, job) => sum + (job.batchSizeKg ?? 0) * (partFor(job, order.id)?.quantity ?? 0) / job.quantity, 0);
+  const overage = orderTotalKg && dispensedKg ? (dispensedKg - orderTotalKg) / orderTotalKg * 100 : undefined;
   const remaining = Math.max(0, Number((order.quantity - released).toPrecision(12)));
   const allowable = product?.batchQuantity;
   const report = (result: string[], success: string) => { setErrors(result); setNotice(result.length ? "" : success); return !result.length; };
@@ -608,6 +614,7 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
     <details className="order-section">
     <summary className="order-section-summary"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
       <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span>
+      {overage !== undefined ? <span className="route-muted" title="Batch sizes keyed in on the job orders against the order's total weight">{formatKg(dispensedKg)} for dispensing against the order's {formatKg(orderTotalKg!)} · {overage >= 0 ? `${overage.toFixed(1)}% overage` : `${(-overage).toFixed(1)}% short`}</span> : null}
       {released > order.quantity ? <span className="order-warning">{(released - order.quantity).toLocaleString()} {order.uom} more than the PO</span> : null}
       {uncounted.length ? <span className="order-warning">{uncounted.map((job) => job.number).join(", ")}: no figure in {order.uom}, not counted</span> : null}</summary>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
@@ -828,7 +835,7 @@ function JobOrderFields({ job, order, format, countSteps, factors, countUom, def
       {values.batchSizeUom === "kg" && isCounted(values.uom) && !factors.unitWeightMg ? <small className="route-muted">Add the unit weight on the PO item to work out the {values.uom}</small> : null}</fieldset>
     <fieldset className="job-measure"><legend title={`Batch quantity, for ${countSteps || "production"}`}>Batch quantity<span> · {countSteps || "Production"}</span></legend>
       <input name="quantity" type="number" min="0" step="any" required aria-label="Batch quantity" value={quantity} onChange={(event) => type("quantity", event.target.value)} />
-      <select name="uom" aria-label="Batch quantity UOM" value={values.uom} onChange={(event) => set("uom", event.target.value)}>{options([order.uom, countUom, ...COUNT_UOMS, "sachets"], values.uom).map((name) => <option key={name}>{name}</option>)}</select>
+      <select name="uom" aria-label="Batch quantity UOM" value={values.uom} onChange={(event) => set("uom", event.target.value)}>{options(FORM_UNITS[format] ?? [order.uom, countUom, ...COUNT_UOMS, "sachets"], values.uom).map((name) => <option key={name}>{name}</option>)}</select>
       {note(auto.quantity && worked.quantity !== undefined, `≈ ${values.batchSize} kg ÷ ${factors.unitWeightMg} mg`)}</fieldset>
     <fieldset className="job-measure job-number"><legend title="Packing job order number; follows the job order number with PJO in front unless keyed in">Packing JO no.<span> · Packing</span></legend>
       <input name="packingNumber" maxLength={60} autoComplete="off" aria-label="Packing job order no." defaultValue={job?.packingNumber} placeholder={job ? defaultPackingNumber(job.number) : "PJO + job order no."} /></fieldset>

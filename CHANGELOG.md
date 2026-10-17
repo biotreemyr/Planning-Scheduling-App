@@ -9,9 +9,11 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 ## [Unreleased]
 
 ### Added
+- **Job orders** show the kilograms planned for dispensing against the order's total weight, with the overage (or shortfall) as a %.
 - **Late activities** show in red: an open activity whose planned day has passed is red in the order's Progress grid (marked "Late") and has a red edge in the Planner list, with a warning in the process-flow warnings.
 
 ### Changed
+- **Job orders** for a capsule, tablet or sachet PO offer only capsules, tablets or sachets as the batch quantity unit. Existing job orders keep the unit they have.
 - **Production update** can start or complete a process only after the work in progress handed over to it from the process before is received. The handover shows in the activity window with an **Acknowledge receipt** button, so who took over the material is recorded. Handovers already received are unchanged; ones still waiting must be received before their next process starts.
 - **Machine bookings** that are confirmed can be moved to another machine or time only by someone who can approve bookings. When anyone else moves the activity, its confirmed bookings move with it and go back to Draft, to be confirmed again. Deleting a booking that is past Draft needs the right to cancel bookings.
 
