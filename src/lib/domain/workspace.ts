@@ -84,10 +84,29 @@ export function newWorkspace(): WorkspaceSnapshot {
 }
 
 // Validate structure and references before accepting a complete atomic save.
+// The most records a list may hold: far above a factory's use, low enough that checking a save stays quick.
+const MAX_RECORDS = 20000;
+function checkSize(input: unknown) {
+  const lists = (value: unknown) => value && typeof value === "object" ? Object.values(value as Record<string, unknown>).filter(Array.isArray) : [];
+  const root = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  if ([...lists(root), ...lists(root.directory), ...lists(root.data)].some((list) => list.length > MAX_RECORDS)) throw new Error("Too many records");
+}
+
 export function parseWorkspace(input: unknown): WorkspaceSnapshot {
+  checkSize(input);
   const state = workspaceSchema.parse(input);
   const { directory: d, data } = state;
-  const has = (items: { id: string }[], value: string) => items.some((item) => item.id === value);
+  // Each list's IDs, looked up once: a save is checked in time that grows with its size, not its square.
+  const idSets = new WeakMap<object, Set<string>>();
+  const has = (items: { id: string }[], value: string) => {
+    let set = idSets.get(items);
+    if (!set) idSets.set(items, set = new Set(items.map((item) => item.id)));
+    return set.has(value);
+  };
+  const byId = <T extends { id: string }>(items: T[]) => new Map(items.map((item) => [item.id, item]));
+  const lineById = byId(data.lines), calendarById = byId(d.calendars), machineById = byId(state.machines);
+  const actualQuantities = new Map<string, number[]>();
+  data.actuals.forEach((actual) => actualQuantities.set(actual.planLineId, [...actualQuantities.get(actual.planLineId) ?? [], actual.actualQuantity]));
   const require = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
   for (const list of [...Object.values(d), state.products, state.workCentres, state.machines, data.lines, data.entries, data.transfers, data.orders]) {
     require(new Set(list.map((item) => item.id)).size === list.length, "Duplicate record ID");
@@ -109,12 +128,12 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
     require(has(d.calendars, line.calendarId) && has(state.products, line.productId), "Invalid plan references");
     require(!line.endDate || line.endDate > line.plannedDate, "Activity ends before it starts");
     require(!line.incomingWipId || has(data.transfers, line.incomingWipId), "Invalid incoming WIP");
-    if (line.completedAt) require(line.yieldQuantity !== undefined && data.actuals.some((actual) => actual.planLineId === line.id && actual.actualQuantity === line.yieldQuantity), "Completed plan requires final yield");
+    if (line.completedAt) require(line.yieldQuantity !== undefined && !!actualQuantities.get(line.id)?.includes(line.yieldQuantity), "Completed plan requires final yield");
   });
   data.entries.forEach((entry) => {
-    const line = data.lines.find((line) => line.id === entry.planLineId);
-    const calendar = d.calendars.find((calendar) => calendar.id === entry.calendarId);
-    const machine = state.machines.find((machine) => machine.id === entry.machineId);
+    const line = lineById.get(entry.planLineId);
+    const calendar = calendarById.get(entry.calendarId);
+    const machine = machineById.get(entry.machineId);
     require(!!line && line.calendarId === entry.calendarId && line.productId === entry.productId && !!machine && machine.workCentreId === entry.workCentreId && machine.unitId === calendar?.unitId && machine.processIds.includes(calendar?.processId ?? "") && Date.parse(entry.endAt) > Date.parse(entry.startAt), "Invalid production booking");
   });
   // A PO may have several product line items: each item number once, and one customer per PO.
@@ -140,20 +159,21 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
     require(new Set(ids).size === ids.length && ids.every((id) => has(data.orders, id)), "Invalid shared job order PO");
     require((job.poReleases ?? []).every((release) => ids.includes(release.orderId)) && new Set((job.poReleases ?? []).map((release) => release.orderId)).size === (job.poReleases ?? []).length, "Invalid job order release");
   });
+  const jobById = byId(data.jobOrders), orderById = byId(data.orders);
   data.lines.forEach((line) => {
     if (!line.jobOrderId) return;
-    const job = data.jobOrders.find((item) => item.id === line.jobOrderId);
+    const job = jobById.get(line.jobOrderId);
     // A shared batch's filling and packing belong to the PO they are done for, any PO the batch serves.
     const orderIds = job ? [job.orderId, ...(job.shares ?? []).map((share) => share.orderId)] : [];
-    const order = data.orders.find((item) => item.id === line.productionOrderId && orderIds.includes(item.id));
+    const order = line.productionOrderId && orderIds.includes(line.productionOrderId) ? orderById.get(line.productionOrderId) : undefined;
     require(!!job && !!order && order.productId === line.productId, "Activity linked to an invalid job order");
   });
   // Production orders and R&D, trial and pilot orders are numbered separately, each from 1.
   const numbered = data.orders.filter((order) => order.number !== undefined);
   require(new Set(numbered.map((order) => `${order.category ? "trial" : "production"}:${order.number}`)).size === numbered.length, "Duplicate order number");
   require(new Set(data.actuals.map((item) => item.planLineId)).size === data.actuals.length, "Duplicate actual result");
-  data.actuals.forEach((actual) => require(data.lines.some((line) => line.id === actual.planLineId && line.calendarId === actual.calendarId) && (!actual.hasDeviation || !!actual.deviation.trim()), "Invalid actual result"));
+  data.actuals.forEach((actual) => require(lineById.get(actual.planLineId)?.calendarId === actual.calendarId && (!actual.hasDeviation || !!actual.deviation.trim()), "Invalid actual result"));
   require(new Set(data.transfers.map((item) => item.sourceLineId)).size === data.transfers.length, "Duplicate WIP handoff");
-  data.transfers.forEach((transfer) => require(data.lines.some((line) => line.id === transfer.sourceLineId && !!line.completedAt && line.calendarId === transfer.sourceCalendarId && line.productId === transfer.productId) && has(d.calendars, transfer.calendarId) && (!transfer.plannedLineId || data.lines.some((line) => line.id === transfer.plannedLineId && line.incomingWipId === transfer.id && line.calendarId === transfer.calendarId)), "Invalid WIP references"));
+  data.transfers.forEach((transfer) => require(((line) => !!line && !!line.completedAt && line.calendarId === transfer.sourceCalendarId && line.productId === transfer.productId)(lineById.get(transfer.sourceLineId)) && has(d.calendars, transfer.calendarId) && (!transfer.plannedLineId || ((line) => !!line && line.incomingWipId === transfer.id && line.calendarId === transfer.calendarId)(lineById.get(transfer.plannedLineId))), "Invalid WIP references"));
   return state;
 }
