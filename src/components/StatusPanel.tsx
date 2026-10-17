@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { CheckCircle2, PackageCheck, Printer, Search, XCircle } from "lucide-react";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
-import { limitText, type YieldLimits, type YieldRange } from "@/lib/services/yields";
+import { batchYield, formatYield, limitText, type YieldLimits, type YieldRange } from "@/lib/services/yields";
 import { OTHER_USES, finalOutputFor, formulaPending, jobParts, needsFormulaCheck, releaseFor, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { finalOutput, finishedOn, packingNumber, releaseQueue, testingQueue, testResult, type JobOrder, type TestResult } from "@/lib/services/jobOrders";
 import type { PurchaseOrder } from "@/lib/services/orders";
@@ -43,6 +43,20 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [printing, setPrinting] = useState(0);
   useEffect(() => { if (printing) window.print(); }, [printing]);
+  // The batch's final yield against QA's limits, and whether any process came out outside them,
+  // so testing and release see it without opening the order. No limits set says so.
+  const yieldOf = (job: JobOrder) => {
+    const result = batchYield(job, job.orderId, lines, orders, directory, yieldLimits);
+    return { final: result.final, outside: result.stages.filter((stage) => stage.tone === "out").length };
+  };
+  const yieldText = (job: JobOrder) => { const { final, outside } = yieldOf(job); return `${formatYield(final?.percent)}${final?.tone === "out" ? " outside limits" : ""}${outside ? ` · ${outside} process${outside === 1 ? "" : "es"} outside` : ""}`; };
+  const finalYieldCell = (job: JobOrder) => {
+    const { final, outside } = yieldOf(job);
+    if (!final) return <span className="route-muted">-</span>;
+    return <><small className={`yield-chip yield-${final.tone}`} title={final.working ?? final.missing}>{formatYield(final.percent)}{final.tone === "out" ? " · outside limits" : ""}</small>
+      {!final.limit ? <small className="route-muted">No QA limits set</small> : null}
+      {outside ? <small className="yield-chip yield-out">{outside} process{outside === 1 ? "" : "es"} outside limits</small> : null}</>;
+  };
   const testing = testingQueue(jobOrders, lines, transfers);
   const release = releaseQueue(jobOrders);
   const rows = section === "testing" ? testing : release;
@@ -80,12 +94,12 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
       <table className="job-order-table status-table">
         <thead><tr>
           <th scope="col">PJO no.</th><th scope="col">Product</th><th scope="col">Batch no.</th><th scope="col">Job order no.</th><th scope="col">PO</th>
-          <th scope="col" className="numeric">Final output</th>
+          <th scope="col" className="numeric">Final output</th><th scope="col" className="numeric">Final yield</th>
           {section === "testing" ? <><th scope="col">Finished</th><th scope="col">Status</th></> : <><th scope="col">Testing result</th><th scope="col" className="numeric">Release quantity</th></>}
           <th scope="col"><span className="admin-sr-only">Action</span></th>
         </tr></thead>
         <tbody>
-          {!rows.length ? <tr><td colSpan={9} className="empty-state">{section === "testing" ? "No batches waiting for testing." : "No batches waiting for release."}</td></tr> : null}
+          {!rows.length ? <tr><td colSpan={10} className="empty-state">{section === "testing" ? "No batches waiting for testing." : "No batches waiting for release."}</td></tr> : null}
           {rows.map((job) => {
             const { order, product, output } = details(job);
             const typed = quantities[job.id] ?? (output ? String(output.quantity) : "");
@@ -96,6 +110,7 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
               <td>{job.number}</td>
               <td>{order?.poNumber ?? "-"}{order?.customerName ? <small>{order.customerName}</small> : null}</td>
               <td className="numeric">{output ? `${amount(output.quantity)} ${output.uom}` : "-"}</td>
+              <td className="numeric">{finalYieldCell(job)}</td>
               {section === "testing" ? <><td>{day(finishedOn(job, lines, transfers))}</td>
                 <td>{testResult(job) === "Under investigation" ? <><span className="badge warning">Under investigation</span><small>since {day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></> : <span className="badge neutral">Awaiting testing</span>}</td></> : <>
                 <td>{testResult(job) === "Failed" ? <span className="badge danger">Failed testing</span> : <span className="badge success">Passed</span>}<small>{day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></td>
@@ -127,9 +142,9 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
     {printing && typeof document !== "undefined" ? createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
       <header><h1>{section === "testing" ? "Testing" : "Release"} list</h1><p>{rows.length} batch{rows.length === 1 ? "" : "es"} pending · printed {formatDateTime(new Date())}</p></header>
       <table className="print-orders-table">
-        <thead><tr><th>PJO no.</th><th>Product</th><th>Batch no.</th><th>Job order no.</th><th>PO</th><th>Final output</th>{section === "testing" ? <><th>Finished</th><th>Status</th></> : <><th>Passed testing</th><th>Release quantity</th></>}</tr></thead>
+        <thead><tr><th>PJO no.</th><th>Product</th><th>Batch no.</th><th>Job order no.</th><th>PO</th><th>Final output</th><th>Final yield</th>{section === "testing" ? <><th>Finished</th><th>Status</th></> : <><th>Passed testing</th><th>Release quantity</th></>}</tr></thead>
         <tbody>{rows.map((job) => { const { order, product, output } = details(job); return <tr key={job.id}>
-          <td>{packingNumber(job)}</td><td>{product}</td><td>{job.batchNumber ?? ""}</td><td>{job.number}</td><td>{order?.poNumber ?? ""}</td><td>{output ? `${amount(output.quantity)} ${output.uom}` : ""}</td>
+          <td>{packingNumber(job)}</td><td>{product}</td><td>{job.batchNumber ?? ""}</td><td>{job.number}</td><td>{order?.poNumber ?? ""}</td><td>{output ? `${amount(output.quantity)} ${output.uom}` : ""}</td><td>{yieldText(job)}</td>
           {section === "testing" ? <><td>{day(finishedOn(job, lines, transfers))}</td><td>{testResult(job) ?? "Awaiting testing"}</td></> : <><td>{day(job.testedAt)}</td><td>{quantities[job.id] ?? (output ? amount(output.quantity) : "")} {output?.uom ?? ""}</td></>}
         </tr>; })}</tbody>
       </table>
