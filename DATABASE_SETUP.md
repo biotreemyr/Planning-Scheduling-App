@@ -38,9 +38,11 @@ or `_dev` (for example `bio_tree_scheduler_scratch`). It refuses the live databa
     npm run db:migrate
     npm run dev -- --port 3001
 
-The dev server and `npm start` bind to 127.0.0.1 (`-H 127.0.0.1`); other machines
-reach the live site only through nginx and the Cloudflare tunnel. Any preview
-command must pass `-H 127.0.0.1` too. Database UI access is allowed only with a
+The dev server binds to 127.0.0.1 (`-H 127.0.0.1`); any preview command must pass
+`-H 127.0.0.1` too. `npm start` does not: with `-H 127.0.0.1` the Clerk sign-in step
+rewrites signed-in requests to `localhost`, which Next.js then treats as another
+host and fails (every signed-in page gave a server error after v1.8.0). Keep the live
+port off the office network another way (macOS firewall or pf), not with `-H`. Database UI access is allowed only with a
 loopback Host in development mode. Writes additionally require a matching Origin
 and a server-generated session token. Client-supplied persona selection is NOT
 authentication. Production/Core mode cannot access this persistence endpoint.
