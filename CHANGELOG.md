@@ -8,6 +8,11 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-10-18
+
+### Fixed
+- **Signing in** works again: after v1.8.0, every signed-in page showed a server error. Nothing was saved or lost while it was down.
+
 ## [1.8.0] - 2026-10-17
 Fixes from the 17/10/2026 security and workflow review.
 

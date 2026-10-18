@@ -1,11 +1,11 @@
 {
   "name": "bio-tree-scheduler-mvp",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "private": true,
   "scripts": {
     "dev": "next dev -H 127.0.0.1 --port 3003",
     "build": "next build",
-    "start": "next start -H 127.0.0.1 --port 3003",
+    "start": "next start --port 3003",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
