@@ -1062,3 +1062,17 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .cell-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 /* The next step for a batch, chosen at the end of its row. */
 .status-table .status-action-select { min-width: 170px; min-height: 32px; padding: 4px 8px; font-size: 13px; font-weight: 600; }
+/* Orders: the Progress grid and the Job orders table scroll both ways inside their box, with the
+   headings and the first column (process, job order) kept in view. */
+.order-batch-scroll { overflow: auto; max-height: min(55vh, 520px); border: 1px solid var(--line); border-radius: 6px; }
+.order-batch-scroll > table > thead > tr > th { position: sticky; top: 0; z-index: 2; }
+.order-batch-scroll > table > thead > tr > th:first-child { left: 0; z-index: 3; }
+.order-batch-scroll > table > tbody > tr > th:first-child, .order-batch-scroll > table > tfoot > tr > th:first-child { position: sticky; left: 0; z-index: 1; box-shadow: 4px 0 6px -4px #14241f33; }
+.order-batch-scroll > .order-batch-table > tbody > tr.order-flow-stage > th { position: sticky; left: 0; }
+.order-batch-scroll > .job-order-table { border-collapse: separate; border-spacing: 0; min-width: 100%; width: max-content; }
+.order-batch-scroll > .job-order-table > thead > tr > th { background: var(--panel-soft); }
+.order-batch-scroll > .job-order-table > tbody > tr > th:first-child { background: var(--panel, #fff); }
+/* Progress cells: yield, step and fill notes wrap inside the cell instead of running into the next. */
+.order-batch-table .order-batch-col { overflow-wrap: anywhere; }
+.order-batch-table .yield-step, .order-batch-table .yield-chip { white-space: normal; max-width: 100%; }
+.order-batch-table .yield-chip { display: inline-block; }

@@ -8,6 +8,12 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Changed
+- **Orders · Progress and Job orders** scroll left to right and up and down inside their own box, with the headings and the first column (process, job order) kept in view.
+
+### Fixed
+- **Orders · Progress** yield, step and fill notes (such as "Fill 719 mg · target 720 (−0.1%)") now wrap inside their cell instead of running into the next batch's.
+
 ## [1.9.0] - 2026-10-19
 
 ### Added
