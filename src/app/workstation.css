@@ -994,3 +994,30 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .yield-limit-input input { width: 90px; text-align: right; }
 .yield-limits-final-gap td { padding: 4px; background: var(--panel-soft); }
 .yield-limits-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* Reports: three reports picked by the tabs at the top, each with headline figures, its own view tabs,
+   and one table in the Orders table style. One type scale: 13 table text, 12 notes. */
+.reports-panel { gap: 14px; }
+.reports-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.reports-head .order-views { margin: 0; }
+.reports-head .calendar-filters { margin: 0; }
+.reports-panel .metric-row { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.reports-panel .metric span { font-size: 24px; font-variant-numeric: tabular-nums; }
+.reports-panel .metric p { font-size: 13px; color: var(--muted); }
+.reports-panel .orders-list { padding: 14px 16px; }
+.reports-panel .orders-toolbar h2 { margin: 0 8px 0 0; font-size: 18px; }
+.reports-panel .orders-toolbar label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.reports-panel .orders-toolbar input[type="search"] { width: 220px; }
+.report-table { min-width: 720px; }
+.report-table td { font-variant-numeric: tabular-nums; }
+.report-table .report-total th, .report-table .report-total td { font-weight: 700; background: var(--panel-soft); }
+.report-yields { display: flex; flex-wrap: wrap; gap: 4px; }
+.report-yields .yield-chip { margin-top: 0; font-weight: 600; }
+.report-sections { display: grid; gap: 18px; }
+.report-section h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 14px; }
+.report-section > p { margin: 0; font-size: 13px; }
+.report-note, .report-empty { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+.report-empty { padding: 12px 8px; }
+.reports-panel .actuals-report { padding-top: 4px; border-bottom: 0; }
+.report-table td.report-product { min-width: 220px; }
+.report-table td.report-yield-cell { min-width: 280px; }

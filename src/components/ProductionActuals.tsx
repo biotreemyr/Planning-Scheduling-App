@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useDateCheck } from "./DateCheck";
 import { Pencil, X } from "lucide-react";
 import type { PlanLine, Product } from "@/lib/domain/types";
+import { formatDate, formatDateTime } from "@/lib/services/dates";
 import { productionPerformance, validateActual, type ProductionActual } from "@/lib/services/actuals";
 
 export type ActualInput = Pick<ProductionActual, "planLineId" | "actualQuantity" | "productionDate" | "hasDeviation" | "deviation" | "correctiveAction">;
@@ -30,11 +31,11 @@ export function ProductionActuals({ lines, products, actuals, editable, onSave }
         const uom = actual?.uom ?? line.uom ?? products.find((product) => product.id === line.productId)?.uom;
         const performance = productionPerformance(planned, actual?.actualQuantity);
         return <tr key={line.id}>
-          <td><strong>{products.find((product) => product.id === line.productId)?.name}</strong><div>{line.activityType ?? "Production"} · {line.plannedDate}</div>{line.orderReference ? <div>{line.orderReference}</div> : null}</td>
-          <td>{number(planned)} {uom}</td><td>{actual ? <>{number(actual.actualQuantity)} {uom}<div>{actual.productionDate}</div></> : "Not reported"}</td>
+          <td><strong>{products.find((product) => product.id === line.productId)?.name}</strong><div>{line.activityType ?? "Production"} · {formatDate(line.plannedDate)}</div>{line.orderReference ? <div>{line.orderReference}</div> : null}</td>
+          <td>{number(planned)} {uom}</td><td>{actual ? <>{number(actual.actualQuantity)} {uom}<div>{formatDate(actual.productionDate)}</div></> : "Not reported"}</td>
           <td>{performance.variance === null ? "Not reported" : `${performance.variance > 0 ? "+" : ""}${number(performance.variance)} ${uom}`}</td>
           <td>{performance.ratio === null ? "Not reported" : `${performance.ratio.toFixed(1)}%`}</td>
-          <td>{actual?.hasDeviation ? <><strong>Deviation recorded</strong><p>{actual.deviation}</p>{actual.correctiveAction ? <p>Corrective action: {actual.correctiveAction}</p> : null}</> : actual ? "None reported" : "Not reported"}{actual ? <small>Updated by {actual.updatedBy} · {new Date(actual.updatedAt).toLocaleString()}</small> : null}</td>
+          <td>{actual?.hasDeviation ? <><strong>Deviation recorded</strong><p>{actual.deviation}</p>{actual.correctiveAction ? <p>Corrective action: {actual.correctiveAction}</p> : null}</> : actual ? "None reported" : "Not reported"}{actual ? <small>Updated by {actual.updatedBy} · {formatDateTime(actual.updatedAt)}</small> : null}</td>
           {editable ? <td>{line.completedAt ? "Final yield recorded" : <button type="button" className="calendar-button" onClick={() => { setSelectedId(line.id); setNotice(""); }}><Pencil size={16} />{actual ? "Edit actual" : "Record actual"}</button>}</td> : null}
         </tr>;
       })}</tbody>

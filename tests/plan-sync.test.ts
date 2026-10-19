@@ -5,7 +5,7 @@ import { moveActivity } from "../src/lib/services/planChanges";
 import { batchRoute, orderBatchMatrix, orderProcessRows, orderProgress } from "../src/lib/services/orders";
 import { listPrintCells } from "../src/lib/services/calendarPrint";
 import { checkProcessFlow } from "../src/lib/services/processRules";
-import { getScheduleReport } from "../src/lib/services/reports";
+import { machineLoad } from "../src/lib/services/reports";
 import { findMachineConflicts } from "../src/lib/services/conflicts";
 
 // Beta test: every screen reads the same lines and bookings, so one date change must show everywhere.
@@ -48,8 +48,8 @@ describe("one date change reaches every view", () => {
     expect(route.find((step) => step.processName === "Dispensing")!.lines.map((item) => item.plannedDate)).toEqual([after]);
   });
   it("reports and machine conflicts see the moved booking, and no booking is left behind", () => {
-    const report = getScheduleReport(lines, entries, state.workCentres, state.machines as never, state.products);
-    expect(report.totalEntries).toBe(getScheduleReport(state.data.lines, state.data.entries, state.workCentres, state.machines as never, state.products).totalEntries);
+    const booked = (list: typeof entries) => machineLoad(list, state.machines as never, "2026-09-01", 30).rows.reduce((sum, row) => sum + row.total, 0);
+    expect(booked(entries)).toBeCloseTo(booked(state.data.entries), 1);
     expect(checkProcessFlow(lines, entries, state.data.orders, state.products, state.directory).filter((warning) => warning.kind === "booking")).toEqual([]);
     expect(findMachineConflicts(entries, state.machines as never, state.products).every((conflict) => conflict.entryIds.every((id) => entries.some((entry) => entry.id === id)))).toBe(true);
   });

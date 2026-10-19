@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowUpDown, CalendarDays, CheckCircle2, ClipboardList, Copy, Factory, FileText, FlaskConical, Sparkles, LayoutGrid, Plus, Search, SlidersHorizontal, Users, XCircle, History } from "lucide-react";
+import { AlertTriangle, ArrowUpDown, CalendarDays, CheckCircle2, ClipboardList, Copy, Factory, FileText, FlaskConical, Sparkles, LayoutGrid, Plus, Search, SlidersHorizontal, XCircle, History } from "lucide-react";
 import { FormEvent, Fragment, useMemo, useState, type ReactNode } from "react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -48,7 +48,7 @@ import { YieldLimitsProvider } from "./YieldLimitsContext";
 import { closeOrder, formulaPending, jobForOrder, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
-import { getScheduleReport } from "@/lib/services/reports";
+import { ReportsPanel } from "@/components/ReportsPanel";
 import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
 import { moveActivity, resizeActivity } from "@/lib/services/planChanges";
 import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
@@ -585,99 +585,6 @@ function MasterDataPanel({
   );
 }
 
-function ReportsPanel({
-  planLines,
-  entries,
-  products,
-  workCentres,
-  machines
-}: {
-  planLines: PlanLine[];
-  entries: ScheduleEntry[];
-  products: Product[];
-  workCentres: WorkCentre[];
-  machines: Machine[];
-}) {
-  const report = getScheduleReport(planLines, entries, workCentres, machines, products);
-
-  return (
-    <section className="reports-layout">
-      <div className="metric-row">
-        <div className="metric">
-          <ClipboardList size={18} />
-          <span>{report.unscheduledLines.length}</span>
-          <p>Open plan lines</p>
-        </div>
-        <div className="metric">
-          <AlertTriangle size={18} />
-          <span>{report.conflicts.length}</span>
-          <p>Machine conflicts</p>
-        </div>
-        <div className="metric">
-          <CheckCircle2 size={18} />
-          <span>{report.completed}</span>
-          <p>Completed entries</p>
-        </div>
-        <div className="metric">
-          <Users size={18} />
-          <span>{report.totalEntries}</span>
-          <p>Schedule entries</p>
-        </div>
-      </div>
-      <div className="workspace-panel">
-        <div className="panel-title">
-          <div>
-            <p className="eyebrow">This Week</p>
-            <h2>Work Centre Load</h2>
-          </div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Work Centre</th>
-              <th>Entries</th>
-              <th>Scheduled Hours</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.workCentreLoad.map((row) => (
-              <tr key={row.workCentreId}>
-                <td>{row.workCentreName}</td>
-                <td>{row.entryCount}</td>
-                <td>{row.confirmedHours}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="workspace-panel">
-        <div className="panel-title">
-          <div>
-            <p className="eyebrow">Attention</p>
-            <h2>Unscheduled And Conflict Queue</h2>
-          </div>
-        </div>
-        <div className="records two-column">
-          {report.unscheduledLines.map((line) => (
-            <article className="record-row" key={line.id}>
-              <h3>{labelFor(products, line.productId)}</h3>
-              <p>{toDisplayDate(line.plannedDate)} · {line.quantity.toLocaleString()} {line.uom ?? products.find((product) => product.id === line.productId)?.uom} planned{line.activityType ? ` · ${line.activityType}` : ""}{line.batchSizeKg !== undefined ? ` · ${line.batchSizeKg} kg equivalent` : ""}</p>
-              <StatusBadge value={line.status} />
-            </article>
-          ))}
-          {report.conflicts.map((conflict) => (
-            <article className="record-row conflict-record" key={conflict.id}>
-              <h3>{machineLabel(machines.find((item) => item.id === conflict.machineId)) || "Unassigned"}</h3>
-              <p>{conflict.message}</p>
-              <StatusBadge value="Conflict" />
-            </article>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 // A person verified by Bio Tree Core. Their permissions come from Core; the server rechecks every save.
 export type CoreIdentity = { id: string; name: string; permissions: string[] };
 
@@ -766,6 +673,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const calendarMachines = machines.filter((machine) => machine.unitId === calendar?.unitId && visibleCalendars.some((item) => machine.processIds?.includes(item.processId)));
   const unitMachines = machines.filter((machine) => machine.unitId === activityCalendar?.unitId);
   const conflicts = findMachineConflicts(entries, machines, products);
+  // Reports cover the unit's POs in the production / non-production choice; older POs carry no unit.
+  const reportOrders = data.orders.filter((order) => inStream(order.id) && (!order.unitId || order.unitId === unit?.id));
   const calendarTitle = unit?.name ?? "No unit assigned";
   const processNames = Object.fromEntries(visibleCalendars.map((item) => [item.id, directory.processes.find((process) => process.id === item.processId)?.name ?? "Unassigned process"]));
 
@@ -1308,10 +1217,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       {activeTab === "audit" && caps.auditTrail ? <HistoryPanel refreshKey={activeTab} canDownload={caps.printAuditTrail} /> : null}
       {activeTab === "news" ? <ReleaseNotes releases={releases} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>
-        {filterControls}
-        <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />
-        <details className="wip-reports"><summary>Incoming WIP ({scope(data.transfers).filter((item) => !item.receivedAt).length})</summary><WipInbox transfers={scope(data.transfers)} products={products} directory={directory} canReceive={canProduce} canPlan={canCreate} onReceive={receiveWip} onPlan={planWip} /></details>
-        <ReportsPanel planLines={planLines} entries={entries} products={products} workCentres={workCentres} machines={calendarMachines} />
+        <ReportsPanel unitName={calendarTitle} filters={filterControls} onOpenActivity={(id) => { setActiveTab("planner"); openActivity(id, false); }}
+          access={{ delivery: caps.viewOrders, batches: caps.viewOrders || caps.viewTesting || caps.viewRelease, printDelivery: caps.printOrders, printFlow: caps.printPlan, printBatches: caps.printTesting || caps.printRelease || caps.printOrders }}
+          orders={reportOrders} allOrders={data.orders} jobOrders={data.jobOrders.filter((job) => reportOrders.some((order) => order.id === job.orderId))} allLines={data.lines}
+          lines={planLines} entries={entries} transfers={scope(data.transfers)} machines={calendarMachines} actuals={data.actuals} directory={directory} products={products} yieldLimits={yieldLimits}
+          actualsSection={<ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />}
+          wipInbox={<WipInbox transfers={scope(data.transfers)} products={products} directory={directory} canReceive={canProduce} canPlan={canCreate} onReceive={receiveWip} onPlan={planWip} />} />
       </> : null}
     </div>
   </main></YieldLimitsProvider>;

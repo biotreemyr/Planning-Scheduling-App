@@ -8,6 +8,18 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Added
+- **Reports** has three reports, picked by the tabs at the top. Each has headline figures, view tabs with counts, and Download Excel for people who may print that area.
+- **Orders & Delivery** report: every PO item with its job orders, what is finished and released, the planned finish against the delivery date, and whether it is on track, at risk, overdue or closed on time. Closed POs show what was closed against the order.
+- **Production Flow** report: activities past their planned day, machine double-bookings, activities with no machine booked and WIP waiting to be received (with how many days), plan adherence by process for a month, and hours booked on each machine for the next four weeks.
+- **Batch Yield & Release** report: every batch with its yield at each process and final yield against QA's limits, deviations, and the days from finishing to release, or how long it has waited for QC or QA.
+
+### Changed
+- **Reports** replace the old count tiles, work centre load and unscheduled queue; their contents are now in Production Flow. Actual production & deviations and incoming WIP are under Production Flow.
+
+### Fixed
+- **Actual production** and **Incoming WIP** show dates as DD/MM/YYYY instead of month first.
+
 ## [1.7.0] - 2026-10-16
 
 ### Added
