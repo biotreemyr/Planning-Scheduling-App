@@ -1,7 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CheckCircle2, PackageCheck, Printer, Search, XCircle } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, PackageCheck, Printer, Search, X, XCircle } from "lucide-react";
+import { usePager } from "./Pager";
+import { DateFilterPicker } from "./DateFilterPicker";
+import { matchesDateFilter } from "@/lib/services/dateFilter";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import { DEFAULT_FILL_TOLERANCE, batchYield, formatYield, limitText, type YieldLimits, type YieldRange } from "@/lib/services/yields";
@@ -14,6 +17,12 @@ export type StatusSection = "testing" | "release" | "yield";
 export type StatusAccess = { viewTesting: boolean; passTesting: boolean; printTesting: boolean; viewRelease: boolean; release: boolean; printRelease: boolean };
 
 const day = (value?: string) => formatDate(value);
+// A column of the testing and release lists: how it sorts, filters and shows.
+type StatusColumn = { key: string; label: string; numeric?: boolean; sort: (job: JobOrder) => string | number; cell: (job: JobOrder) => ReactNode;
+  filter?: { kind: "text"; text: (job: JobOrder) => string } | { kind: "date"; date: (job: JobOrder) => string | undefined } | { kind: "select"; options: string[]; value: (job: JobOrder) => string } };
+type Sort = { key: string; ascending: boolean };
+// Each person's sort for each list, remembered on this computer.
+const sortStorage = (section: StatusSection) => `scheduler.${section}Sort`;
 const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
 
 /**
@@ -42,6 +51,14 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   const toConfirm = jobOrders.filter((job) => formulaPending(job, orders) && !job.releasedAt && !job.rejectedAt);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [printing, setPrinting] = useState(0);
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  // Newest first by default: the latest finished (testing) or tested (release) batch on top.
+  const [sort, setSort] = useState<Sort>({ key: "number", ascending: false });
+  useEffect(() => {
+    setFilters({});
+    try { const saved = JSON.parse(localStorage.getItem(sortStorage(chosen)) ?? "null"); setSort(saved && typeof saved.key === "string" ? { key: saved.key, ascending: !!saved.ascending } : { key: "number", ascending: false }); } catch { setSort({ key: "number", ascending: false }); }
+  }, [chosen]);
+  const chooseSort = (next: Sort) => { setSort(next); try { localStorage.setItem(sortStorage(section), JSON.stringify(next)); } catch { /* not remembered */ } };
   useEffect(() => { if (printing) window.print(); }, [printing]);
   // The batch's final yield against QA's limits, and whether any process came out outside them,
   // so testing and release see it without opening the order. No limits set says so.
@@ -66,6 +83,43 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
     const output = finalOutput(job.id, lines, transfers)[0];
     return { order, product: products.find((item) => item.id === order?.productId)?.name ?? "Unknown product", output };
   };
+  // The day a batch joined the list: finished (testing) or tested (release). Numbers run oldest = 1.
+  const listedOn = (job: JobOrder) => (section === "testing" ? finishedOn(job, lines, transfers) : job.testedAt) ?? "";
+  const numbers = new Map([...rows].sort((a, b) => listedOn(a).localeCompare(listedOn(b)) || a.number.localeCompare(b.number)).map((job, index) => [job.id, index + 1]));
+  const statusOf = (job: JobOrder) => section === "testing" ? testResult(job) === "Under investigation" ? "Under investigation" : "Awaiting testing" : testResult(job) === "Failed" ? "Failed testing" : "Passed";
+  const columns: StatusColumn[] = [
+    { key: "number", label: "#", sort: (job) => numbers.get(job.id) ?? 0, cell: (job) => numbers.get(job.id) },
+    { key: "date", label: section === "testing" ? "Finished" : "Tested", sort: listedOn, cell: (job) => day(listedOn(job)) || <span className="route-muted">-</span>, filter: { kind: "date", date: (job) => listedOn(job) || undefined } },
+    { key: "pjo", label: "PJO no.", sort: (job) => packingNumber(job), cell: (job) => <strong>{packingNumber(job)}</strong>, filter: { kind: "text", text: (job) => packingNumber(job) } },
+    { key: "product", label: "Product", sort: (job) => details(job).product, cell: (job) => details(job).product, filter: { kind: "text", text: (job) => details(job).product } },
+    { key: "batch", label: "Batch no.", sort: (job) => job.batchNumber ?? "", cell: (job) => job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Not keyed in</span>, filter: { kind: "text", text: (job) => job.batchNumber ?? "" } },
+    { key: "job", label: "Job order no.", sort: (job) => job.number, cell: (job) => job.number, filter: { kind: "text", text: (job) => job.number } },
+    { key: "po", label: "PO", sort: (job) => details(job).order?.poNumber ?? "", cell: (job) => { const { order } = details(job); return <>{order?.poNumber ?? "-"}{order?.customerName ? <small>{order.customerName}</small> : null}</>; }, filter: { kind: "text", text: (job) => { const { order } = details(job); return `${order?.poNumber ?? ""} ${order?.customerName ?? ""}`; } } },
+    { key: "output", label: "Final output", numeric: true, sort: (job) => details(job).output?.quantity ?? -1, cell: (job) => { const { output } = details(job); return output ? `${amount(output.quantity)} ${output.uom}` : "-"; } },
+    { key: "yield", label: "Final yield", numeric: true, sort: (job) => yieldOf(job).final?.percent ?? -1, cell: finalYieldCell },
+    { key: "status", label: section === "testing" ? "Status" : "Testing result", sort: statusOf, filter: { kind: "select", options: section === "testing" ? ["Awaiting testing", "Under investigation"] : ["Passed", "Failed testing"], value: statusOf },
+      cell: (job) => section === "testing"
+        ? testResult(job) === "Under investigation" ? <><span className="badge warning">Under investigation</span><small>since {day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></> : <span className="badge neutral">Awaiting testing</span>
+        : <>{testResult(job) === "Failed" ? <span className="badge danger">Failed testing</span> : <span className="badge success">Passed</span>}<small>{day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></> },
+    ...(section === "release" ? [{ key: "released", label: "Release quantity", numeric: true, sort: (job: JobOrder) => jobParts(job).filter((part) => releaseFor(job, part.orderId)).length,
+      cell: (job: JobOrder) => testResult(job) === "Failed" ? <span className="route-muted">Not for release</span> : (() => {
+        const parts = jobParts(job), done = parts.filter((part) => releaseFor(job, part.orderId)).length;
+        return parts.length > 1 || done ? <span>{done} of {parts.length} POs released</span> : <span className="route-muted">Not released</span>;
+      })() }] : [])
+  ];
+  const sorter = columns.find((column) => column.key === sort.key) ?? columns[0];
+  const filtering = Object.values(filters).some((value) => value.trim());
+  const table = rows.filter((job) => columns.every((column) => {
+    const value = filters[column.key]?.trim().toLowerCase();
+    if (!value || !column.filter) return true;
+    if (column.filter.kind === "date") return matchesDateFilter(column.filter.date(job), value);
+    return column.filter.kind === "text" ? column.filter.text(job).toLowerCase().includes(value) : column.filter.value(job).toLowerCase() === value;
+  }) && (!filters.remarks?.trim() || (job.notes ?? "").toLowerCase().includes(filters.remarks.trim().toLowerCase()))).sort((a, b) => {
+    const x = sorter.sort(a), y = sorter.sort(b);
+    const result = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+    return (result || (numbers.get(a.id) ?? 0) - (numbers.get(b.id) ?? 0)) * (sort.ascending ? 1 : -1);
+  });
+  const { rows: page, pager } = usePager(table, `${section}|${JSON.stringify(filters)}|${sort.key}|${sort.ascending}`, [50, 100]);
   const report = (errors: string[], text: string) => setMessage(errors.length ? { text: errors.join(" "), error: true } : { text, error: false });
   if (!access.viewTesting && !access.viewRelease) return null;
   if (section === "yield") return <YieldLimitsPanel directory={directory} limits={yieldLimits} editable={access.release} onSave={onYieldLimits} />;
@@ -90,36 +144,37 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
         {access.release ? <button type="button" className="primary-button" onClick={() => report(onConfirmFormula(job.id), `${job.number}: same formula confirmed. Production can plan it now.`)}><CheckCircle2 size={16} />Confirm same formula</button> : null}
       </li>)}</ul>
     </section> : null}
-    <div className="orders-table-scroll" tabIndex={0} role="region" aria-label={`${section === "testing" ? "Testing" : "Release"} list`}>
-      <table className="job-order-table status-table">
-        <thead><tr>
-          <th scope="col">PJO no.</th><th scope="col">Product</th><th scope="col">Batch no.</th><th scope="col">Job order no.</th><th scope="col">PO</th>
-          <th scope="col" className="numeric">Final output</th><th scope="col" className="numeric">Final yield</th>
-          {section === "testing" ? <><th scope="col">Finished</th><th scope="col">Status</th></> : <><th scope="col">Testing result</th><th scope="col" className="numeric">Release quantity</th></>}
-          <th scope="col"><span className="admin-sr-only">Action</span></th>
-        </tr></thead>
+    <div className="orders-table-scroll status-table-scroll" tabIndex={0} role="region" aria-label={`${section === "testing" ? "Testing" : "Release"} list`}>
+      <table className="orders-table status-table">
+        <thead>
+          <tr>
+            {columns.map((column) => {
+              const active = sort.key === column.key;
+              const Icon = !active ? ArrowUpDown : sort.ascending ? ArrowUp : ArrowDown;
+              return <th scope="col" key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined} aria-sort={active ? sort.ascending ? "ascending" : "descending" : "none"}>
+                <button type="button" className="table-sort" title={column.key === "number" ? active && !sort.ascending ? "Newest first, click for oldest first" : "Oldest first, click for newest first" : `Sort by ${column.label.toLowerCase()}`}
+                  onClick={() => chooseSort({ key: column.key, ascending: active ? !sort.ascending : column.key !== "number" && column.key !== "date" })}>{column.label}<Icon size={13} /></button>
+              </th>;
+            })}
+            <th scope="col" data-col="action"><span className="admin-sr-only">Action</span></th>
+            <th scope="col" data-col="remarks">Remarks</th>
+          </tr>
+          <tr className="orders-filter-row">
+            {columns.map((column) => <th scope="col" key={column.key} data-col={column.key}>
+              {column.filter?.kind === "text" ? <input type="search" aria-label={`Search ${column.label}`} placeholder="Search" value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })} /> : null}
+              {column.filter?.kind === "date" ? (() => { const date = column.filter.date; return <DateFilterPicker label={column.label} value={filters[column.key] ?? ""} dates={rows.map((job) => date(job))} onChange={(value) => setFilters({ ...filters, [column.key]: value })} />; })() : null}
+              {column.filter?.kind === "select" ? <select aria-label={`Filter ${column.label}`} value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })}><option value="">All</option>{column.filter.options.map((option) => <option key={option}>{option}</option>)}</select> : null}
+            </th>)}
+            <th scope="col" data-col="action">{filtering ? <button type="button" className="calendar-button" onClick={() => setFilters({})}><X size={14} />Clear</button> : null}</th>
+            <th scope="col" data-col="remarks"><input type="search" aria-label="Search remarks" placeholder="Search" value={filters.remarks ?? ""} onChange={(event) => setFilters({ ...filters, remarks: event.target.value })} /></th>
+          </tr>
+        </thead>
         <tbody>
-          {!rows.length ? <tr><td colSpan={10} className="empty-state">{section === "testing" ? "No batches waiting for testing." : "No batches waiting for release."}</td></tr> : null}
-          {rows.map((job) => {
-            const { order, product, output } = details(job);
-            const typed = quantities[job.id] ?? (output ? String(output.quantity) : "");
-            return <tr key={job.id}>
-              <th scope="row"><strong>{packingNumber(job)}</strong></th>
-              <td>{product}</td>
-              <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Not keyed in</span>}</td>
-              <td>{job.number}</td>
-              <td>{order?.poNumber ?? "-"}{order?.customerName ? <small>{order.customerName}</small> : null}</td>
-              <td className="numeric">{output ? `${amount(output.quantity)} ${output.uom}` : "-"}</td>
-              <td className="numeric">{finalYieldCell(job)}</td>
-              {section === "testing" ? <><td>{day(finishedOn(job, lines, transfers))}</td>
-                <td>{testResult(job) === "Under investigation" ? <><span className="badge warning">Under investigation</span><small>since {day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></> : <span className="badge neutral">Awaiting testing</span>}</td></> : <>
-                <td>{testResult(job) === "Failed" ? <span className="badge danger">Failed testing</span> : <span className="badge success">Passed</span>}<small>{day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></td>
-                <td className="numeric">{testResult(job) === "Failed" ? <span className="route-muted">Not for release</span> : (() => {
-                  const parts = jobParts(job), done = parts.filter((part) => releaseFor(job, part.orderId)).length;
-                  return parts.length > 1 || done ? <span>{done} of {parts.length} POs released</span> : <span className="route-muted">Not released</span>;
-                })()}</td>
-              </>}
-              <td>{section === "testing"
+          {!table.length ? <tr><td colSpan={columns.length + 2} className="empty-state">{rows.length ? "No batches match these filters." : section === "testing" ? "No batches waiting for testing." : "No batches waiting for release."}</td></tr> : null}
+          {page.map((job) => <Fragment key={job.id}>
+            <tr>
+              {columns.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(job)}</td>)}
+              <td data-col="action">{section === "testing"
                 ? access.passTesting ? <span className="status-actions">
                   <button type="button" className="primary-button" onClick={() => report(onTest(job.id, "Passed"), `${packingNumber(job)} passed testing and moved to Release.`)}><CheckCircle2 size={16} />Pass</button>
                   <button type="button" className="calendar-button danger-button" onClick={() => { if (window.confirm(`Mark ${packingNumber(job)} as failed testing? It goes to Release for QA to reject.`)) report(onTest(job.id, "Failed"), `${packingNumber(job)} failed testing and moved to Release, for QA to reject.`); }}><XCircle size={16} />Failed</button>
@@ -128,24 +183,25 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
                 : access.release && testResult(job) === "Failed" ? <button type="button" className="calendar-button danger-button" onClick={() => { if (window.confirm(`Reject ${packingNumber(job)}? It failed testing and will be closed as rejected.`)) report(onReject(job.id), `${packingNumber(job)} rejected.`); }}><XCircle size={16} />Rejected</button>
                 : access.release ? <button type="button" className={releasing === job.id ? "calendar-button" : "primary-button"} aria-expanded={releasing === job.id} onClick={() => setReleasing(releasing === job.id ? null : job.id)}>
                   <PackageCheck size={16} />{releasing === job.id ? "Close" : "Release"}</button> : null}</td>
-            </tr>;
-          }).flatMap((row, index) => {
-            const job = rows[index];
-            return releasing === job.id && section === "release" && testResult(job) !== "Failed" ? [row, <tr key={`${job.id}-release`} className="release-panel-row"><td colSpan={9}>
+              <td data-col="remarks">{job.notes ? <span className="cell-clamp" title={job.notes}>{job.notes}</span> : <span className="route-muted">-</span>}</td>
+            </tr>
+            {releasing === job.id && section === "release" && testResult(job) !== "Failed" ? <tr className="release-panel-row"><td colSpan={columns.length + 2}>
               <ReleasePanel job={job} orders={orders} lines={lines} transfers={transfers} directory={directory} formulaWaiting={formulaPending(job, orders)}
                 onRelease={(entries, text) => { const errors = onRelease(job.id, entries); report(errors, text); if (!errors.length && entries.length === jobParts(job).filter((part) => !releaseFor(job, part.orderId)).length) setReleasing(null); return errors; }} />
-            </td></tr>] : [row];
-          })}
+            </td></tr> : null}
+          </Fragment>)}
         </tbody>
       </table>
     </div>
+    {pager}
     {printing && typeof document !== "undefined" ? createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
-      <header><h1>{section === "testing" ? "Testing" : "Release"} list</h1><p>{rows.length} batch{rows.length === 1 ? "" : "es"} pending · printed {formatDateTime(new Date())}</p></header>
+      <header><h1>{section === "testing" ? "Testing" : "Release"} list</h1><p>{table.length} batch{table.length === 1 ? "" : "es"} pending{filtering ? " (filtered)" : ""} · printed {formatDateTime(new Date())}</p></header>
       <table className="print-orders-table">
-        <thead><tr><th>PJO no.</th><th>Product</th><th>Batch no.</th><th>Job order no.</th><th>PO</th><th>Final output</th><th>Final yield</th>{section === "testing" ? <><th>Finished</th><th>Status</th></> : <><th>Passed testing</th><th>Release quantity</th></>}</tr></thead>
-        <tbody>{rows.map((job) => { const { order, product, output } = details(job); return <tr key={job.id}>
-          <td>{packingNumber(job)}</td><td>{product}</td><td>{job.batchNumber ?? ""}</td><td>{job.number}</td><td>{order?.poNumber ?? ""}</td><td>{output ? `${amount(output.quantity)} ${output.uom}` : ""}</td><td>{yieldText(job)}</td>
+        <thead><tr><th>#</th><th>PJO no.</th><th>Product</th><th>Batch no.</th><th>Job order no.</th><th>PO</th><th>Final output</th><th>Final yield</th>{section === "testing" ? <><th>Finished</th><th>Status</th></> : <><th>Passed testing</th><th>Release quantity</th></>}<th>Remarks</th></tr></thead>
+        <tbody>{table.map((job, index) => { const { order, product, output } = details(job); return <tr key={job.id}>
+          <td>{index + 1}</td><td>{packingNumber(job)}</td><td>{product}</td><td>{job.batchNumber ?? ""}</td><td>{job.number}</td><td>{order?.poNumber ?? ""}</td><td>{output ? `${amount(output.quantity)} ${output.uom}` : ""}</td><td>{yieldText(job)}</td>
           {section === "testing" ? <><td>{day(finishedOn(job, lines, transfers))}</td><td>{testResult(job) ?? "Awaiting testing"}</td></> : <><td>{day(job.testedAt)}</td><td>{quantities[job.id] ?? (output ? amount(output.quantity) : "")} {output?.uom ?? ""}</td></>}
+          <td>{job.notes ?? ""}</td>
         </tr>; })}</tbody>
       </table>
     </section>, document.body) : null}

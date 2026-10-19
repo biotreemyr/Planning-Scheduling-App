@@ -15,6 +15,7 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 - **Edit planning and Activity workspace** windows have a Maximise button (or double-click the title bar) to fill the screen, and Restore to go back.
 
 ### Changed
+- **QA/QC Testing and Release lists** now work like the Orders list: rows are numbered, the newest batch is on top, every heading sorts (each person's choice is remembered), searches and filters sit under the headings, long lists page at 50 or 100, and a Remarks column comes last. Columns are wider so each cell takes one line, two at most, and the table scrolls inside its box. The printed list follows the filters and is numbered too.
 - **Completed activities** can now be moved to another plan date on the Planner Board and in Edit planning, so past production can be keyed in on the day it was planned. Their quantity, machine and results stay as recorded.
 - **Edit planning** opens wider, with each heading on one line and long machine names on two lines at most.
 - **Activity workspace** route table keeps its headings and the Plan and Process columns in view while scrolling, has wider columns, and shows its sideways scrollbar at the bottom of the window instead of the bottom of the table.

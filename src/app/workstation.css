@@ -1042,3 +1042,21 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .date-check-reason textarea { min-height: 64px; resize: vertical; font-weight: 400; }
 .who-tip { white-space: pre-line; }
 .date-check ul.date-check-changes { border-color: var(--line); background: var(--panel-soft); }
+/* QA/QC testing and release lists: wide enough that each cell takes one line, two at most. */
+.status-table { min-width: 1500px; }
+.status-table > tbody > tr > td { line-height: 1.35; }
+.status-table [data-col="number"] { width: 44px; text-align: center; color: var(--muted); }
+.status-table [data-col="date"] { min-width: 130px; white-space: nowrap; }
+.status-table [data-col="pjo"], .status-table [data-col="batch"], .status-table [data-col="job"] { min-width: 120px; white-space: nowrap; }
+.status-table [data-col="product"] { min-width: 300px; }
+.status-table [data-col="po"] { min-width: 190px; }
+.status-table [data-col="output"], .status-table [data-col="yield"] { min-width: 130px; }
+.status-table [data-col="status"] { min-width: 170px; }
+.status-table [data-col="released"] { min-width: 150px; }
+.status-table [data-col="action"] { min-width: 150px; }
+.status-table td[data-col="action"] { white-space: nowrap; }
+.status-table td[data-col="action"] button { white-space: nowrap; display: inline-flex; flex-direction: row; align-items: center; gap: 6px; }
+.status-table td[data-col="action"] .status-actions { flex-wrap: nowrap; }
+.status-table [data-col="remarks"] { min-width: 220px; }
+/* Long text kept to two lines; the whole of it shows on pointing. */
+.cell-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
