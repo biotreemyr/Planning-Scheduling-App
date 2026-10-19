@@ -9,7 +9,13 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 ## [Unreleased]
 
 ### Changed
+- **Setup** replaces the Admin tab and holds only what the scheduler itself needs: Units, Processes, Machines and UOMs. Products and machines' names come from Master Data, and people's access from Bio Tree Core.
+- **Reports** shows machine bookings and scheduled hours by process (Dispensing, Blending…) in place of the old work centre rooms.
 - **Orders · Progress and Job orders** scroll left to right and up and down inside their own box, with the headings and the first column (process, job order) kept in view.
+
+### Removed
+- **Admin → Products** (finished goods, R&D products, work centres): products come from Master Data, and R&D products are added from the R&D order form. Existing products and orders are unchanged.
+- **Admin → Measurements → Activity types**: activities are named after their process. The UOM list moves to Setup.
 
 ### Fixed
 - **Orders · Progress** yield, step and fill notes (such as "Fill 719 mg · target 720 (−0.1%)") now wrap inside their cell instead of running into the next batch's.

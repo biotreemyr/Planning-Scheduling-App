@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertTriangle, ArrowUpDown, CalendarDays, CheckCircle2, ClipboardList, Copy, Factory, FileText, FlaskConical, Sparkles, LayoutGrid, Plus, Search, SlidersHorizontal, Users, XCircle, History } from "lucide-react";
-import { FormEvent, Fragment, useMemo, useState, type ReactNode } from "react";
+import { AlertTriangle, CalendarDays, CheckCircle2, ClipboardList, FileText, FlaskConical, Sparkles, LayoutGrid, Users, History } from "lucide-react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { StatusBadge } from "@/components/StatusBadge";
 import PlanningCalendar from "@/components/PlanningCalendar";
@@ -11,7 +11,6 @@ import { stampChanges } from "@/lib/services/stamps";
 import { dateWarnings } from "@/lib/services/dateChecks";
 import { ActivityWorkspace } from "@/components/ActivityWorkspace";
 import { CalendarAdmin } from "@/components/CalendarAdmin";
-import { CatalogAdmin } from "@/components/CatalogAdmin";
 import { validateDirectoryChange } from "@/lib/services/adminConfiguration";
 import { ProductionUpdate, WipInbox } from "@/components/ProductionFlow";
 import { accessibleCalendars, selectedUnitCalendars, scopeCalendarRecords, type CalendarDirectory, type CalendarPerson } from "@/lib/domain/calendarAccess";
@@ -32,30 +31,27 @@ import { validateActual, type ProductionActual } from "@/lib/services/actuals";
 import { batchKilograms, isVolume } from "@/lib/services/measurements";
 import { MeasurementProvider, MeasurementAdmin, useSettings } from "@/components/MeasurementSettings";
 import type {
-  Employee,
   Machine,
   PlanLine,
   Product,
   ScheduleEntry,
-  ScheduleEntryStatus,
   WorkCentre
 } from "@/lib/domain/types";
-import { priorities, scheduleStatuses, type Customer } from "@/lib/domain/types";
-import { seedData } from "@/lib/seed";
-import { findMachineConflicts, hasConflict } from "@/lib/services/conflicts";
+import { priorities, type Customer } from "@/lib/domain/types";
+import { findMachineConflicts } from "@/lib/services/conflicts";
 import { formatYield, limitText, stepYieldWith, yieldWarnings, type YieldLimits } from "@/lib/services/yields";
 import { YieldLimitsProvider } from "./YieldLimitsContext";
 import { closeOrder, formulaPending, jobForOrder, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
-import { lineEnd, syncPlanLineStatuses, validateScheduleEntry } from "@/lib/services/scheduling";
+import { lineEnd, syncPlanLineStatuses } from "@/lib/services/scheduling";
 import { moveActivity, reopenMovedBookings, resizeActivity } from "@/lib/services/planChanges";
-import { recordTest, rejectBatch, type TestResult, releaseBatch, checkTally, createManualJobOrder, lateWarnings, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
+import { recordTest, rejectBatch, type TestResult, checkTally, createManualJobOrder, lateWarnings, linesForJob, processQuantity, type ManualJob, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "@/lib/services/jobOrders";
 import { checkProcessFlow, inferFormat, warningsByLine, type FlowWarning } from "@/lib/services/processRules";
 import type { Release } from "@/lib/services/releases";
 import { ReleaseNotes } from "./ReleaseNotes";
-import { formatDate, formatDateTime } from "@/lib/services/dates";
+import { formatDate } from "@/lib/services/dates";
 import type { OrderCatalog } from "@/lib/services/masterData";
 
 type Tab = "planner" | "orders" | "trials" | "status" | "master" | "reports" | "audit" | "news";
@@ -66,7 +62,7 @@ const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: "orders", label: "Orders", icon: FileText },
   { id: "trials", label: "R&D, Trial & Pilot", icon: FlaskConical },
   { id: "status", label: "QA/QC", icon: CheckCircle2 },
-  { id: "master", label: "Admin", icon: LayoutGrid },
+  { id: "master", label: "Setup", icon: LayoutGrid },
   { id: "reports", label: "Reports", icon: ClipboardList },
   { id: "audit", label: "Audit trail", icon: History },
   { id: "news", label: "What's new", icon: Sparkles }
@@ -78,9 +74,6 @@ function toDisplayDate(value: string) {
   return formatDate(value.slice(0, 10));
 }
 
-function toTimeRange(entry: ScheduleEntry) {
-  return `${formatDateTime(entry.startAt)} - ${formatDateTime(entry.endAt)}`;
-}
 
 function labelFor<T extends { id: string; name: string }>(items: T[], id?: string) {
   return items.find((item) => item.id === id)?.name ?? "Unassigned";
@@ -278,327 +271,20 @@ function JobOrderQueue({ jobOrders, orders, products, lines, calendars }: { jobO
   </ToolbarMenu>;
 }
 
-function ScheduleBoard({
-  planLines,
-  products,
-  workCentres,
-  machines,
-  entries,
-  onAddEntry,
-  onChangeStatus,
-  onDuplicate,
-  onCancel
-}: {
-  planLines: PlanLine[];
-  products: Product[];
-  workCentres: WorkCentre[];
-  machines: Machine[];
-  entries: ScheduleEntry[];
-  onAddEntry: (entry: ScheduleEntry) => string[];
-  onChangeStatus: (entryId: string, status: ScheduleEntryStatus) => void;
-  onDuplicate: (entryId: string) => void;
-  onCancel: (entryId: string) => void;
-}) {
-  const [errors, setErrors] = useState<string[]>([]);
-  const [form, setForm] = useState({
-    planLineId: planLines[0]?.id ?? "",
-    workCentreId: workCentres[0]?.id ?? "",
-    machineId: machines[0]?.id ?? "",
-    startAt: "2026-09-16T08:00",
-    endAt: "2026-09-16T12:00",
-    status: "Draft" as ScheduleEntryStatus,
-    notes: ""
-  });
-
-  const selectedLine = planLines.find((line) => line.id === form.planLineId);
-  const filteredMachines = machines.filter((machine) => machine.workCentreId === form.workCentreId);
-  const conflicts = findMachineConflicts(entries, machines, products);
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!selectedLine) {
-      return;
-    }
-
-    const submitErrors = onAddEntry({
-      id: newId("sched"),
-      planLineId: selectedLine.id,
-      productionOrderId: selectedLine.productionOrderId,
-      productId: selectedLine.productId,
-      workCentreId: form.workCentreId,
-      machineId: form.machineId || undefined,
-      startAt: form.startAt,
-      endAt: form.endAt,
-      status: form.status,
-      notes: form.notes.trim() || undefined,
-      changedBy: seedData.productionPlan.ownerName
-    });
-
-    setErrors(submitErrors);
-
-    if (submitErrors.length === 0) {
-      setForm((current) => ({ ...current, notes: "" }));
-    }
-  }
-
-  return (
-    <section className="screen-grid schedule-grid">
-      <div className="workspace-panel wide">
-        <div className="panel-title">
-          <div>
-            <p className="eyebrow">Detailed Scheduling</p>
-            <h2>Work Centre Timeline</h2>
-          </div>
-          <SlidersHorizontal size={19} />
-        </div>
-        <div className="schedule-list">
-          {entries
-            .slice()
-            .sort((a, b) => a.startAt.localeCompare(b.startAt))
-            .map((entry) => {
-              const conflicted = hasConflict(entry.id, conflicts);
-              return (
-                <article className={conflicted ? "schedule-entry conflict" : "schedule-entry"} key={entry.id}>
-                  <div className="entry-time">
-                    <span>{toTimeRange(entry)}</span>
-                    {conflicted ? <StatusBadge value="Conflict" /> : null}
-                  </div>
-                  <div className="entry-main">
-                    <h3>{labelFor(products, entry.productId)}</h3>
-                    <p>
-                      {labelFor(workCentres, entry.workCentreId)} · {machineLabel(machines.find((item) => item.id === entry.machineId)) || "Unassigned"}
-                    </p>
-                  </div>
-                  <div className="entry-actions">
-                    <select
-                      value={entry.status}
-                      onChange={(event) => onChangeStatus(entry.id, event.target.value as ScheduleEntryStatus)}
-                      aria-label="Schedule status"
-                    >
-                      {scheduleStatuses.map((status) => (
-                        <option key={status}>{status}</option>
-                      ))}
-                    </select>
-                    <button aria-label="Duplicate entry" className="icon-button" onClick={() => onDuplicate(entry.id)} type="button">
-                      <Copy size={16} />
-                    </button>
-                    <button aria-label="Cancel entry" className="icon-button danger" onClick={() => onCancel(entry.id)} type="button">
-                      <XCircle size={16} />
-                    </button>
-                  </div>
-                  {entry.notes ? <p className="record-note">{entry.notes}</p> : null}
-                </article>
-              );
-            })}
-        </div>
-      </div>
-      <form className="workspace-panel form-panel" onSubmit={submit}>
-        <div className="panel-title compact">
-          <h2>Create Schedule Entry</h2>
-          <Plus size={18} />
-        </div>
-        {errors.length > 0 ? (
-          <div className="inline-errors">
-            {errors.map((error) => (
-              <p key={error}>{error}</p>
-            ))}
-          </div>
-        ) : null}
-        <label>
-          Plan Line
-          <select value={form.planLineId} onChange={(event) => setForm({ ...form, planLineId: event.target.value })}>
-            {planLines.map((line) => (
-              <option key={line.id} value={line.id}>
-                {toDisplayDate(line.plannedDate)} · {labelFor(products, line.productId)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Work Centre
-          <select
-            value={form.workCentreId}
-            onChange={(event) => {
-              const machine = machines.find((item) => item.workCentreId === event.target.value);
-              setForm({ ...form, workCentreId: event.target.value, machineId: machine?.id ?? "" });
-            }}
-          >
-            {workCentres.map((workCentre) => (
-              <option key={workCentre.id} value={workCentre.id}>
-                {workCentre.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Machine
-          <select value={form.machineId} onChange={(event) => setForm({ ...form, machineId: event.target.value })}>
-            <option value="">No machine</option>
-            {filteredMachines.map((machine) => (
-              <option key={machine.id} value={machine.id}>
-                {machineLabel(machine)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Start
-          <input
-            type="datetime-local"
-            value={form.startAt}
-            onChange={(event) => setForm({ ...form, startAt: event.target.value })}
-          />
-        </label>
-        <label>
-          End
-          <input type="datetime-local" value={form.endAt} onChange={(event) => setForm({ ...form, endAt: event.target.value })} />
-        </label>
-        <label>
-          Status
-          <select
-            value={form.status}
-            onChange={(event) => setForm({ ...form, status: event.target.value as ScheduleEntryStatus })}
-          >
-            {scheduleStatuses.map((status) => (
-              <option key={status}>{status}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Notes
-          <textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
-        </label>
-        <button className="primary-button" type="submit">
-          <Plus size={17} />
-          Create Entry
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function MasterDataPanel({
-  products,
-  workCentres,
-  onAddProduct,
-  onAddWorkCentre
-}: {
-  products: Product[];
-  workCentres: WorkCentre[];
-  onAddProduct: (product: Product) => void;
-  onAddWorkCentre: (workCentre: WorkCentre) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [product, setProduct] = useState({ sku: "", name: "", uom: "kg" });
-  const [productMessage, setProductMessage] = useState("");
-  const [workCentre, setWorkCentre] = useState({ code: "", name: "" });
-  const normalizedQuery = query.toLowerCase();
-  const [activeFilter, setActiveFilter] = useState("");
-  const [sort, setSort] = useState<{ key: "sku" | "name" | "uom" | "active"; ascending: boolean }>({ key: "sku", ascending: true });
-  const visibleProducts = products.filter((item) => (!activeFilter || item.active === activeFilter) && `${item.sku} ${item.name}`.toLowerCase().includes(normalizedQuery))
-    .sort((a, b) => a[sort.key].localeCompare(b[sort.key]) * (sort.ascending ? 1 : -1));
-
-  return (
-    <section className="master-layout">
-      <div className="workspace-panel">
-        <div className="panel-title">
-          <div>
-            <p className="eyebrow">Master Data</p>
-            <h2>Products</h2>
-          </div>
-          <div className="search-control">
-            <Search size={16} />
-            <input aria-label="Search products" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search products" />
-          </div>
-        </div>
-        <div className="operational-filters"><label>Product status<select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value)}><option value="">All statuses</option><option>Active</option><option>Inactive</option></select></label><span className="result-count">{visibleProducts.length} products</span></div>
-        <table>
-          <thead>
-            <tr>
-              {([{ key: "sku", label: "Product code" }, { key: "name", label: "Product name" }, { key: "uom", label: "UOM" }, { key: "active", label: "Status" }] as const).map((column) => <th key={column.key} aria-sort={sort.key === column.key ? sort.ascending ? "ascending" : "descending" : "none"}><button className="table-sort" type="button" onClick={() => setSort({ key: column.key, ascending: sort.key === column.key ? !sort.ascending : true })}>{column.label}<ArrowUpDown size={14} /></button></th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {visibleProducts.length === 0 ? <tr><td colSpan={4}>No products match these filters.</td></tr> : null}
-            {visibleProducts.map((item) => (
-              <tr key={item.id}>
-                <td>{item.sku}</td>
-                <td>{item.name}</td>
-                <td>{item.uom}</td>
-                <td>
-                  <StatusBadge value={item.active} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="workspace-panel compact-stack">
-        <form
-          className="mini-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!product.sku.trim() || !product.name.trim() || !product.uom.trim()) return;
-            if (products.some((item) => item.sku.toLowerCase() === product.sku.trim().toLowerCase())) { setProductMessage("Product code already exists."); return; }
-            onAddProduct({
-              id: newId("prod"),
-              sku: product.sku.trim(),
-              name: product.name.trim(),
-              uom: product.uom.trim(),
-              productType: "Finished Good",
-              active: "Active"
-            });
-            setProduct({ sku: "", name: "", uom: "kg" });
-            setProductMessage("Product added.");
-          }}
-        >
-          <h3>Add Product</h3>
-          <label>Product code<input required value={product.sku} onChange={(event) => setProduct({ ...product, sku: event.target.value })} /></label>
-          <label>Product name<input required value={product.name} onChange={(event) => setProduct({ ...product, name: event.target.value })} /></label>
-          <label>UOM<input required value={product.uom} onChange={(event) => setProduct({ ...product, uom: event.target.value })} /></label>
-          {productMessage ? <p role="status">{productMessage}</p> : null}
-          <button type="submit">
-            <Plus size={16} />
-            Add
-          </button>
-        </form>
-        <form
-          className="mini-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!workCentre.code || !workCentre.name) return;
-            onAddWorkCentre({ id: newId("wc"), code: workCentre.code, name: workCentre.name, active: "Active" });
-            setWorkCentre({ code: "", name: "" });
-          }}
-        >
-          <h3>Add Work Centre</h3>
-          <input value={workCentre.code} onChange={(event) => setWorkCentre({ ...workCentre, code: event.target.value })} placeholder="Code" />
-          <input value={workCentre.name} onChange={(event) => setWorkCentre({ ...workCentre, name: event.target.value })} placeholder="Name" />
-          <button type="submit">
-            <Plus size={16} />
-            Add
-          </button>
-        </form>
-      </div>
-    </section>
-  );
-}
-
 function ReportsPanel({
   planLines,
   entries,
   products,
-  workCentres,
+  processName,
   machines
 }: {
   planLines: PlanLine[];
   entries: ScheduleEntry[];
   products: Product[];
-  workCentres: WorkCentre[];
+  processName: (calendarId: string) => string;
   machines: Machine[];
 }) {
-  const report = getScheduleReport(planLines, entries, workCentres, machines, products);
+  const report = getScheduleReport(planLines, entries, processName, machines, products);
 
   return (
     <section className="reports-layout">
@@ -628,21 +314,21 @@ function ReportsPanel({
         <div className="panel-title">
           <div>
             <p className="eyebrow">This Week</p>
-            <h2>Work Centre Load</h2>
+            <h2>Load by process</h2>
           </div>
         </div>
         <table>
           <thead>
             <tr>
-              <th>Work Centre</th>
-              <th>Entries</th>
-              <th>Scheduled Hours</th>
+              <th>Process</th>
+              <th>Machine bookings</th>
+              <th>Scheduled hours</th>
             </tr>
           </thead>
           <tbody>
-            {report.workCentreLoad.map((row) => (
-              <tr key={row.workCentreId}>
-                <td>{row.workCentreName}</td>
+            {report.processLoad.map((row) => (
+              <tr key={row.calendarId}>
+                <td>{row.processName}</td>
                 <td>{row.entryCount}</td>
                 <td>{row.confirmedHours}</td>
               </tr>
@@ -713,7 +399,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   // Signed-in Core users start on the plan; the local demo starts on Admin to set up units.
   const [activeTab, setActiveTab] = useState<Tab>(identity ? "planner" : "master");
   const [planningView, setPlanningView] = useState<PlanningView>("calendar");
-  const [adminSection, setAdminSection] = useState("Configuration");
+  const [adminSection, setAdminSection] = useState("Setup");
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
   // Which QA/QC section is open: Testing or Release.
   const [statusSection, setStatusSection] = useState<StatusSection>("testing");
@@ -1244,7 +930,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     if (machine.masterDataId && storedMachines.some((item) => item.id !== machine.id && item.masterDataId === machine.masterDataId)) return [`${machineLabel(machine)} is already set up as a machine.`];
     const old = machines.find((item) => item.id === machine.id);
     if (old && data.entries.some((entry) => entry.machineId === machine.id && (old.unitId !== machine.unitId || !machine.processIds?.includes(directory.calendars.find((item) => item.id === entry.calendarId)?.processId ?? "")))) return ["A booked machine must retain its unit and booked processes."];
-    setMachines((current) => current.some((item) => item.id === machine.id) ? current.map((item) => item.id === machine.id ? machine : item) : [...current, machine]);
+    // Work centres are no longer set up on screen; a machine keeps its own, or takes the first one
+    // (one is made when none exists), so the saved records stay linked as before.
+    const centre = workCentres.find((item) => item.id === machine.workCentreId) ?? workCentres[0] ?? { id: "wc-general", code: "GEN", name: "General", active: "Active" as const };
+    if (!workCentres.some((item) => item.id === centre.id)) setWorkCentres((current) => [...current, centre]);
+    const saved = { ...machine, workCentreId: centre.id };
+    setMachines((current) => current.some((item) => item.id === saved.id) ? current.map((item) => item.id === saved.id ? saved : item) : [...current, saved]);
     return [];
   }
   function deleteMachine(id: string) {
@@ -1301,7 +992,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     <div className="workstation-content">
       <header className="workstation-topbar"><div className="topbar-title"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>{persistenceStatus}</div>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
       {!unit && activeTab !== "master" && activeTab !== "news" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
-      {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
+      {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Setup." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
       {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canMoveDates && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine} onResizeLine={resizeLine}
@@ -1315,23 +1006,9 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
           onSaved={(message) => { setActivityUpdating(false); setActivityNotice(`${selectedLine.activityType ?? "Activity"} ${formatDate(selectedLine.plannedDate)}: ${message}`); }} />}
       </ActivityWorkspace> : null}
       {activeTab === "master" ? canManage ? <>
-        <div className="view-switch admin-main-tabs" aria-label="Admin area">{["Configuration", "Products", "Measurements", ...(identity ? [] : ["Sample data"])].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div>
-        {adminSection === "Configuration" ? <CalendarAdmin showPeople={!identity} directory={directory} onSave={saveDirectory} machines={machines} savedMachines={storedMachines} equipment={equipment} workCentres={workCentres} onMachine={saveMachine} onDeleteMachine={deleteMachine} onOpenCalendar={(unitId) => { setUnitSelection(unitId); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
+        {!identity ? <div className="view-switch admin-main-tabs" aria-label="Setup area">{["Setup", "Sample data"].map((item) => <button key={item} type="button" aria-pressed={adminSection === item} onClick={() => setAdminSection(item)}>{item}</button>)}</div> : null}
+        {adminSection === "Setup" || identity ? <CalendarAdmin uoms={<MeasurementAdmin usedUoms={[...products.map((item) => item.uom), ...data.orders.map((item) => item.uom), ...data.lines.map((item) => item.uom ?? ""), ...data.transfers.map((item) => item.uom), ...machines.map((item) => item.capacityUom ?? "")]} />} showPeople={!identity} directory={directory} onSave={saveDirectory} machines={machines} savedMachines={storedMachines} equipment={equipment} workCentres={workCentres} onMachine={saveMachine} onDeleteMachine={deleteMachine} onOpenCalendar={(unitId) => { setUnitSelection(unitId); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
         {adminSection === "Sample data" && !identity ? <SampleDataAdmin snapshot={snapshot} onApply={applySnapshot} onOpenCalendar={() => { setUnitSelection(directory.units.find((item) => item.id.startsWith("sample-"))?.id ?? ""); setProcessSelection(null); setSelectedActivity(null); setActiveTab("planner"); }} /> : null}
-        {adminSection === "Measurements" ? <MeasurementAdmin usedUoms={[...products.map((item) => item.uom), ...data.lines.map((item) => item.uom ?? ""), ...data.transfers.map((item) => item.uom), ...machines.map((item) => item.capacityUom ?? "")]} usedActivities={data.lines.map((item) => item.activityType ?? "")} /> : null}
-        {adminSection === "Products" ? <CatalogAdmin products={products} workCentres={workCentres} onProduct={(item) => {
-          if (products.some((old) => old.id === item.id && old.uom !== item.uom) && (data.lines.some((line) => line.productId === item.id) || data.entries.some((entry) => entry.productId === item.id))) return ["This product has planning or production records. Keep its existing UOM."];
-          setProducts((current) => current.some((old) => old.id === item.id) ? current.map((old) => old.id === item.id ? item : old) : [...current, item]); return [];
-        }} onCentre={(item) => { setWorkCentres((current) => current.some((old) => old.id === item.id) ? current.map((old) => old.id === item.id ? item : old) : [...current, item]); return []; }} onDelete={(kind, id) => {
-          if (kind === "products") {
-            if (data.lines.some((line) => line.productId === id) || data.entries.some((entry) => entry.productId === id) || data.transfers.some((transfer) => transfer.productId === id)) return ["This product is in use. Mark it inactive instead of deleting it."];
-            setProducts((current) => current.filter((item) => item.id !== id));
-          } else {
-            if (machines.some((machine) => machine.workCentreId === id) || data.entries.some((entry) => entry.workCentreId === id)) return ["This work centre has machines or production records. Reassign them first or mark it inactive."];
-            setWorkCentres((current) => current.filter((item) => item.id !== id));
-          }
-          return [];
-        }} /> : null}
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
       {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers} directory={directory} onConfirmFormula={confirmFormula} yieldLimits={yieldLimits} onYieldLimits={saveYieldLimits}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
@@ -1344,7 +1021,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />
         <details className="wip-reports"><summary>Incoming WIP ({scope(data.transfers).filter((item) => !item.receivedAt).length})</summary><WipInbox transfers={scope(data.transfers)} products={products} directory={directory} canReceive={canProduce} canPlan={canCreate} onReceive={receiveWip} onPlan={planWip} /></details>
-        <ReportsPanel planLines={planLines} entries={entries} products={products} workCentres={workCentres} machines={calendarMachines} />
+        <ReportsPanel planLines={planLines} entries={entries} products={products} processName={(calendarId) => calendarProcessName(directory, calendarId)} machines={calendarMachines} />
       </> : null}
     </div>
   </main></YieldLimitsProvider>;
