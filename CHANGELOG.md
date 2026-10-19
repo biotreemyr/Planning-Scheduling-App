@@ -8,6 +8,8 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-19
+
 ### Changed
 - **Setup** replaces the Admin tab and holds only what the scheduler itself needs: Units, Processes, Machines and UOMs. Products and machines' names come from Master Data, and people's access from Bio Tree Core.
 - **Reports** shows machine bookings and scheduled hours by process (Dispensing, Blending…) in place of the old work centre rooms.
