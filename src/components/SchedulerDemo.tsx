@@ -706,6 +706,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const canPlan = caps.editPlan && !!calendar;
   const canCreate = caps.createPlan && !!calendar;
   const canProduce = caps.produce && !!calendar;
+  // Production can move an activity's dates too, always giving a reason; everything else stays with planners.
+  const canMoveDates = canPlan || canProduce;
   const canManage = caps.manage;
   const canAssign = caps.editPlan || caps.produce;
   // Signed-in Core users start on the plan; the local demo starts on Admin to set up units.
@@ -914,22 +916,28 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     return [];
   }
   // The planner's reason for a plan date before today, kept on the activities it applies to.
-  const withPastReason = (lines: PlanLine[], ids: string[], reason?: string) => !reason ? lines : lines.map((line) => ids.includes(line.id) ? { ...line, pastPlanReason: reason } : line);
+  // The reason given for a plan change (a date before today, or any change made by production), kept on
+  // the activities it applies to; a change needing no reason clears an earlier one.
+  const withPlanReason = (lines: PlanLine[], ids: string[], reason?: string) => lines.map((line) => !ids.includes(line.id) ? line
+    : reason ? { ...line, planChangeReason: reason } : (({ planChangeReason: _r, ...rest }) => rest)(line));
   // Every date change (drag in calendar or list, or the activity's date field) goes through here,
   // so bookings, orders and reports follow. Process-flow problems are warned about, not blocked.
-  // A drop on a day before today is confirmed first; the move then happens and reports as usual.
+  // A drop on a day before today is confirmed first, with the planner's reason; production gives a
+  // reason for every change. The move then happens and reports as usual.
   function moveLine(id: string, date: string) {
     const line = allowedLines.find((item) => item.id === id);
     const checks = [{ label: `${line?.activityType ?? "Activity"} date`, value: date, rule: "plan" as const, was: line?.plannedDate }];
+    if (line && !canPlan && canProduce) { checkDates(checks, (reason) => setPlanNotice(applyMove(id, date, reason)), { reason: "always" }); return ""; }
     if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, (reason) => setPlanNotice(applyMove(id, date, reason))); return ""; }
     return applyMove(id, date);
   }
   function applyMove(id: string, date: string, reason?: string) {
-    if (!canPlan || !allowedLines.some((item) => item.id === id)) return "You cannot move this activity.";
+    if (!canMoveDates || !allowedLines.some((item) => item.id === id)) return "You cannot move this activity.";
+    if (!canPlan && !reason) return "Give a reason for changing the plan.";
     const result = moveActivity(data.lines, data.entries, id, date, member.name);
     if ("error" in result) return result.error;
     if (result.lines === data.lines) return "";
-    setData((current) => ({ ...current, lines: withPastReason(result.lines, [id], reason), entries: result.entries }));
+    setData((current) => ({ ...current, lines: withPlanReason(result.lines, [id], reason), entries: result.entries }));
     const when = formatDate(date);
     const moved = new Set(result.movedEntryIds);
     const clash = findMachineConflicts(result.entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => moved.has(entryId)));
@@ -942,15 +950,17 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   function resizeLine(id: string, endDate: string) {
     const line = allowedLines.find((item) => item.id === id);
     const checks = [{ label: `${line?.activityType ?? "Activity"} last day`, value: endDate, rule: "plan" as const, was: line ? lineEnd(line) : undefined }];
+    if (line && !canPlan && canProduce) { checkDates(checks, (reason) => setPlanNotice(applyResize(id, endDate, reason)), { reason: "always" }); return ""; }
     if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, (reason) => setPlanNotice(applyResize(id, endDate, reason))); return ""; }
     return applyResize(id, endDate);
   }
   function applyResize(id: string, endDate: string, reason?: string) {
-    if (!canPlan || !allowedLines.some((item) => item.id === id)) return "You cannot change this activity.";
+    if (!canMoveDates || !allowedLines.some((item) => item.id === id)) return "You cannot change this activity.";
+    if (!canPlan && !reason) return "Give a reason for changing the plan.";
     const result = resizeActivity(data.lines, data.entries, id, endDate, member.name);
     if ("error" in result) return result.error;
     if (result.lines === data.lines) return "";
-    setData((current) => ({ ...current, lines: withPastReason(result.lines, [id], reason), entries: result.entries }));
+    setData((current) => ({ ...current, lines: withPlanReason(result.lines, [id], reason), entries: result.entries }));
     const line = result.lines.find((item) => item.id === id)!;
     const day = (value: string) => formatDate(value.slice(0, 10));
     const span = line.endDate ? `${day(line.plannedDate)} – ${day(line.endDate)}` : day(line.plannedDate);
@@ -1084,7 +1094,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     // The reason for a date before today goes on each activity planned or moved into the past.
     const today = localDateKey(new Date());
     const pastIds = plan.rows.filter((row) => row.on && row.plannedDate < today).map((row) => row.lineId ? existing.find((line) => line.id === row.lineId)?.plannedDate !== row.plannedDate ? row.lineId : "" : added[adding.indexOf(row)]?.id ?? "").filter(Boolean);
-    const savedLines = withPastReason(finalLines, pastIds, plan.pastReason);
+    const savedLines = withPlanReason(finalLines, pastIds, plan.pastReason);
     setData((current) => ({ ...current, lines: savedLines, entries, jobOrders: batchChanged ? current.jobOrders.map((item) => item.id === savedJob.id ? savedJob : item) : current.jobOrders }));
     const parts = [added.length ? `${added.length} added` : "", updated ? `${updated} updated` : "", removing.length ? `${removing.length} removed` : "", machinesChanged && mode === "edit" ? `${machinesChanged} machine${machinesChanged === 1 ? "" : "s"} changed` : ""].filter(Boolean).join(", ");
     const booked = plan.rows.filter((row) => row.on).reduce((total, row) => total + row.machineIds.length, 0);
@@ -1265,7 +1275,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       // Received work continues the same batch, so it keeps the source activity's job order and PO.
       const source = current.lines.find((item) => item.id === transfer.sourceLineId);
       const job = source?.productId === transfer.productId ? current.jobOrders.find((item) => item.id === source.jobOrderId) : undefined;
-      const line: PlanLine = { ...(job ? { jobOrderId: job.id, productionOrderId: job.orderId } : {}), id: lineId, planId: "production-plan", calendarId: transfer.calendarId, productId: transfer.productId, quantity: transfer.quantity, uom: transfer.uom, plannedDate: date, priority: "Normal", status: "Unscheduled", incomingWipId: id, notes: transfer.notes, orderReference: transfer.orderReference, ...(reason ? { pastPlanReason: reason } : {}), activityType: directory.processes.find((item) => item.id === directory.calendars.find((entry) => entry.id === transfer.calendarId)?.processId)?.name };
+      const line: PlanLine = { ...(job ? { jobOrderId: job.id, productionOrderId: job.orderId } : {}), id: lineId, planId: "production-plan", calendarId: transfer.calendarId, productId: transfer.productId, quantity: transfer.quantity, uom: transfer.uom, plannedDate: date, priority: "Normal", status: "Unscheduled", incomingWipId: id, notes: transfer.notes, orderReference: transfer.orderReference, ...(reason ? { planChangeReason: reason } : {}), activityType: directory.processes.find((item) => item.id === directory.calendars.find((entry) => entry.id === transfer.calendarId)?.processId)?.name };
       return { ...current, lines: [...current.lines, line], transfers: current.transfers.map((item) => item.id === id ? { ...item, plannedLineId: lineId } : item) };
     });
   }
@@ -1293,7 +1303,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       {!unit && activeTab !== "master" && activeTab !== "news" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Admin." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canPlan && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
+      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canMoveDates && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine} onResizeLine={resizeLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace directory={directory} allLines={data.lines} key={`${selectedLine.jobOrderId ?? selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}

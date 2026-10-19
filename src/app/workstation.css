@@ -1041,3 +1041,4 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .date-check-reason label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; }
 .date-check-reason textarea { min-height: 64px; resize: vertical; font-weight: 400; }
 .who-tip { white-space: pre-line; }
+.date-check ul.date-check-changes { border-color: var(--line); background: var(--panel-soft); }

@@ -136,8 +136,8 @@ export type PlanLine = {
   notes?: string;
   // Who last changed the plan (date, quantity, machine...) and who last keyed in production, and when.
   plannedBy?: string; plannedAt?: string; updatedBy?: string; updatedAt?: string;
-  // Why the planner set a plan date before today (keying in past production, say).
-  pastPlanReason?: string;
+  // Why the plan was changed: a date before today (keying in past production, say), or any change by production.
+  planChangeReason?: string;
   // The machines planned, kept when production reported running on others. Older records hold one id.
   plannedMachineIds?: string[];
   plannedMachineId?: string;
