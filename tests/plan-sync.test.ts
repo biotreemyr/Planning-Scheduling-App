@@ -48,8 +48,8 @@ describe("one date change reaches every view", () => {
     expect(route.find((step) => step.processName === "Dispensing")!.lines.map((item) => item.plannedDate)).toEqual([after]);
   });
   it("reports and machine conflicts see the moved booking, and no booking is left behind", () => {
-    const report = getScheduleReport(lines, entries, state.workCentres, state.machines as never, state.products);
-    expect(report.totalEntries).toBe(getScheduleReport(state.data.lines, state.data.entries, state.workCentres, state.machines as never, state.products).totalEntries);
+    const report = getScheduleReport(lines, entries, (id) => id, state.machines as never, state.products);
+    expect(report.totalEntries).toBe(getScheduleReport(state.data.lines, state.data.entries, (id) => id, state.machines as never, state.products).totalEntries);
     expect(checkProcessFlow(lines, entries, state.data.orders, state.products, state.directory).filter((warning) => warning.kind === "booking")).toEqual([]);
     expect(findMachineConflicts(entries, state.machines as never, state.products).every((conflict) => conflict.entryIds.every((id) => entries.some((entry) => entry.id === id)))).toBe(true);
   });

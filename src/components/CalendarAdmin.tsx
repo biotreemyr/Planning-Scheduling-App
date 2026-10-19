@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AdminRows } from "./AdminRows";
 import type { CalendarDirectory, CalendarPerson } from "@/lib/domain/calendarAccess";
 import type { Machine, WorkCentre } from "@/lib/domain/types";
@@ -10,13 +10,16 @@ import { DOSAGE_FORMS, NEW_PROCESS, PLANNED_LABEL, REPORT_LABEL, settingsOf, typ
 
 const id = () => crypto.randomUUID();
 const value = (data: FormData, name: string) => String(data.get(name) ?? "").trim();
-type Section = "units" | "processes" | "people" | "machines";
+type Section = "units" | "processes" | "people" | "machines" | "uoms";
 const sections: { key: Section; label: string; singular: string }[] = [
   { key: "units", label: "Units", singular: "unit" }, { key: "processes", label: "Processes", singular: "process" },
-  { key: "people", label: "People & access", singular: "person" }, { key: "machines", label: "Machines", singular: "machine" }
+  { key: "people", label: "People & access", singular: "person" }, { key: "machines", label: "Machines", singular: "machine" },
+  { key: "uoms", label: "UOMs", singular: "UOM" }
 ];
 
-export function CalendarAdmin({ directory: d, onSave, machines, savedMachines = machines, equipment, workCentres, onMachine, onDeleteMachine, onOpenCalendar, showPeople = true }: {
+export function CalendarAdmin({ directory: d, onSave, machines, savedMachines = machines, equipment, workCentres, onMachine, onDeleteMachine, onOpenCalendar, showPeople = true, uoms }: {
+  // The units of measure list, shown as the last section.
+  uoms?: ReactNode;
   // Machines as shown (Master Data's current ID and name) and as saved; and Master Data's Production Equipment to choose from.
   savedMachines?: Machine[]; equipment?: EquipmentCatalog;
   onOpenCalendar: (unitId: string) => void;
@@ -35,7 +38,7 @@ export function CalendarAdmin({ directory: d, onSave, machines, savedMachines = 
   useEffect(() => { if (editing) editor.current?.scrollIntoView({ block: "start", behavior: "smooth" }); }, [editing]);
   const selectedSection = sections.find((item) => item.key === section)!;
   // Machines are listed as Equipment ID · name, as Master Data has them now.
-  const rows = section === "machines" ? machines.map((machine) => ({ ...machine, name: machineLabel(machine) })) : d[section];
+  const rows = section === "machines" ? machines.map((machine) => ({ ...machine, name: machineLabel(machine) })) : section === "uoms" ? [] : d[section];
   function finish(errors: string[], message: string) {
     setNotice(errors.join(" ") || message);
     if (!errors.length) { setEditing(null); setPendingDelete(null); setVersion((current) => current + 1); }
@@ -45,6 +48,7 @@ export function CalendarAdmin({ directory: d, onSave, machines, savedMachines = 
   function remove() {
     if (!pendingDelete) return;
     if (section === "machines") { finish(onDeleteMachine(pendingDelete.id), "Machine deleted."); return; }
+    if (section === "uoms") return;
     finish(onSave(removeDirectoryItem(d, section, pendingDelete.id)), "Item deleted.");
   }
   function summary(recordId: string) {
@@ -56,8 +60,10 @@ export function CalendarAdmin({ directory: d, onSave, machines, savedMachines = 
     const units = d.units.filter((unit) => d.calendars.some((calendar) => calendar.unitId === unit.id && calendar.processId === recordId)).map((unit) => unit.name).join(", ") || "No units assigned";
     return `${units} | ${settings.forms.length ? settings.forms.join(", ") : "No dosage form"}${settings.optional ? " · optional" : ""}`;
   }
+  const switcher = <div className="view-switch admin-sections" aria-label="Setup section">{sections.filter((item) => showPeople || item.key !== "people").map((item) => <button type="button" key={item.key} aria-pressed={section === item.key} onClick={() => { setSection(item.key); setEditing(null); setPendingDelete(null); setNotice(""); }}>{item.label}</button>)}</div>;
+  if (section === "uoms") return <section className="calendar-admin">{switcher}{uoms}</section>;
   return <section className="calendar-admin">
-    <div className="view-switch admin-sections" aria-label="Administration section">{sections.filter((item) => showPeople || item.key !== "people").map((item) => <button type="button" key={item.key} aria-pressed={section === item.key} onClick={() => { setSection(item.key); setEditing(null); setPendingDelete(null); setNotice(""); }}>{item.label}</button>)}</div>
+    {switcher}
     {notice && !pendingDelete ? <p role="status" className="admin-notice">{notice}</p> : null}
     <section ref={editor} className="admin-create-area">
       <div className="panel-title"><h2>{editing ? "Edit" : "Add"} {selectedSection.singular}</h2>{editing ? <button type="button" className="calendar-button" onClick={() => { setEditing(null); setNotice(""); }}>Cancel edit</button> : null}</div>
@@ -65,7 +71,7 @@ export function CalendarAdmin({ directory: d, onSave, machines, savedMachines = 
         {section === "units" ? <UnitForm directory={d} unitId={editing} onSave={save} /> : null}
         {section === "processes" ? <ProcessForm process={d.processes.find((item) => item.id === editing)} onSave={(process) => save({ ...d, processes: editing ? d.processes.map((item) => item.id === editing ? { ...item, ...process } : item) : [...d.processes, { id: id(), ...process }] })} /> : null}
         {section === "people" ? <PersonForm person={d.people.find((item) => item.id === editing) ?? { id: id(), name: "", role: "production", unitIds: [], teamIds: [], calendarIds: [] }} directory={d} submitLabel={editing ? "Save person & access" : "Add person"} onSave={(person) => save({ ...d, people: editing ? d.people.map((item) => item.id === editing ? person : item) : [...d.people, person] })} /> : null}
-        {section === "machines" ? <MachineForm machine={savedMachines.find((item) => item.id === editing) ?? { id: id(), name: "", code: "", unitId: d.units[0]?.id, processIds: [], setupMinutes: 0, workCentreId: workCentres[0]?.id ?? "", active: "Active" }} directory={d} workCentres={workCentres} equipment={equipment} taken={savedMachines.filter((item) => item.id !== editing).map((item) => item.masterDataId ?? "")} submitLabel={editing ? "Save machine" : "Add machine"} onSave={(machine) => finish(onMachine(machine), editing ? "Machine saved." : "Machine added.")} /> : null}
+        {section === "machines" ? <MachineForm machine={savedMachines.find((item) => item.id === editing) ?? { id: id(), name: "", code: "", unitId: d.units[0]?.id, processIds: [], setupMinutes: 0, workCentreId: workCentres[0]?.id ?? "", active: "Active" }} directory={d} equipment={equipment} taken={savedMachines.filter((item) => item.id !== editing).map((item) => item.masterDataId ?? "")} submitLabel={editing ? "Save machine" : "Add machine"} onSave={(machine) => finish(onMachine(machine), editing ? "Machine saved." : "Machine added.")} /> : null}
       </div>
     </section>
     <section className="admin-saved-area"><h2>Existing {selectedSection.label.toLowerCase()} <span className="badge neutral">{rows.length}</span></h2>
@@ -129,7 +135,7 @@ function PersonForm({ person, directory: d, onSave, submitLabel }: { person: Cal
 // Equipment ID and name come from there and are not typed here. The scheduler sets where it works,
 // which processes it serves and its capacity. Without Master Data configured (a local demo), the
 // name and code are typed instead.
-function MachineForm({ machine, directory: d, workCentres, equipment, taken, onSave, submitLabel }: { machine: Machine; directory: CalendarDirectory; workCentres: WorkCentre[]; equipment?: EquipmentCatalog; taken: string[]; onSave: (machine: Machine) => void; submitLabel: string }) {
+function MachineForm({ machine, directory: d, equipment, taken, onSave, submitLabel }: { machine: Machine; directory: CalendarDirectory; equipment?: EquipmentCatalog; taken: string[]; onSave: (machine: Machine) => void; submitLabel: string }) {
   const [processIds, setProcessIds] = useState(machine.processIds ?? []);
   const [unitId, setUnitId] = useState(machine.unitId ?? d.units[0]?.id ?? "");
   const [masterDataId, setMasterDataId] = useState(machine.masterDataId ?? "");
@@ -145,7 +151,7 @@ function MachineForm({ machine, directory: d, workCentres, equipment, taken, onS
       : { code: value(data, "code"), name: value(data, "name") };
     if (!identity) { setError(equipment?.status === "ok" ? "Choose the equipment from Master Data." : "Master Data's equipment list can't be read just now, so no machine can be added. Try again shortly."); return; }
     setError("");
-    onSave({ ...machine, ...identity, unitId: value(data, "unit"), workCentreId: value(data, "workCentre"), setupMinutes: Number(data.get("setup")), capacity: value(data, "capacity") ? Number(data.get("capacity")) : undefined, capacityUom: value(data, "basis"), active: data.get("active") ? "Active" : "Inactive", processIds });
+    onSave({ ...machine, ...identity, unitId: value(data, "unit"),  setupMinutes: Number(data.get("setup")), capacity: value(data, "capacity") ? Number(data.get("capacity")) : undefined, capacityUom: value(data, "basis"), active: data.get("active") ? "Active" : "Inactive", processIds });
   }}>
     <div className="admin-inline">
       {fromMasterData
@@ -154,7 +160,7 @@ function MachineForm({ machine, directory: d, workCentres, equipment, taken, onS
             {choices.map((item) => <option key={item.id} value={item.id}>{machineLabel(item)}{item.active ? "" : " (inactive in Master Data)"}</option>)}
           </select>{chosen?.processType ? <small>Process type in Master Data: {chosen.processType}</small> : null}</label>
         : <><label>Machine name<input name="name" required defaultValue={machine.name} /></label><label>Code<input name="code" required defaultValue={machine.code} /></label></>}
-      <label>Unit<select name="unit" value={unitId} onChange={(event) => { setUnitId(event.target.value); setProcessIds([]); }}>{d.units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label><label>Work centre<select name="workCentre" defaultValue={machine.workCentreId}>{workCentres.map((centre) => <option key={centre.id} value={centre.id}>{centre.name}</option>)}</select></label></div>
+      <label>Unit<select name="unit" value={unitId} onChange={(event) => { setUnitId(event.target.value); setProcessIds([]); }}>{d.units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label></div>
     <div className="admin-inline"><label>Setup time (minutes)<input name="setup" type="number" min="0" step="1" required defaultValue={machine.setupMinutes ?? 0} /></label><label>Capacity<input name="capacity" type="number" min="0.000001" step="any" defaultValue={machine.capacity} /></label><label>Capacity unit / basis<input name="basis" defaultValue={machine.capacityUom} /></label><label className="actuals-filter"><input name="active" type="checkbox" defaultChecked={machine.active === "Active"} />Active</label></div>
     <Checks title="Available processes" items={d.processes.filter((process) => d.calendars.some((calendar) => calendar.unitId === unitId && calendar.processId === process.id))} selected={processIds} onChange={setProcessIds} />
     {error ? <p role="alert">{error}</p> : null}

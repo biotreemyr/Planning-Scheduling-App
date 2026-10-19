@@ -29,21 +29,18 @@ export function MeasurementFields({ defaultQuantity, defaultUom }: { defaultQuan
     <output className="batch-equivalent" aria-live="polite">Equivalent batch size <strong>{kg === undefined ? "Not specified" : `${kg.toLocaleString("en-MY", { maximumFractionDigits: 9 })} kg`}</strong></output>
   </>;
 }
-export function MeasurementAdmin({ usedUoms = [], usedActivities = [] }: { usedUoms?: string[]; usedActivities?: string[] }) {
-  const { uoms, activities, setUoms, setActivities } = useSettings();
+// Units of measure offered on orders. (Activity types were dropped: an activity is named after its process.)
+export function MeasurementAdmin({ usedUoms = [] }: { usedUoms?: string[] }) {
+  const { uoms, setUoms } = useSettings();
   const [error, setError] = useState("");
-  const [section, setSection] = useState<"uoms" | "activities">("uoms");
+  const section = "uoms" as const;
   const [editing, setEditing] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  const items = section === "uoms" ? uoms : activities;
-  const update = section === "uoms" ? setUoms : setActivities;
-  const used = section === "uoms" ? usedUoms : usedActivities;
-  const singular = section === "uoms" ? "UOM" : "activity type";
-  const title = section === "uoms" ? "Units of measure" : "Activity types";
-  const protectedName = (name: string) => used.includes(name) || (section === "uoms" && ["kg", "g", "mg"].includes(name));
+  const items = uoms, update = setUoms, used = usedUoms;
+  const singular = "UOM", title = "Units of measure";
+  const protectedName = (name: string) => used.includes(name) || ["kg", "g", "mg"].includes(name);
   return <section className="calendar-admin">
-    <div className="view-switch admin-sections" aria-label="Measurement section">{(["uoms", "activities"] as const).map((key) => <button type="button" key={key} aria-pressed={section === key} onClick={() => { setSection(key); setEditing(null); setPendingDelete(null); setError(""); }}>{key === "uoms" ? "Units of measure" : "Activity types"}</button>)}</div>
     <section className="admin-create-area"><div className="panel-title"><h2>{editing ? "Edit" : "Add"} {singular}</h2>{editing ? <button type="button" className="calendar-button" onClick={() => { setEditing(null); setError(""); }}>Cancel edit</button> : null}</div>
       <form key={`${section}-${editing}-${version}`} className="admin-inline" onSubmit={(event) => {
         event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get("name")).trim(); const active = data.has("active");
