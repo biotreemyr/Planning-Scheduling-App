@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { Maximize2, Minus, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Copy, Maximize2, Minus, Square, X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
 import { batchYield, formatYield, limitText, type BatchYield } from "@/lib/services/yields";
+import { FillNote } from "./FillNote";
 import { useYieldLimits } from "./YieldLimitsContext";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import { bookedMachineIds, machineLabels } from "@/lib/services/machines";
@@ -44,15 +45,16 @@ export function ActivityWorkspace({ directory, allLines = [], onEditJobPlanning,
   // A floating window like Production Planning: dragged by its title bar, minimised to it, so the
   // calendar behind stays in reach.
   const limits = useYieldLimits();
-  const { minimised, setMinimised, barProps, open, style } = useFloatingWindow(dialog);
+  const { minimised, setMinimised, maximised, setMaximised, barProps, open, style } = useFloatingWindow(dialog);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { dialog.current?.show(); open(1340); }, []);
-  return <dialog ref={dialog} className={`activity-dialog unified-activity route-wide floating-window${minimised ? " minimised" : ""}`} style={style} aria-labelledby="activity-workspace-title" onClose={onClose}
+  return <dialog ref={dialog} className={`activity-dialog unified-activity route-wide floating-window${minimised ? " minimised" : ""}${maximised ? " maximised" : ""}`} style={style} aria-labelledby="activity-workspace-title" onClose={onClose}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); dialog.current?.close(); } }}>
     <header className="panel-title plan-window-bar" {...barProps}><div><p className="eyebrow">Activity workspace</p><h2 id="activity-workspace-title">{product?.name}{minimised ? ` · ${job?.number ?? line.activityType ?? ""}` : ""}</h2>
       <p className="activity-order-ref">{order?.customerName ? <span>Customer: <strong>{order.customerName}</strong></span> : null}<span>{order ? <OrderBadge number={numbers.get(order.id)} poNumber={order.poNumber} trial={isNonProduction(order)} /> : null}PO number: <strong>{order ? poLabel(order, orders) : "Not linked"}</strong></span>{job ? <span>Job order: <strong>{job.number}</strong></span> : line.orderReference ? <span>{line.orderReference}</span> : null}{job ? <span>Batch no.: <strong>{job.batchNumber ?? "Not entered"}</strong></span> : null}{order ? <span>Order quantity: {order.quantity.toLocaleString()} {order.uom}</span> : null}</p>
       {job && onEditJobPlanning ? <button type="button" className="calendar-button" onClick={() => { dialog.current?.close(); onEditJobPlanning(); }}>Edit job order planning</button> : null}</div><span className="plan-window-buttons">
       <button className="icon-button" type="button" aria-label={minimised ? "Restore" : "Minimise"} title={minimised ? "Restore" : "Minimise"} onClick={() => setMinimised(!minimised)}>{minimised ? <Maximize2 size={16} /> : <Minus size={18} />}</button>
+          {!minimised ? <button className="icon-button" type="button" aria-label={maximised ? "Restore size" : "Maximise"} title={maximised ? "Restore size" : "Maximise"} onClick={() => setMaximised(!maximised)}>{maximised ? <Copy size={15} /> : <Square size={14} />}</button> : null}
       <button type="button" className="icon-button" aria-label="Close activity workspace" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button></span></header>
     {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
     {route.length ? <ProductionRoute yields={job && directory ? batchYield(job, line.productionOrderId ?? job.orderId, allLines.length ? allLines : route.flatMap((step) => step.lines), orders, directory, limits) : undefined} line={line} route={route} format={format} warnings={warnings} machines={routeMachines} entries={routeEntries} transfers={transfers} visibleCalendarIds={visibleCalendarIds} factors={factorsFor(order, job, format === "Capsule" ? "capsules" : format === "Sachet" ? "sachets" : "tablets")}
@@ -95,20 +97,31 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
     },
     onMouseLeave: () => setTip(null)
   } : {};
+  // The second heading row sticks just below the first, whatever its height.
+  const headRow = useRef<HTMLTableRowElement>(null);
+  useLayoutEffect(() => {
+    const row = headRow.current;
+    if (!row) return;
+    const set = () => row.closest("table")?.style.setProperty("--route-head", `${row.offsetHeight}px`);
+    set();
+    const observer = new ResizeObserver(set);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
   const processOf = (calendarId?: string) => route.find((other) => other.calendar.id === calendarId)?.processName ?? "next process";
   return <section className="production-route" onScrollCapture={() => setTip(null)}>
     {tip ? <div className="who-tip" role="tooltip" style={{ left: tip.left, top: tip.top }}>{tip.text}</div> : null}<h3>Production route{line.orderReference ? ` · ${line.orderReference}` : ""}</h3>
     {warnings.length ? <ul className="flow-warnings" role="alert">{warnings.map((warning) => <li key={warning.message}>{warning.message}</li>)}</ul> : null}
     <div className="route-table-scroll"><table className="route-table">
       <thead>
-        <tr><th scope="col" rowSpan={2} className="route-plan-mark">Plan</th><th scope="col" rowSpan={2}>Process</th><th scope="colgroup" colSpan={4} className="route-group planned">Planned</th><th scope="colgroup" colSpan={6} className="route-group actual">Actual</th><th scope="col" rowSpan={2}><span className="admin-sr-only">Update</span></th><th scope="col" rowSpan={2} className="route-yield" title="% of theoretical: what the process made against the batch formula, with QA's limits. Step: against what the process before handed over">Yield</th></tr>
-        <tr><th scope="col">Date planned</th><th scope="col" className="numeric">Qty planned</th><th scope="col">Planned equivalence</th><th scope="col">Machine planned</th>
-          <th scope="col">Actual run date</th><th scope="col" className="numeric">Actual quantity</th><th scope="col">Actual equivalence</th><th scope="col">Machine used</th><th scope="col">Remarks</th><th scope="col">Send to next process</th></tr>
+        <tr ref={headRow}><th scope="col" rowSpan={2} className="route-plan-mark">Plan</th><th scope="col" rowSpan={2} className="route-process">Process</th><th scope="colgroup" colSpan={4} className="route-group planned">Planned</th><th scope="colgroup" colSpan={6} className="route-group actual">Actual</th><th scope="col" rowSpan={2}><span className="admin-sr-only">Update</span></th><th scope="col" rowSpan={2} className="route-yield" title="% of theoretical: what the process made against the batch formula, with QA's limits. Step: against what the process before handed over">Yield</th></tr>
+        <tr><th scope="col" className="route-col-date">Date planned</th><th scope="col" className="numeric">Qty planned</th><th scope="col" className="route-col-equivalence">Planned equivalence</th><th scope="col" className="route-col-machine">Machine planned</th>
+          <th scope="col" className="route-col-date">Actual run date</th><th scope="col" className="numeric">Actual quantity</th><th scope="col" className="route-col-equivalence">Actual equivalence</th><th scope="col" className="route-col-machine">Machine used</th><th scope="col" className="route-col-remarks">Remarks</th><th scope="col" className="route-col-next">Send to next process</th></tr>
       </thead>
       <tbody>{route.flatMap((step) => {
         // A process not used for this dosage form (set in Admin) is shown as not used.
         const outside = format !== "Other" && !step.settings.forms.includes(format);
-        if (!step.lines.length) return [<tr key={step.calendar.id} className="route-empty"><td className="route-plan-mark" /><th scope="row">{step.processName}</th><td colSpan={COLUMNS - 2} className="route-muted">{outside ? `Not used for ${format.toLowerCase()}s` : visibleCalendarIds && !visibleCalendarIds.includes(step.calendar.id) ? "Not in your processes" : "Not planned"}</td></tr>];
+        if (!step.lines.length) return [<tr key={step.calendar.id} className="route-empty"><td className="route-plan-mark" /><th scope="row" className="route-process">{step.processName}</th><td colSpan={COLUMNS - 2} className="route-muted">{outside ? `Not used for ${format.toLowerCase()}s` : visibleCalendarIds && !visibleCalendarIds.includes(step.calendar.id) ? "Not in your processes" : "Not planned"}</td></tr>];
         const done = step.lines.every((item) => item.completedAt);
         return step.lines.flatMap((item, index) => {
           const booked = bookedMachineIds(entries, item.id);
@@ -124,13 +137,13 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
             : chosenKind === "final" ? "Final output" : chosenKind === "wip" ? `WIP room, for ${processOf(chosenCalendar)}` : chosenKind === "next" ? processOf(chosenCalendar) : "";
           const current = item.id === line.id;
           // Who planned shows beside the Planned cells, who last updated beside the Actual ones.
-          const plannedWho = hover(whoText("Planned", item.plannedBy, item.plannedAt));
+          const plannedWho = hover([whoText("Planned", item.plannedBy, item.plannedAt), item.planChangeReason ? `Reason for the plan change: ${item.planChangeReason}` : ""].filter(Boolean).join("\n"));
           const updatedWho = item.startedAt || item.completedAt || item.progressQuantity !== undefined || item.progressDestination ? whoText("Updated", item.updatedBy, item.updatedAt) : "";
           // Production can click anywhere on a day's Actual cells to key them in.
           const open = (className = "") => ({ className: `${className}${canUpdate ? " route-actual-open" : ""}`.trim() || undefined, ...hover(updatedWho), ...(canUpdate ? { onClick: () => { setTip(null); onOpenLine?.(item.id, true); } } : {}) });
           const rows = [<tr key={item.id} className={[current ? "route-current" : "", item.completedAt ? "route-done" : ""].join(" ").trim() || undefined}>
             {index === 0 ? <><td rowSpan={step.lines.length} className="route-plan-mark" aria-label="Planned">✓</td>
-              <th scope="row" rowSpan={step.lines.length}>{step.processName}{done ? <span className="badge success">Done</span> : null}</th></> : null}
+              <th scope="row" rowSpan={step.lines.length} className="route-process">{step.processName}{done ? <span className="badge success">Done</span> : null}</th></> : null}
             <td {...plannedWho}>{day(item.plannedDate)}{item.endDate ? ` – ${day(item.endDate)}` : ""}</td>
             <td className="numeric" {...plannedWho}>{amount(item.quantity)} {item.uom ?? ""}</td>
             <td className="route-equivalence" {...plannedWho}>{equivalence(item.quantity, item.uom, factors) || <span className="route-muted">-</span>}</td>
@@ -152,7 +165,7 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
               if (stage?.ofTheoretical !== undefined || stage?.percent !== undefined) return <>
                 {stage.ofTheoretical !== undefined ? <span className={`yield-chip yield-${stage.tone}`} title={`% of theoretical: ${stage.theoreticalWorking}${stage.limit ? ` · QA limits ${limitText(stage.limit)}` : ""}`}>{formatYield(stage.ofTheoretical)}{stage.tone === "out" ? " · outside limits" : ""}</span> : null}
                 {stage.percent !== undefined ? <small className="yield-step" title={`Step yield: ${stage.working}`}>Step {formatYield(stage.percent)}{stage.powder ? " by powder" : ""}</small> : null}
-                {stage.powder?.targetMg ? <small className="yield-step" title="Average net fill per capsule (filled weight less the empty shell) against the unit weight on the PO">Fill {stage.powder.fillMg.toLocaleString("en-MY", { maximumFractionDigits: 1 })} mg · target {stage.powder.targetMg.toLocaleString()}</small> : null}</>;
+                {stage.powder?.targetMg ? <FillNote powder={stage.powder} /> : null}</>;
               if (stage?.missing) return <span className="yield-chip yield-missing" title={`Yield can't be worked out: ${stage.missing}`}>– figure missing</span>;
               return <span className="route-muted">{stage?.started && !stage.done ? "In progress" : "-"}</span>;
             })()}</td> : null}

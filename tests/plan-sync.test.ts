@@ -69,9 +69,13 @@ describe("moves that break the process flow warn", () => {
     expect(checkProcessFlow(back.lines, back.entries, state.data.orders, state.products, state.directory).some((warning) => warning.batch === "Batch 8" && warning.orderId === order.id)).toBe(false);
     expect(back.entries).toEqual(state.data.entries.map((entry) => ({ ...entry, ...(back.entries.find((item) => item.id === entry.id)!.changedBy === "Tester" ? { changedBy: "Tester" } : {}) })));
   });
-  it("refuses to move completed work and keeps everything unchanged", () => {
+  it("moves completed work's plan date (to key in past production) but leaves its finished bookings where the machine ran", () => {
     const done = state.data.lines.find((line) => line.completedAt)!;
-    expect(moveActivity(state.data.lines, state.data.entries, done.id, "2026-12-01", "Tester")).toEqual({ error: "Completed activities cannot be moved." });
+    const moved = moveActivity(state.data.lines, state.data.entries, done.id, "2026-09-01", "Tester");
+    if ("error" in moved) throw new Error(moved.error);
+    expect(moved.lines.find((line) => line.id === done.id)!.plannedDate).toBe("2026-09-01");
+    const finished = state.data.entries.filter((entry) => entry.planLineId === done.id && entry.status === "Completed");
+    for (const entry of finished) expect(moved.entries.find((item) => item.id === entry.id)).toEqual(entry);
     expect(moveActivity(state.data.lines, state.data.entries, "missing", "2026-12-01", "Tester")).toEqual({ error: "This activity no longer exists." });
   });
   it("a same-day move changes nothing", () => {

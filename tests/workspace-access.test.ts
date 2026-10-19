@@ -146,6 +146,18 @@ describe("workspace change review", () => {
     bare.data.jobOrders.push(job);
     expect(reviewWorkspaceChange(base, bare, role("orders.create")).allowed).toBe(true);
   });
+  it("lets production change an activity's dates only with a reason, and nothing else of the plan", () => {
+    const producer = role("planning.view", "schedule.view", "schedule.edit");
+    const moved = copy();
+    moved.data.lines.find((line) => line.id === openLine().id)!.plannedDate = "2026-10-20";
+    expect(reviewWorkspaceChange(base, moved, producer).denied).toContain("move or edit plan activities");
+    const explained = copy();
+    Object.assign(explained.data.lines.find((line) => line.id === openLine().id)!, { plannedDate: "2026-10-20", endDate: "2026-10-21", planChangeReason: "Machine breakdown" });
+    expect(reviewWorkspaceChange(base, explained, producer).allowed).toBe(true);
+    const quantity = copy();
+    Object.assign(quantity.data.lines.find((line) => line.id === openLine().id)!, { quantity: 1, planChangeReason: "Machine breakdown" });
+    expect(reviewWorkspaceChange(base, quantity, producer).denied).toContain("move or edit plan activities");
+  });
   it("refuses production results bundled with a plan change or carried by a new activity", () => {
     const bundled = copy();
     Object.assign(bundled.data.lines.find((line) => line.id === openLine().id)!, { plannedDate: "2026-10-20", completedAt: "2026-10-08T10:00:00.000Z", yieldQuantity: 1 });

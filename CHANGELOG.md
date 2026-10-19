@@ -8,6 +8,20 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-19
+
+### Added
+- **Capsule fill check** shows a batch's average net fill (filled capsule less the empty shell) in bold red when it is further from the unit weight on the PO than QA's tolerance, in Progress, the activity route and the capsulation update. QA sets the tolerance under QA/QC → Yield limits; until then it is ±5%. Often it means a weight was keyed in wrongly.
+- **Planning in the past** asks for a reason when a plan date is set before today, with quick picks such as "Keying in past production records". The reason is kept with the activity, shows when pointing at its planned cells, and appears in the audit trail.
+- **Production can change plan dates** on the Planner Board (drag an activity or its last day), always giving a reason, with quick picks such as "Machine breakdown" or "Material not ready". Quantities, adding or removing processes and Edit planning stay with planners. The reason shows to the planner on the activity and in the audit trail.
+- **Edit planning and Activity workspace** windows have a Maximise button (or double-click the title bar) to fill the screen, and Restore to go back.
+
+### Changed
+- **QA/QC Testing and Release lists** now work like the Orders list: rows are numbered 1, 2, 3 down the list, the newest batch is on top, every heading sorts (each person's choice is remembered), searches and filters sit under the headings, long lists page at 50 or 100, and a Remarks column comes last. Columns are wider so each cell takes one line, two at most, and the table scrolls inside its box. The next step for a batch (Pass, Failed, Under investigation; Release or Reject) is chosen from a drop-down at the end of its row. Print opens a window to choose the batches by status and date, then print them or download them in Excel, numbered 1, 2, 3.
+- **Completed activities** can now be moved to another plan date on the Planner Board and in Edit planning, so past production can be keyed in on the day it was planned. Their quantity, machine and results stay as recorded.
+- **Edit planning** opens wider, with each heading on one line and long machine names on two lines at most.
+- **Activity workspace** route table keeps its headings and the Plan and Process columns in view while scrolling, has wider columns, and shows its sideways scrollbar at the bottom of the window instead of the bottom of the table.
+
 ## [1.8.2] - 2026-10-19
 
 ### Changed

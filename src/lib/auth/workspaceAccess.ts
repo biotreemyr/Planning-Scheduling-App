@@ -25,6 +25,8 @@ const only = (keys: string[], allowed: string[]) => keys.every((key) => allowed.
 // Who/when a record was last edited: they follow the change they stamp, so need no right of their own.
 const EDIT_STAMPS = ["updatedBy", "updatedAt"];
 const LINE_STAMPS = [...EDIT_STAMPS, "plannedBy", "plannedAt"];
+// An activity's dates, which production may change too, always with its reason.
+const LINE_DATES = ["plannedDate", "endDate", "planChangeReason"];
 // What production records on an activity.
 const LINE_RESULTS: string[] = ["completedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "actualUnitVolumeMl", "shellWeightMg", "startedAt", "productionNotes", "progressQuantity", "progressUom", "progressUnitSize", "progressDestination"];
 // A job order's fields that only one right may set, each with the people who record them.
@@ -124,7 +126,10 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
     // When production reports another machine than planned, the planned one is kept on the activity.
     const keptMachine = (key: string) => key === "plannedMachineIds" && old.plannedMachineIds === undefined && old.plannedMachineId === undefined;
     const rest = keys.filter((key) => !LINE_RESULTS.includes(key) && !keptMachine(key));
-    if (rest.some((key) => !LINE_STAMPS.includes(key)) || (rest.length && rest.length === keys.length)) need(can.editPlan, "move or edit plan activities");
+    if (rest.some((key) => !LINE_STAMPS.includes(key)) || (rest.length && rest.length === keys.length)) {
+      const datesOnly = rest.every((key) => LINE_DATES.includes(key) || LINE_STAMPS.includes(key)) && !!line.planChangeReason?.trim();
+      need(can.editPlan || (datesOnly && can.produce), "move or edit plan activities");
+    }
   }
   count("activities added", lines.added.length); count("activities changed", lines.changed.length); count("activities removed", lines.removed.length);
 

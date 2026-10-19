@@ -52,6 +52,12 @@ describe("step yield", () => {
     const stage = batchYield(job, "po", weighed, [order], directory).stages[2];
     expect(stage).toMatchObject({ percent: 99.5, ofTheoretical: 98, powder: { fillMg: 723, targetMg: 720 } });
     expect(stage.working).toBe("42.802 kg powder in capsules (weighed less 59,200 empty shells) ÷ 43 kg from Blending");
+    expect(stage.powder).toMatchObject({ diff: 0.4, out: false, tolerance: 5 });
+    // A filled weight keyed in as the fill target (720 mg, shell 127 mg) gives a net fill 17.6% under: flagged.
+    const slip = lines.map((line) => line.id === "capsulation" ? { ...line, weighedQuantity: 42.624, weighedUom: "kg", actualUnitWeightMg: 720, shellWeightMg: 127 } : line);
+    expect(batchYield(job, "po", slip, [order], directory).stages[2].powder).toMatchObject({ fillMg: 593, diff: -17.6, out: true });
+    // QA's own tolerance replaces the default.
+    expect(batchYield(job, "po", weighed, [order], directory, { byProcess: {}, fillTolerance: 0.2 }).stages[2].powder).toMatchObject({ out: true, tolerance: 0.2 });
     // Without the shell weight it compares by count.
     expect(batchYield(job, "po", lines, [order], directory).stages[2].percent).toBe(99.1);
   });

@@ -531,7 +531,16 @@
 .route-plan-scroll { overflow-x: auto; }
 .route-plan-table input[type="number"] { width: 96px; min-height: 34px; }
 .route-plan-table select { width: 104px; min-height: 34px; }
-.activity-dialog.activity-dialog-wide { width: min(720px, calc(100vw - 24px)); }
+.activity-dialog.activity-dialog-wide { width: min(1120px, calc(100vw - 24px)); }
+/* Edit planning: headings on one line, each cell on one line or two at most; the table scrolls sideways when narrower. */
+.route-plan-table { min-width: 880px; }
+.route-plan-table th { white-space: nowrap; }
+.route-plan-table td { line-height: 1.35; }
+.route-plan-table td:nth-child(2) { min-width: 220px; }
+.route-plan-table td:nth-child(3) { min-width: 150px; }
+.route-plan-table td:nth-child(4) { min-width: 320px; width: 460px; }
+.route-plan-table td:nth-child(4) .machine-picker { max-width: 460px; }
+.route-plan-table td:nth-child(5) { min-width: 150px; }
 /* Job orders keyed in and edited inside a PO item. */
 .job-order-form { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .job-order-form > .primary-button { align-self: end; }
@@ -1000,3 +1009,56 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .yield-limit-input input { width: 90px; text-align: right; }
 .yield-limits-final-gap td { padding: 4px; background: var(--panel-soft); }
 .yield-limits-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* A floating window maximised to fill the screen. */
+.floating-window.maximised, .plan-window.maximised { border-radius: 8px; }
+
+/* Activity workspace route: the table scrolls inside the window, so its sideways scrollbar sits at the
+   bottom of the window, not of the whole table. The headings and the Plan and Process columns stay put. */
+.unified-activity:not(.minimised):has(> .production-route) { display: flex; flex-direction: column; overflow: hidden; }
+.unified-activity:not(.minimised) > .production-route { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.unified-activity:not(.minimised) > .production-route > .route-table-scroll { flex: 1 1 auto; min-height: 120px; overflow: auto; }
+.production-route .route-table { min-width: 1500px; border-collapse: separate; border-spacing: 0; border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.production-route .route-table :is(th, td) { border-width: 0 1px 1px 0; }
+.production-route .route-table thead th { position: sticky; top: 0; z-index: 3; }
+.production-route .route-table thead tr + tr th { top: var(--route-head, 33px); }
+.production-route .route-table .route-plan-mark { position: sticky; left: 0; z-index: 2; box-sizing: border-box; width: 44px; min-width: 44px; max-width: 44px; background: var(--panel, #fff); }
+.production-route .route-table .route-process { position: sticky; left: 44px; z-index: 2; min-width: 150px; background: var(--panel, #fff); box-shadow: 4px 0 6px -4px #14241f40; }
+.production-route .route-table thead :is(.route-plan-mark, .route-process) { z-index: 4; background: var(--panel-soft); }
+.production-route .route-table .route-empty :is(.route-plan-mark, .route-process) { background: #fafbfa; }
+.production-route .route-table .route-current > :is(.route-plan-mark, .route-process) { background: #eef6f1; }
+.production-route .route-table thead .route-col-date { min-width: 120px; }
+.production-route .route-table thead .route-col-equivalence { min-width: 150px; }
+.production-route .route-table thead .route-col-machine { min-width: 190px; }
+.production-route .route-table thead .route-col-remarks { min-width: 200px; }
+.production-route .route-table thead .route-col-next { min-width: 150px; }
+/* Edit planning: a long machine name wraps to two lines rather than being cut off. */
+.route-plan-table .machine-picker > summary { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.35; }
+/* A capsule fill further from target than QA's tolerance. */
+.fill-out, .yield-step.fill-out { color: var(--red); font-weight: 700; }
+/* A plan date before today: the planner's reason, typed or picked. */
+.date-check-reason { display: grid; gap: 8px; }
+.date-check-reason label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; }
+.date-check-reason textarea { min-height: 64px; resize: vertical; font-weight: 400; }
+.who-tip { white-space: pre-line; }
+.date-check ul.date-check-changes { border-color: var(--line); background: var(--panel-soft); }
+/* QA/QC testing and release lists: wide enough that each cell takes one line, two at most. */
+.status-table { min-width: 1500px; }
+.status-table > tbody > tr > td { line-height: 1.35; }
+.status-table [data-col="number"] { width: 44px; text-align: center; color: var(--muted); }
+.status-table [data-col="date"] { min-width: 130px; white-space: nowrap; }
+.status-table [data-col="pjo"], .status-table [data-col="batch"], .status-table [data-col="job"] { min-width: 120px; white-space: nowrap; }
+.status-table [data-col="product"] { min-width: 300px; }
+.status-table [data-col="po"] { min-width: 190px; }
+.status-table [data-col="output"], .status-table [data-col="yield"] { min-width: 130px; }
+.status-table [data-col="status"] { min-width: 170px; }
+.status-table [data-col="released"] { min-width: 150px; }
+.status-table [data-col="action"] { min-width: 150px; }
+.status-table td[data-col="action"] { white-space: nowrap; }
+.status-table td[data-col="action"] button { white-space: nowrap; display: inline-flex; flex-direction: row; align-items: center; gap: 6px; }
+.status-table td[data-col="action"] .status-actions { flex-wrap: nowrap; }
+.status-table [data-col="remarks"] { min-width: 220px; }
+/* Long text kept to two lines; the whole of it shows on pointing. */
+.cell-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* The next step for a batch, chosen at the end of its row. */
+.status-table .status-action-select { min-width: 170px; min-height: 32px; padding: 4px 8px; font-size: 13px; font-weight: 600; }

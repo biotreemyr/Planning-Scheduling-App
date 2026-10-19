@@ -9,5 +9,5 @@ export function monthDates(date: string): string[] {
 }
 
 export function canMovePlan(line: PlanLine | undefined, canPlan: boolean) {
-  return canPlan && !!line && !line.completedAt;
+  return canPlan && !!line;
 }

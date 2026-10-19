@@ -69,13 +69,14 @@ describe("dragging in the list view", () => {
     expect(document.body.textContent).toContain("Activities stay in their process");
   });
 
-  it("says a completed activity is locked instead of silently ignoring the drag", () => {
+  it("lets a planner move a completed activity to the day it was planned (keying in past production)", () => {
     const { onMove, card } = setup([line("a", { completedAt: "2026-10-09T10:00:00Z" })]);
     pointer(card("a"), "pointerdown", 100, 100);
-    pointer(window, "pointermove", 100, 160);
-    pointer(window, "pointerup", 100, 160);
-    expect(onMove).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain("is completed, so it is locked");
+    over = cell("2026-10-12", "dispensing");
+    pointer(window, "pointermove", 100, 140);
+    pointer(window, "pointermove", 100, 180);
+    pointer(window, "pointerup", 100, 180);
+    expect(onMove).toHaveBeenCalledWith("a", "2026-10-12");
   });
 
   it("lets a finger pick a card up by holding it, but a quick swipe still scrolls", () => {

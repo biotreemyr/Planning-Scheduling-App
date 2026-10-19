@@ -1,10 +1,16 @@
 "use client";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CheckCircle2, PackageCheck, Printer, Search, XCircle } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, FileSpreadsheet, PackageCheck, Printer, X, XCircle } from "lucide-react";
+import { PRINT_PERIODS, periodRange, type PrintPeriod } from "@/lib/services/printPeriods";
+import { statusWorkbook } from "@/lib/services/statusExcel";
+import { localDateKey } from "@/lib/services/calendarPrint";
+import { usePager } from "./Pager";
+import { DateFilterPicker } from "./DateFilterPicker";
+import { matchesDateFilter } from "@/lib/services/dateFilter";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
-import { batchYield, formatYield, limitText, type YieldLimits, type YieldRange } from "@/lib/services/yields";
+import { DEFAULT_FILL_TOLERANCE, batchYield, formatYield, limitText, type YieldLimits, type YieldRange } from "@/lib/services/yields";
 import { OTHER_USES, finalOutputFor, formulaPending, jobParts, needsFormulaCheck, releaseFor, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { finalOutput, finishedOn, packingNumber, releaseQueue, testingQueue, testResult, type JobOrder, type TestResult } from "@/lib/services/jobOrders";
 import type { PurchaseOrder } from "@/lib/services/orders";
@@ -14,6 +20,12 @@ export type StatusSection = "testing" | "release" | "yield";
 export type StatusAccess = { viewTesting: boolean; passTesting: boolean; printTesting: boolean; viewRelease: boolean; release: boolean; printRelease: boolean };
 
 const day = (value?: string) => formatDate(value);
+// A column of the testing and release lists: how it sorts, filters and shows.
+type StatusColumn = { key: string; label: string; numeric?: boolean; sort: (job: JobOrder) => string | number; cell: (job: JobOrder) => ReactNode;
+  filter?: { kind: "text"; text: (job: JobOrder) => string } | { kind: "date"; date: (job: JobOrder) => string | undefined } | { kind: "select"; options: string[]; value: (job: JobOrder) => string } };
+type Sort = { key: string; ascending: boolean };
+// Each person's sort for each list, remembered on this computer.
+const sortStorage = (section: StatusSection) => `scheduler.${section}Sort`;
 const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
 
 /**
@@ -42,7 +54,21 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   const toConfirm = jobOrders.filter((job) => formulaPending(job, orders) && !job.releasedAt && !job.rejectedAt);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [printing, setPrinting] = useState(0);
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  // Newest first by default: the latest finished (testing) or tested (release) batch on top.
+  const [sort, setSort] = useState<Sort>({ key: "date", ascending: false });
+  useEffect(() => {
+    setFilters({});
+    try { const saved = JSON.parse(localStorage.getItem(sortStorage(chosen)) ?? "null"); setSort(saved && typeof saved.key === "string" ? { key: saved.key, ascending: !!saved.ascending } : { key: "date", ascending: false }); } catch { setSort({ key: "date", ascending: false }); }
+  }, [chosen]);
+  const chooseSort = (next: Sort) => { setSort(next); try { localStorage.setItem(sortStorage(section), JSON.stringify(next)); } catch { /* not remembered */ } };
   useEffect(() => { if (printing) window.print(); }, [printing]);
+  // Print or Excel first asks which batches: by status, and when they finished (testing) or were tested (release).
+  const [printSetup, setPrintSetup] = useState<{ statuses: string[]; period: PrintPeriod; from: string; to: string } | null>(null);
+  const [printRows, setPrintRows] = useState<string[]>([]);
+  const [printCaption, setPrintCaption] = useState("");
+  const printDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const box = printDialog.current; if (!box) return; if (printSetup && !box.open) box.showModal(); if (!printSetup && box.open) box.close(); }, [printSetup]);
   // The batch's final yield against QA's limits, and whether any process came out outside them,
   // so testing and release see it without opening the order. No limits set says so.
   const yieldOf = (job: JobOrder) => {
@@ -66,6 +92,82 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
     const output = finalOutput(job.id, lines, transfers)[0];
     return { order, product: products.find((item) => item.id === order?.productId)?.name ?? "Unknown product", output };
   };
+  // The day a batch joined the list: finished (testing) or tested (release). Numbers run oldest = 1.
+  const listedOn = (job: JobOrder) => (section === "testing" ? finishedOn(job, lines, transfers) : job.testedAt) ?? "";
+  // Rows are numbered 1, 2, 3 down the list as shown (filled in once the list is sorted).
+  const position = new Map<string, number>();
+  const statusOf = (job: JobOrder) => section === "testing" ? testResult(job) === "Under investigation" ? "Under investigation" : "Awaiting testing" : testResult(job) === "Failed" ? "Failed testing" : "Passed";
+  const columns: StatusColumn[] = [
+    { key: "date", label: section === "testing" ? "Finished" : "Tested", sort: listedOn, cell: (job) => day(listedOn(job)) || <span className="route-muted">-</span>, filter: { kind: "date", date: (job) => listedOn(job) || undefined } },
+    { key: "pjo", label: "PJO no.", sort: (job) => packingNumber(job), cell: (job) => <strong>{packingNumber(job)}</strong>, filter: { kind: "text", text: (job) => packingNumber(job) } },
+    { key: "product", label: "Product", sort: (job) => details(job).product, cell: (job) => details(job).product, filter: { kind: "text", text: (job) => details(job).product } },
+    { key: "batch", label: "Batch no.", sort: (job) => job.batchNumber ?? "", cell: (job) => job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Not keyed in</span>, filter: { kind: "text", text: (job) => job.batchNumber ?? "" } },
+    { key: "job", label: "Job order no.", sort: (job) => job.number, cell: (job) => job.number, filter: { kind: "text", text: (job) => job.number } },
+    { key: "po", label: "PO", sort: (job) => details(job).order?.poNumber ?? "", cell: (job) => { const { order } = details(job); return <>{order?.poNumber ?? "-"}{order?.customerName ? <small>{order.customerName}</small> : null}</>; }, filter: { kind: "text", text: (job) => { const { order } = details(job); return `${order?.poNumber ?? ""} ${order?.customerName ?? ""}`; } } },
+    { key: "output", label: "Final output", numeric: true, sort: (job) => details(job).output?.quantity ?? -1, cell: (job) => { const { output } = details(job); return output ? `${amount(output.quantity)} ${output.uom}` : "-"; } },
+    { key: "yield", label: "Final yield", numeric: true, sort: (job) => yieldOf(job).final?.percent ?? -1, cell: finalYieldCell },
+    { key: "status", label: section === "testing" ? "Status" : "Testing result", sort: statusOf, filter: { kind: "select", options: section === "testing" ? ["Awaiting testing", "Under investigation"] : ["Passed", "Failed testing"], value: statusOf },
+      cell: (job) => section === "testing"
+        ? testResult(job) === "Under investigation" ? <><span className="badge warning">Under investigation</span><small>since {day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></> : <span className="badge neutral">Awaiting testing</span>
+        : <>{testResult(job) === "Failed" ? <span className="badge danger">Failed testing</span> : <span className="badge success">Passed</span>}<small>{day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></> },
+    ...(section === "release" ? [{ key: "released", label: "Release quantity", numeric: true, sort: (job: JobOrder) => jobParts(job).filter((part) => releaseFor(job, part.orderId)).length,
+      cell: (job: JobOrder) => testResult(job) === "Failed" ? <span className="route-muted">Not for release</span> : (() => {
+        const parts = jobParts(job), done = parts.filter((part) => releaseFor(job, part.orderId)).length;
+        return parts.length > 1 || done ? <span>{done} of {parts.length} POs released</span> : <span className="route-muted">Not released</span>;
+      })() }] : [])
+  ];
+  const sorter = columns.find((column) => column.key === sort.key) ?? columns[0];
+  const filtering = Object.values(filters).some((value) => value.trim());
+  const table = rows.filter((job) => columns.every((column) => {
+    const value = filters[column.key]?.trim().toLowerCase();
+    if (!value || !column.filter) return true;
+    if (column.filter.kind === "date") return matchesDateFilter(column.filter.date(job), value);
+    return column.filter.kind === "text" ? column.filter.text(job).toLowerCase().includes(value) : column.filter.value(job).toLowerCase() === value;
+  }) && (!filters.remarks?.trim() || (job.notes ?? "").toLowerCase().includes(filters.remarks.trim().toLowerCase()))).sort((a, b) => {
+    const x = sorter.sort(a), y = sorter.sort(b);
+    const result = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+    return (result || a.number.localeCompare(b.number)) * (sort.ascending ? 1 : -1);
+  });
+  table.forEach((job, index) => position.set(job.id, index + 1));
+  const statusOptions = section === "testing" ? ["Awaiting testing", "Under investigation"] : ["Passed", "Failed testing"];
+  const dateLabel = section === "testing" ? "Finished" : "Tested";
+  const listTitle = `${section === "testing" ? "Testing" : "Release"} list`;
+  const today = localDateKey(new Date());
+  const inPeriod = (job: JobOrder) => { const date = listedOn(job).slice(0, 10); return !printSetup || ((!printSetup.from || (!!date && date >= printSetup.from)) && (!printSetup.to || (!!date && date <= printSetup.to))); };
+  const toPrint = printSetup ? table.filter((job) => printSetup.statuses.includes(statusOf(job)) && inPeriod(job)) : [];
+  const statusCounts = Object.fromEntries(statusOptions.map((status) => [status, table.filter((job) => statusOf(job) === status && inPeriod(job)).length]));
+  const captionFor = (setup: NonNullable<typeof printSetup>) => [
+    setup.statuses.length === statusOptions.length ? "All statuses" : setup.statuses.join(", "),
+    setup.from || setup.to ? `${dateLabel} ${setup.from ? day(setup.from) : "…"} – ${setup.to ? day(setup.to) : "…"}` : `${dateLabel}: all dates`,
+    ...(filtering ? ["with the list's searches and filters"] : [])
+  ].join(" · ");
+  async function downloadExcel(jobs: JobOrder[], caption: string) {
+    const book = await statusWorkbook(jobs.map((job) => {
+      const { order, product, output } = details(job);
+      const parts = jobParts(job), done = parts.filter((part) => releaseFor(job, part.orderId)).length;
+      return { date: listedOn(job) || undefined, pjo: packingNumber(job), product, batch: job.batchNumber ?? "", job: job.number, po: order?.poNumber ?? "", customer: order?.customerName ?? "",
+        output: output?.quantity, outputUom: output?.uom ?? "", finalYield: yieldOf(job).final?.percent, status: statusOf(job),
+        release: testResult(job) === "Failed" ? "Not for release" : parts.length > 1 || done ? `${done} of ${parts.length} POs released` : "Not released", remarks: job.notes ?? "" };
+    }), { title: listTitle, caption, dateLabel, release: section === "release", at: formatDateTime(new Date()) });
+    const url = URL.createObjectURL(new Blob([await book.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `${section}-list-${today}.xlsx`; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  // What QA/QC can do next with a batch, chosen from a drop-down at the end of its row.
+  const act = (job: JobOrder, choice: string) => {
+    const name = packingNumber(job);
+    if (choice === "pass") report(onTest(job.id, "Passed"), `${name} passed testing and moved to Release.`);
+    if (choice === "fail" && window.confirm(`Mark ${name} as failed testing? It goes to Release for QA to reject.`)) report(onTest(job.id, "Failed"), `${name} failed testing and moved to Release, for QA to reject.`);
+    if (choice === "investigate") report(onTest(job.id, "Under investigation"), `${name} is under investigation. Pass or fail it when the result is known.`);
+    if (choice === "release") setReleasing(job.id);
+    if (choice === "close") setReleasing(null);
+    if (choice === "reject" && window.confirm(`Reject ${name}? It failed testing and will be closed as rejected.`)) report(onReject(job.id), `${name} rejected.`);
+  };
+  const choices = (job: JobOrder): { value: string; label: string }[] => section === "testing"
+    ? access.passTesting ? [{ value: "pass", label: "Pass" }, { value: "fail", label: "Failed" }, ...(testResult(job) !== "Under investigation" ? [{ value: "investigate", label: "Under investigation" }] : [])] : []
+    : !access.release ? [] : testResult(job) === "Failed" ? [{ value: "reject", label: "Reject" }] : releasing === job.id ? [{ value: "close", label: "Close release" }] : [{ value: "release", label: "Release to POs…" }];
+  const { rows: page, pager } = usePager(table, `${section}|${JSON.stringify(filters)}|${sort.key}|${sort.ascending}`, [50, 100]);
   const report = (errors: string[], text: string) => setMessage(errors.length ? { text: errors.join(" "), error: true } : { text, error: false });
   if (!access.viewTesting && !access.viewRelease) return null;
   if (section === "yield") return <YieldLimitsPanel directory={directory} limits={yieldLimits} editable={access.release} onSave={onYieldLimits} />;
@@ -77,7 +179,7 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
         <button type="button" aria-pressed={section === "testing"} onClick={() => onSection("testing")}>Testing</button>
         <button type="button" aria-pressed={section === "release"} onClick={() => onSection("release")}>Release</button>
       </div> : null}
-      {canPrint ? <button type="button" className="calendar-button" onClick={() => setPrinting((value) => value + 1)}><Printer size={16} />Print {section} list</button> : null}
+      {canPrint ? <button type="button" className="calendar-button" aria-expanded={!!printSetup} title="Choose which batches to print or download in Excel" onClick={() => setPrintSetup({ statuses: [...statusOptions], period: "all", from: "", to: "" })}><Printer size={16} />Print {section} list</button> : null}
     </div>
     <p className="orders-help">{section === "testing" ? "Finished batches, from production's final output, waiting for testing. Pass and Failed both send a batch to Release, where QA releases or rejects it. A batch under investigation stays here until it is passed or failed." : "Batches QC has finished with. Passed batches: the release quantity is the final output; change it if needed, then release. Failed batches: reject them."}</p>
     {message ? <p role={message.error ? "alert" : "status"} className={message.error ? undefined : "calendar-notice"}>{message.text}</p> : null}
@@ -90,62 +192,100 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
         {access.release ? <button type="button" className="primary-button" onClick={() => report(onConfirmFormula(job.id), `${job.number}: same formula confirmed. Production can plan it now.`)}><CheckCircle2 size={16} />Confirm same formula</button> : null}
       </li>)}</ul>
     </section> : null}
-    <div className="orders-table-scroll" tabIndex={0} role="region" aria-label={`${section === "testing" ? "Testing" : "Release"} list`}>
-      <table className="job-order-table status-table">
-        <thead><tr>
-          <th scope="col">PJO no.</th><th scope="col">Product</th><th scope="col">Batch no.</th><th scope="col">Job order no.</th><th scope="col">PO</th>
-          <th scope="col" className="numeric">Final output</th><th scope="col" className="numeric">Final yield</th>
-          {section === "testing" ? <><th scope="col">Finished</th><th scope="col">Status</th></> : <><th scope="col">Testing result</th><th scope="col" className="numeric">Release quantity</th></>}
-          <th scope="col"><span className="admin-sr-only">Action</span></th>
-        </tr></thead>
+    <dialog ref={printDialog} className="activity-dialog print-dialog" aria-labelledby="status-print-title" onClose={() => setPrintSetup(null)}>
+    {printSetup ? <div className="print-chooser">
+      <header className="print-chooser-head">
+        <div><h2 id="status-print-title">Print {section} list</h2><p>Choose the batches, then print or download them in Excel.</p></div>
+        <button type="button" className="icon-button" aria-label="Close" title="Close" onClick={() => setPrintSetup(null)}><X size={18} /></button>
+      </header>
+      <section className="print-chooser-step" aria-labelledby="status-print-statuses">
+        <div className="print-chooser-label"><h3 id="status-print-statuses">Batches to include</h3>
+          <button type="button" className="link-button" onClick={() => setPrintSetup({ ...printSetup, statuses: printSetup.statuses.length === statusOptions.length ? [] : [...statusOptions] })}>{printSetup.statuses.length === statusOptions.length ? "Clear all" : "Select all"}</button></div>
+        <div className="choice-chips" role="group" aria-label="Batches to include">
+          {statusOptions.map((status) => { const on = printSetup.statuses.includes(status); return <button key={status} type="button" className="choice-chip" aria-pressed={on}
+            onClick={() => setPrintSetup({ ...printSetup, statuses: on ? printSetup.statuses.filter((item) => item !== status) : [...printSetup.statuses, status] })}>
+            <span className="choice-check" aria-hidden="true">{on ? "✓" : ""}</span>{status}<span className="choice-count">{statusCounts[status]}</span></button>; })}
+        </div>
+      </section>
+      <section className="print-chooser-step" aria-labelledby="status-print-period">
+        <div className="print-chooser-label"><h3 id="status-print-period">{dateLabel}</h3></div>
+        <div className="choice-chips" role="radiogroup" aria-label={dateLabel}>
+          {PRINT_PERIODS.map((item) => <button key={item.key} type="button" role="radio" className="choice-chip" aria-checked={printSetup.period === item.key} aria-pressed={printSetup.period === item.key}
+            onClick={() => setPrintSetup({ ...printSetup, period: item.key, ...(item.key === "custom" ? {} : periodRange(item.key, today)) })}>{item.label}</button>)}
+        </div>
+        {printSetup.period === "custom" ? <div className="print-chooser-dates">
+          <label>From<input type="date" value={printSetup.from} max={printSetup.to || undefined} onChange={(event) => setPrintSetup({ ...printSetup, from: event.target.value })} /></label>
+          <label>To<input type="date" value={printSetup.to} min={printSetup.from || undefined} onChange={(event) => setPrintSetup({ ...printSetup, to: event.target.value })} /></label>
+        </div> : <p className="print-chooser-range">{printSetup.from || printSetup.to ? `${day(printSetup.from)} – ${day(printSetup.to)}` : "Every batch on the list, whenever it was " + dateLabel.toLowerCase()}</p>}
+      </section>
+      <section className={`print-chooser-summary${toPrint.length ? "" : " empty"}`} aria-live="polite">
+        <strong>{toPrint.length}</strong>
+        <span>{toPrint.length ? <>batch{toPrint.length === 1 ? "" : "es"}, numbered 1, 2, 3 in the list's order</> : "No batches match these choices"}
+          {filtering ? <small>The list's searches and filters also apply.</small> : null}</span>
+      </section>
+      <footer className="print-chooser-actions">
+        <button type="button" className="calendar-button" onClick={() => setPrintSetup(null)}>Cancel</button>
+        <button type="button" className="calendar-button" disabled={!toPrint.length} onClick={() => void downloadExcel(toPrint, captionFor(printSetup))}><FileSpreadsheet size={16} />Download Excel</button>
+        <button type="button" className="primary-button" disabled={!toPrint.length} onClick={() => { printDialog.current?.close(); setPrintCaption(captionFor(printSetup)); setPrintRows(toPrint.map((job) => job.id)); setPrinting((value) => value + 1); setPrintSetup(null); }}><Printer size={16} />Print</button>
+      </footer>
+    </div> : null}
+    </dialog>
+    <div className="orders-table-scroll status-table-scroll" tabIndex={0} role="region" aria-label={`${section === "testing" ? "Testing" : "Release"} list`}>
+      <table className="orders-table status-table">
+        <thead>
+          <tr>
+            <th scope="col" data-col="number">#</th>
+            {columns.map((column) => {
+              const active = sort.key === column.key;
+              const Icon = !active ? ArrowUpDown : sort.ascending ? ArrowUp : ArrowDown;
+              return <th scope="col" key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined} aria-sort={active ? sort.ascending ? "ascending" : "descending" : "none"}>
+                <button type="button" className="table-sort" title={column.key === "date" ? active && !sort.ascending ? "Newest first, click for oldest first" : "Oldest first, click for newest first" : `Sort by ${column.label.toLowerCase()}`}
+                  onClick={() => chooseSort({ key: column.key, ascending: active ? !sort.ascending : column.key !== "date" })}>{column.label}<Icon size={13} /></button>
+              </th>;
+            })}
+            <th scope="col" data-col="action"><span className="admin-sr-only">Action</span></th>
+            <th scope="col" data-col="remarks">Remarks</th>
+          </tr>
+          <tr className="orders-filter-row">
+            <th scope="col" data-col="number"><span className="admin-sr-only">Filters</span></th>
+            {columns.map((column) => <th scope="col" key={column.key} data-col={column.key}>
+              {column.filter?.kind === "text" ? <input type="search" aria-label={`Search ${column.label}`} placeholder="Search" value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })} /> : null}
+              {column.filter?.kind === "date" ? (() => { const date = column.filter.date; return <DateFilterPicker label={column.label} value={filters[column.key] ?? ""} dates={rows.map((job) => date(job))} onChange={(value) => setFilters({ ...filters, [column.key]: value })} />; })() : null}
+              {column.filter?.kind === "select" ? <select aria-label={`Filter ${column.label}`} value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })}><option value="">All</option>{column.filter.options.map((option) => <option key={option}>{option}</option>)}</select> : null}
+            </th>)}
+            <th scope="col" data-col="action">{filtering ? <button type="button" className="calendar-button" onClick={() => setFilters({})}><X size={14} />Clear</button> : null}</th>
+            <th scope="col" data-col="remarks"><input type="search" aria-label="Search remarks" placeholder="Search" value={filters.remarks ?? ""} onChange={(event) => setFilters({ ...filters, remarks: event.target.value })} /></th>
+          </tr>
+        </thead>
         <tbody>
-          {!rows.length ? <tr><td colSpan={10} className="empty-state">{section === "testing" ? "No batches waiting for testing." : "No batches waiting for release."}</td></tr> : null}
-          {rows.map((job) => {
-            const { order, product, output } = details(job);
-            const typed = quantities[job.id] ?? (output ? String(output.quantity) : "");
-            return <tr key={job.id}>
-              <th scope="row"><strong>{packingNumber(job)}</strong></th>
-              <td>{product}</td>
-              <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Not keyed in</span>}</td>
-              <td>{job.number}</td>
-              <td>{order?.poNumber ?? "-"}{order?.customerName ? <small>{order.customerName}</small> : null}</td>
-              <td className="numeric">{output ? `${amount(output.quantity)} ${output.uom}` : "-"}</td>
-              <td className="numeric">{finalYieldCell(job)}</td>
-              {section === "testing" ? <><td>{day(finishedOn(job, lines, transfers))}</td>
-                <td>{testResult(job) === "Under investigation" ? <><span className="badge warning">Under investigation</span><small>since {day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></> : <span className="badge neutral">Awaiting testing</span>}</td></> : <>
-                <td>{testResult(job) === "Failed" ? <span className="badge danger">Failed testing</span> : <span className="badge success">Passed</span>}<small>{day(job.testedAt)}{job.testedBy ? ` · ${job.testedBy}` : ""}</small></td>
-                <td className="numeric">{testResult(job) === "Failed" ? <span className="route-muted">Not for release</span> : (() => {
-                  const parts = jobParts(job), done = parts.filter((part) => releaseFor(job, part.orderId)).length;
-                  return parts.length > 1 || done ? <span>{done} of {parts.length} POs released</span> : <span className="route-muted">Not released</span>;
-                })()}</td>
-              </>}
-              <td>{section === "testing"
-                ? access.passTesting ? <span className="status-actions">
-                  <button type="button" className="primary-button" onClick={() => report(onTest(job.id, "Passed"), `${packingNumber(job)} passed testing and moved to Release.`)}><CheckCircle2 size={16} />Pass</button>
-                  <button type="button" className="calendar-button danger-button" onClick={() => { if (window.confirm(`Mark ${packingNumber(job)} as failed testing? It goes to Release for QA to reject.`)) report(onTest(job.id, "Failed"), `${packingNumber(job)} failed testing and moved to Release, for QA to reject.`); }}><XCircle size={16} />Failed</button>
-                  {testResult(job) !== "Under investigation" ? <button type="button" className="calendar-button" onClick={() => report(onTest(job.id, "Under investigation"), `${packingNumber(job)} is under investigation. Pass or fail it when the result is known.`)}><Search size={16} />Under investigation</button> : null}
-                </span> : null
-                : access.release && testResult(job) === "Failed" ? <button type="button" className="calendar-button danger-button" onClick={() => { if (window.confirm(`Reject ${packingNumber(job)}? It failed testing and will be closed as rejected.`)) report(onReject(job.id), `${packingNumber(job)} rejected.`); }}><XCircle size={16} />Rejected</button>
-                : access.release ? <button type="button" className={releasing === job.id ? "calendar-button" : "primary-button"} aria-expanded={releasing === job.id} onClick={() => setReleasing(releasing === job.id ? null : job.id)}>
-                  <PackageCheck size={16} />{releasing === job.id ? "Close" : "Release"}</button> : null}</td>
-            </tr>;
-          }).flatMap((row, index) => {
-            const job = rows[index];
-            return releasing === job.id && section === "release" && testResult(job) !== "Failed" ? [row, <tr key={`${job.id}-release`} className="release-panel-row"><td colSpan={9}>
+          {!table.length ? <tr><td colSpan={columns.length + 3} className="empty-state">{rows.length ? "No batches match these filters." : section === "testing" ? "No batches waiting for testing." : "No batches waiting for release."}</td></tr> : null}
+          {page.map((job) => <Fragment key={job.id}>
+            <tr>
+              <td data-col="number">{position.get(job.id)}</td>
+              {columns.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(job)}</td>)}
+              <td data-col="action">{choices(job).length ? <select className="status-action-select" aria-label={`Update ${packingNumber(job)}`} value="" onChange={(event) => act(job, event.target.value)}>
+                <option value="" disabled>{section === "testing" ? "Update result…" : "Choose action…"}</option>
+                {choices(job).map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+              </select> : <span className="route-muted">-</span>}</td>
+              <td data-col="remarks">{job.notes ? <span className="cell-clamp" title={job.notes}>{job.notes}</span> : <span className="route-muted">-</span>}</td>
+            </tr>
+            {releasing === job.id && section === "release" && testResult(job) !== "Failed" ? <tr className="release-panel-row"><td colSpan={columns.length + 3}>
               <ReleasePanel job={job} orders={orders} lines={lines} transfers={transfers} directory={directory} formulaWaiting={formulaPending(job, orders)}
                 onRelease={(entries, text) => { const errors = onRelease(job.id, entries); report(errors, text); if (!errors.length && entries.length === jobParts(job).filter((part) => !releaseFor(job, part.orderId)).length) setReleasing(null); return errors; }} />
-            </td></tr>] : [row];
-          })}
+            </td></tr> : null}
+          </Fragment>)}
         </tbody>
       </table>
     </div>
+    {pager}
     {printing && typeof document !== "undefined" ? createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
-      <header><h1>{section === "testing" ? "Testing" : "Release"} list</h1><p>{rows.length} batch{rows.length === 1 ? "" : "es"} pending · printed {formatDateTime(new Date())}</p></header>
+      <header><h1>{listTitle}</h1><p>{printCaption} · {printRows.length} batch{printRows.length === 1 ? "" : "es"} · printed {formatDateTime(new Date())}</p></header>
       <table className="print-orders-table">
-        <thead><tr><th>PJO no.</th><th>Product</th><th>Batch no.</th><th>Job order no.</th><th>PO</th><th>Final output</th><th>Final yield</th>{section === "testing" ? <><th>Finished</th><th>Status</th></> : <><th>Passed testing</th><th>Release quantity</th></>}</tr></thead>
-        <tbody>{rows.map((job) => { const { order, product, output } = details(job); return <tr key={job.id}>
-          <td>{packingNumber(job)}</td><td>{product}</td><td>{job.batchNumber ?? ""}</td><td>{job.number}</td><td>{order?.poNumber ?? ""}</td><td>{output ? `${amount(output.quantity)} ${output.uom}` : ""}</td><td>{yieldText(job)}</td>
+        <thead><tr><th>#</th><th>PJO no.</th><th>Product</th><th>Batch no.</th><th>Job order no.</th><th>PO</th><th>Final output</th><th>Final yield</th>{section === "testing" ? <><th>Finished</th><th>Status</th></> : <><th>Passed testing</th><th>Release quantity</th></>}<th>Remarks</th></tr></thead>
+        <tbody>{table.filter((job) => printRows.includes(job.id)).map((job, index) => { const { order, product, output } = details(job); return <tr key={job.id}>
+          <td>{index + 1}</td><td>{packingNumber(job)}</td><td>{product}</td><td>{job.batchNumber ?? ""}</td><td>{job.number}</td><td>{order?.poNumber ?? ""}</td><td>{output ? `${amount(output.quantity)} ${output.uom}` : ""}</td><td>{yieldText(job)}</td>
           {section === "testing" ? <><td>{day(finishedOn(job, lines, transfers))}</td><td>{testResult(job) ?? "Awaiting testing"}</td></> : <><td>{day(job.testedAt)}</td><td>{quantities[job.id] ?? (output ? amount(output.quantity) : "")} {output?.uom ?? ""}</td></>}
+          <td>{job.notes ?? ""}</td>
         </tr>; })}</tbody>
       </table>
     </section>, document.body) : null}
@@ -226,6 +366,7 @@ function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: 
     ...Object.fromEntries(processes.map((process) => [process.id, { min: text(limits.byProcess[process.id]?.min), max: text(limits.byProcess[process.id]?.max) }])),
     final: { min: text(limits.final?.min), max: text(limits.final?.max) }
   }));
+  const [fill, setFill] = useState(text(limits.fillTolerance));
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const read = (value: string) => value.trim() === "" ? undefined : Number(value);
   const range = (key: string): YieldRange => ({ ...(read(draft[key].min) !== undefined ? { min: read(draft[key].min) } : {}), ...(read(draft[key].max) !== undefined ? { max: read(draft[key].max) } : {}) });
@@ -237,7 +378,7 @@ function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: 
   </tr>;
   return <section className="workspace-panel yield-limits">
     <div className="panel-title"><h2>Yield limits</h2></div>
-    <p className="orders-help">The acceptable yield at each process, as a % of theoretical (what it made against what the batch formula gives at that process with no loss, as in the batch record), and for the batch's final yield. Results within range show green, within reach of a limit amber, outside red. When a process comes out outside its range, production adds a deviation note as they save it. The step yield (against what the process before handed over) is shown beside it to find where a loss happened; it has no limits.</p>
+    <p className="orders-help">The acceptable yield at each process, as a % of theoretical (what it made against what the batch formula gives at that process with no loss, as in the batch record), and for the batch's final yield. Results within range show green, within reach of a limit amber, outside red. When a process comes out outside its range, production adds a deviation note as they save it. The step yield (against what the process before handed over) is shown beside it to find where a loss happened; it has no limits. Capsules weighed with their empty shell also show their average net fill, in bold red when it is further from target than the tolerance below.</p>
     {message ? <p role={message.error ? "alert" : "status"} className={message.error ? undefined : "calendar-notice"}>{message.text}</p> : null}
     <div className="orders-table-scroll" role="region" aria-label="Yield limits">
       <table className="orders-table yield-limits-table">
@@ -246,6 +387,10 @@ function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: 
           {processes.map((process) => row(process.id, process.name, "% of theoretical"))}
           <tr className="yield-limits-final-gap"><td colSpan={4} /></tr>
           {row("final", "Final yield", "Last stage's good output ÷ batch quantity")}
+          <tr className="yield-limits-final-gap"><td colSpan={4} /></tr>
+          <tr><th scope="row">Capsule fill weight<small>Average net fill (filled capsule less the empty shell) against the unit weight on the PO</small></th>
+            <td className="numeric" colSpan={2}><span className="yield-limit-input">± <input type="number" min="0.1" max="50" step="0.1" disabled={!editable} aria-label="Capsule fill weight tolerance %" value={fill} placeholder={String(DEFAULT_FILL_TOLERANCE)} onChange={(event) => setFill(event.target.value)} />%</span></td>
+            <td>{fill.trim() ? `Within ±${Number(fill)}% of target` : <span className="route-muted">±{DEFAULT_FILL_TOLERANCE}% until set</span>}. Beyond it shows in bold red.</td></tr>
         </tbody>
       </table>
     </div>
@@ -257,7 +402,9 @@ function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: 
         if ([min, max].some((value) => value !== undefined && (!Number.isFinite(value) || value < 0 || value > 200))) { setMessage({ text: `${name}: limits are percentages from 0 to 200.`, error: true }); return; }
         if (min !== undefined && max !== undefined && min > max) { setMessage({ text: `${name}: the minimum is above the maximum.`, error: true }); return; }
       }
-      const next: YieldLimits = { byProcess: Object.fromEntries(processes.map((process) => [process.id, range(process.id)]).filter(([, value]) => Object.keys(value as object).length)), ...(Object.keys(range("final")).length ? { final: range("final") } : {}) };
+      const tolerance = read(fill);
+      if (tolerance !== undefined && (!Number.isFinite(tolerance) || tolerance <= 0 || tolerance > 50)) { setMessage({ text: "Capsule fill weight: the tolerance is a percentage above 0, up to 50.", error: true }); return; }
+      const next: YieldLimits = { byProcess: Object.fromEntries(processes.map((process) => [process.id, range(process.id)]).filter(([, value]) => Object.keys(value as object).length)), ...(Object.keys(range("final")).length ? { final: range("final") } : {}), ...(tolerance !== undefined ? { fillTolerance: tolerance } : {}) };
       const errors = onSave(next);
       setMessage(errors.length ? { text: errors.join(" "), error: true } : { text: "Yield limits saved. Results across the scheduler follow them now.", error: false });
     }}>Save yield limits</button></div> : <p className="route-muted">Only QA can change these limits.</p>}

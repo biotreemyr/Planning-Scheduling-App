@@ -147,10 +147,7 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
   }
   function pointerDown(event: ReactPointerEvent<HTMLDivElement>, line: PlanLine, name: string) {
     if (event.button !== 0 || moving || drag.current) return;
-    if (!canMovePlan(line, canPlan)) {
-      if (line.completedAt) setNotice(`${name} is completed, so it is locked and cannot be moved.`);
-      return;
-    }
+    if (!canMovePlan(line, canPlan)) return;
     // Mouse and pen pick the card up on movement; a finger picks it up from the grip at once, or by holding the card.
     const resize = !!(event.target as HTMLElement).closest(".plan-list-resize");
     const grip = resize || !!(event.target as HTMLElement).closest(".plan-list-grip");
