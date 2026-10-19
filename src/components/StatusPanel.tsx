@@ -1,7 +1,10 @@
 "use client";
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, PackageCheck, Printer, Search, X, XCircle } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, FileSpreadsheet, PackageCheck, Printer, X, XCircle } from "lucide-react";
+import { PRINT_PERIODS, periodRange, type PrintPeriod } from "@/lib/services/printPeriods";
+import { statusWorkbook } from "@/lib/services/statusExcel";
+import { localDateKey } from "@/lib/services/calendarPrint";
 import { usePager } from "./Pager";
 import { DateFilterPicker } from "./DateFilterPicker";
 import { matchesDateFilter } from "@/lib/services/dateFilter";
@@ -53,13 +56,19 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   const [printing, setPrinting] = useState(0);
   const [filters, setFilters] = useState<Record<string, string>>({});
   // Newest first by default: the latest finished (testing) or tested (release) batch on top.
-  const [sort, setSort] = useState<Sort>({ key: "number", ascending: false });
+  const [sort, setSort] = useState<Sort>({ key: "date", ascending: false });
   useEffect(() => {
     setFilters({});
-    try { const saved = JSON.parse(localStorage.getItem(sortStorage(chosen)) ?? "null"); setSort(saved && typeof saved.key === "string" ? { key: saved.key, ascending: !!saved.ascending } : { key: "number", ascending: false }); } catch { setSort({ key: "number", ascending: false }); }
+    try { const saved = JSON.parse(localStorage.getItem(sortStorage(chosen)) ?? "null"); setSort(saved && typeof saved.key === "string" ? { key: saved.key, ascending: !!saved.ascending } : { key: "date", ascending: false }); } catch { setSort({ key: "date", ascending: false }); }
   }, [chosen]);
   const chooseSort = (next: Sort) => { setSort(next); try { localStorage.setItem(sortStorage(section), JSON.stringify(next)); } catch { /* not remembered */ } };
   useEffect(() => { if (printing) window.print(); }, [printing]);
+  // Print or Excel first asks which batches: by status, and when they finished (testing) or were tested (release).
+  const [printSetup, setPrintSetup] = useState<{ statuses: string[]; period: PrintPeriod; from: string; to: string } | null>(null);
+  const [printRows, setPrintRows] = useState<string[]>([]);
+  const [printCaption, setPrintCaption] = useState("");
+  const printDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const box = printDialog.current; if (!box) return; if (printSetup && !box.open) box.showModal(); if (!printSetup && box.open) box.close(); }, [printSetup]);
   // The batch's final yield against QA's limits, and whether any process came out outside them,
   // so testing and release see it without opening the order. No limits set says so.
   const yieldOf = (job: JobOrder) => {
@@ -85,10 +94,10 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   };
   // The day a batch joined the list: finished (testing) or tested (release). Numbers run oldest = 1.
   const listedOn = (job: JobOrder) => (section === "testing" ? finishedOn(job, lines, transfers) : job.testedAt) ?? "";
-  const numbers = new Map([...rows].sort((a, b) => listedOn(a).localeCompare(listedOn(b)) || a.number.localeCompare(b.number)).map((job, index) => [job.id, index + 1]));
+  // Rows are numbered 1, 2, 3 down the list as shown (filled in once the list is sorted).
+  const position = new Map<string, number>();
   const statusOf = (job: JobOrder) => section === "testing" ? testResult(job) === "Under investigation" ? "Under investigation" : "Awaiting testing" : testResult(job) === "Failed" ? "Failed testing" : "Passed";
   const columns: StatusColumn[] = [
-    { key: "number", label: "#", sort: (job) => numbers.get(job.id) ?? 0, cell: (job) => numbers.get(job.id) },
     { key: "date", label: section === "testing" ? "Finished" : "Tested", sort: listedOn, cell: (job) => day(listedOn(job)) || <span className="route-muted">-</span>, filter: { kind: "date", date: (job) => listedOn(job) || undefined } },
     { key: "pjo", label: "PJO no.", sort: (job) => packingNumber(job), cell: (job) => <strong>{packingNumber(job)}</strong>, filter: { kind: "text", text: (job) => packingNumber(job) } },
     { key: "product", label: "Product", sort: (job) => details(job).product, cell: (job) => details(job).product, filter: { kind: "text", text: (job) => details(job).product } },
@@ -117,8 +126,47 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   }) && (!filters.remarks?.trim() || (job.notes ?? "").toLowerCase().includes(filters.remarks.trim().toLowerCase()))).sort((a, b) => {
     const x = sorter.sort(a), y = sorter.sort(b);
     const result = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
-    return (result || (numbers.get(a.id) ?? 0) - (numbers.get(b.id) ?? 0)) * (sort.ascending ? 1 : -1);
+    return (result || a.number.localeCompare(b.number)) * (sort.ascending ? 1 : -1);
   });
+  table.forEach((job, index) => position.set(job.id, index + 1));
+  const statusOptions = section === "testing" ? ["Awaiting testing", "Under investigation"] : ["Passed", "Failed testing"];
+  const dateLabel = section === "testing" ? "Finished" : "Tested";
+  const listTitle = `${section === "testing" ? "Testing" : "Release"} list`;
+  const today = localDateKey(new Date());
+  const inPeriod = (job: JobOrder) => { const date = listedOn(job).slice(0, 10); return !printSetup || ((!printSetup.from || (!!date && date >= printSetup.from)) && (!printSetup.to || (!!date && date <= printSetup.to))); };
+  const toPrint = printSetup ? table.filter((job) => printSetup.statuses.includes(statusOf(job)) && inPeriod(job)) : [];
+  const statusCounts = Object.fromEntries(statusOptions.map((status) => [status, table.filter((job) => statusOf(job) === status && inPeriod(job)).length]));
+  const captionFor = (setup: NonNullable<typeof printSetup>) => [
+    setup.statuses.length === statusOptions.length ? "All statuses" : setup.statuses.join(", "),
+    setup.from || setup.to ? `${dateLabel} ${setup.from ? day(setup.from) : "…"} – ${setup.to ? day(setup.to) : "…"}` : `${dateLabel}: all dates`,
+    ...(filtering ? ["with the list's searches and filters"] : [])
+  ].join(" · ");
+  async function downloadExcel(jobs: JobOrder[], caption: string) {
+    const book = await statusWorkbook(jobs.map((job) => {
+      const { order, product, output } = details(job);
+      const parts = jobParts(job), done = parts.filter((part) => releaseFor(job, part.orderId)).length;
+      return { date: listedOn(job) || undefined, pjo: packingNumber(job), product, batch: job.batchNumber ?? "", job: job.number, po: order?.poNumber ?? "", customer: order?.customerName ?? "",
+        output: output?.quantity, outputUom: output?.uom ?? "", finalYield: yieldOf(job).final?.percent, status: statusOf(job),
+        release: testResult(job) === "Failed" ? "Not for release" : parts.length > 1 || done ? `${done} of ${parts.length} POs released` : "Not released", remarks: job.notes ?? "" };
+    }), { title: listTitle, caption, dateLabel, release: section === "release", at: formatDateTime(new Date()) });
+    const url = URL.createObjectURL(new Blob([await book.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `${section}-list-${today}.xlsx`; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  // What QA/QC can do next with a batch, chosen from a drop-down at the end of its row.
+  const act = (job: JobOrder, choice: string) => {
+    const name = packingNumber(job);
+    if (choice === "pass") report(onTest(job.id, "Passed"), `${name} passed testing and moved to Release.`);
+    if (choice === "fail" && window.confirm(`Mark ${name} as failed testing? It goes to Release for QA to reject.`)) report(onTest(job.id, "Failed"), `${name} failed testing and moved to Release, for QA to reject.`);
+    if (choice === "investigate") report(onTest(job.id, "Under investigation"), `${name} is under investigation. Pass or fail it when the result is known.`);
+    if (choice === "release") setReleasing(job.id);
+    if (choice === "close") setReleasing(null);
+    if (choice === "reject" && window.confirm(`Reject ${name}? It failed testing and will be closed as rejected.`)) report(onReject(job.id), `${name} rejected.`);
+  };
+  const choices = (job: JobOrder): { value: string; label: string }[] => section === "testing"
+    ? access.passTesting ? [{ value: "pass", label: "Pass" }, { value: "fail", label: "Failed" }, ...(testResult(job) !== "Under investigation" ? [{ value: "investigate", label: "Under investigation" }] : [])] : []
+    : !access.release ? [] : testResult(job) === "Failed" ? [{ value: "reject", label: "Reject" }] : releasing === job.id ? [{ value: "close", label: "Close release" }] : [{ value: "release", label: "Release to POs…" }];
   const { rows: page, pager } = usePager(table, `${section}|${JSON.stringify(filters)}|${sort.key}|${sort.ascending}`, [50, 100]);
   const report = (errors: string[], text: string) => setMessage(errors.length ? { text: errors.join(" "), error: true } : { text, error: false });
   if (!access.viewTesting && !access.viewRelease) return null;
@@ -131,7 +179,7 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
         <button type="button" aria-pressed={section === "testing"} onClick={() => onSection("testing")}>Testing</button>
         <button type="button" aria-pressed={section === "release"} onClick={() => onSection("release")}>Release</button>
       </div> : null}
-      {canPrint ? <button type="button" className="calendar-button" onClick={() => setPrinting((value) => value + 1)}><Printer size={16} />Print {section} list</button> : null}
+      {canPrint ? <button type="button" className="calendar-button" aria-expanded={!!printSetup} title="Choose which batches to print or download in Excel" onClick={() => setPrintSetup({ statuses: [...statusOptions], period: "all", from: "", to: "" })}><Printer size={16} />Print {section} list</button> : null}
     </div>
     <p className="orders-help">{section === "testing" ? "Finished batches, from production's final output, waiting for testing. Pass and Failed both send a batch to Release, where QA releases or rejects it. A batch under investigation stays here until it is passed or failed." : "Batches QC has finished with. Passed batches: the release quantity is the final output; change it if needed, then release. Failed batches: reject them."}</p>
     {message ? <p role={message.error ? "alert" : "status"} className={message.error ? undefined : "calendar-notice"}>{message.text}</p> : null}
@@ -144,22 +192,62 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
         {access.release ? <button type="button" className="primary-button" onClick={() => report(onConfirmFormula(job.id), `${job.number}: same formula confirmed. Production can plan it now.`)}><CheckCircle2 size={16} />Confirm same formula</button> : null}
       </li>)}</ul>
     </section> : null}
+    <dialog ref={printDialog} className="activity-dialog print-dialog" aria-labelledby="status-print-title" onClose={() => setPrintSetup(null)}>
+    {printSetup ? <div className="print-chooser">
+      <header className="print-chooser-head">
+        <div><h2 id="status-print-title">Print {section} list</h2><p>Choose the batches, then print or download them in Excel.</p></div>
+        <button type="button" className="icon-button" aria-label="Close" title="Close" onClick={() => setPrintSetup(null)}><X size={18} /></button>
+      </header>
+      <section className="print-chooser-step" aria-labelledby="status-print-statuses">
+        <div className="print-chooser-label"><h3 id="status-print-statuses">Batches to include</h3>
+          <button type="button" className="link-button" onClick={() => setPrintSetup({ ...printSetup, statuses: printSetup.statuses.length === statusOptions.length ? [] : [...statusOptions] })}>{printSetup.statuses.length === statusOptions.length ? "Clear all" : "Select all"}</button></div>
+        <div className="choice-chips" role="group" aria-label="Batches to include">
+          {statusOptions.map((status) => { const on = printSetup.statuses.includes(status); return <button key={status} type="button" className="choice-chip" aria-pressed={on}
+            onClick={() => setPrintSetup({ ...printSetup, statuses: on ? printSetup.statuses.filter((item) => item !== status) : [...printSetup.statuses, status] })}>
+            <span className="choice-check" aria-hidden="true">{on ? "✓" : ""}</span>{status}<span className="choice-count">{statusCounts[status]}</span></button>; })}
+        </div>
+      </section>
+      <section className="print-chooser-step" aria-labelledby="status-print-period">
+        <div className="print-chooser-label"><h3 id="status-print-period">{dateLabel}</h3></div>
+        <div className="choice-chips" role="radiogroup" aria-label={dateLabel}>
+          {PRINT_PERIODS.map((item) => <button key={item.key} type="button" role="radio" className="choice-chip" aria-checked={printSetup.period === item.key} aria-pressed={printSetup.period === item.key}
+            onClick={() => setPrintSetup({ ...printSetup, period: item.key, ...(item.key === "custom" ? {} : periodRange(item.key, today)) })}>{item.label}</button>)}
+        </div>
+        {printSetup.period === "custom" ? <div className="print-chooser-dates">
+          <label>From<input type="date" value={printSetup.from} max={printSetup.to || undefined} onChange={(event) => setPrintSetup({ ...printSetup, from: event.target.value })} /></label>
+          <label>To<input type="date" value={printSetup.to} min={printSetup.from || undefined} onChange={(event) => setPrintSetup({ ...printSetup, to: event.target.value })} /></label>
+        </div> : <p className="print-chooser-range">{printSetup.from || printSetup.to ? `${day(printSetup.from)} – ${day(printSetup.to)}` : "Every batch on the list, whenever it was " + dateLabel.toLowerCase()}</p>}
+      </section>
+      <section className={`print-chooser-summary${toPrint.length ? "" : " empty"}`} aria-live="polite">
+        <strong>{toPrint.length}</strong>
+        <span>{toPrint.length ? <>batch{toPrint.length === 1 ? "" : "es"}, numbered 1, 2, 3 in the list's order</> : "No batches match these choices"}
+          {filtering ? <small>The list's searches and filters also apply.</small> : null}</span>
+      </section>
+      <footer className="print-chooser-actions">
+        <button type="button" className="calendar-button" onClick={() => setPrintSetup(null)}>Cancel</button>
+        <button type="button" className="calendar-button" disabled={!toPrint.length} onClick={() => void downloadExcel(toPrint, captionFor(printSetup))}><FileSpreadsheet size={16} />Download Excel</button>
+        <button type="button" className="primary-button" disabled={!toPrint.length} onClick={() => { printDialog.current?.close(); setPrintCaption(captionFor(printSetup)); setPrintRows(toPrint.map((job) => job.id)); setPrinting((value) => value + 1); setPrintSetup(null); }}><Printer size={16} />Print</button>
+      </footer>
+    </div> : null}
+    </dialog>
     <div className="orders-table-scroll status-table-scroll" tabIndex={0} role="region" aria-label={`${section === "testing" ? "Testing" : "Release"} list`}>
       <table className="orders-table status-table">
         <thead>
           <tr>
+            <th scope="col" data-col="number">#</th>
             {columns.map((column) => {
               const active = sort.key === column.key;
               const Icon = !active ? ArrowUpDown : sort.ascending ? ArrowUp : ArrowDown;
               return <th scope="col" key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined} aria-sort={active ? sort.ascending ? "ascending" : "descending" : "none"}>
-                <button type="button" className="table-sort" title={column.key === "number" ? active && !sort.ascending ? "Newest first, click for oldest first" : "Oldest first, click for newest first" : `Sort by ${column.label.toLowerCase()}`}
-                  onClick={() => chooseSort({ key: column.key, ascending: active ? !sort.ascending : column.key !== "number" && column.key !== "date" })}>{column.label}<Icon size={13} /></button>
+                <button type="button" className="table-sort" title={column.key === "date" ? active && !sort.ascending ? "Newest first, click for oldest first" : "Oldest first, click for newest first" : `Sort by ${column.label.toLowerCase()}`}
+                  onClick={() => chooseSort({ key: column.key, ascending: active ? !sort.ascending : column.key !== "date" })}>{column.label}<Icon size={13} /></button>
               </th>;
             })}
             <th scope="col" data-col="action"><span className="admin-sr-only">Action</span></th>
             <th scope="col" data-col="remarks">Remarks</th>
           </tr>
           <tr className="orders-filter-row">
+            <th scope="col" data-col="number"><span className="admin-sr-only">Filters</span></th>
             {columns.map((column) => <th scope="col" key={column.key} data-col={column.key}>
               {column.filter?.kind === "text" ? <input type="search" aria-label={`Search ${column.label}`} placeholder="Search" value={filters[column.key] ?? ""} onChange={(event) => setFilters({ ...filters, [column.key]: event.target.value })} /> : null}
               {column.filter?.kind === "date" ? (() => { const date = column.filter.date; return <DateFilterPicker label={column.label} value={filters[column.key] ?? ""} dates={rows.map((job) => date(job))} onChange={(value) => setFilters({ ...filters, [column.key]: value })} />; })() : null}
@@ -170,22 +258,18 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
           </tr>
         </thead>
         <tbody>
-          {!table.length ? <tr><td colSpan={columns.length + 2} className="empty-state">{rows.length ? "No batches match these filters." : section === "testing" ? "No batches waiting for testing." : "No batches waiting for release."}</td></tr> : null}
+          {!table.length ? <tr><td colSpan={columns.length + 3} className="empty-state">{rows.length ? "No batches match these filters." : section === "testing" ? "No batches waiting for testing." : "No batches waiting for release."}</td></tr> : null}
           {page.map((job) => <Fragment key={job.id}>
             <tr>
+              <td data-col="number">{position.get(job.id)}</td>
               {columns.map((column) => <td key={column.key} data-col={column.key} className={column.numeric ? "numeric" : undefined}>{column.cell(job)}</td>)}
-              <td data-col="action">{section === "testing"
-                ? access.passTesting ? <span className="status-actions">
-                  <button type="button" className="primary-button" onClick={() => report(onTest(job.id, "Passed"), `${packingNumber(job)} passed testing and moved to Release.`)}><CheckCircle2 size={16} />Pass</button>
-                  <button type="button" className="calendar-button danger-button" onClick={() => { if (window.confirm(`Mark ${packingNumber(job)} as failed testing? It goes to Release for QA to reject.`)) report(onTest(job.id, "Failed"), `${packingNumber(job)} failed testing and moved to Release, for QA to reject.`); }}><XCircle size={16} />Failed</button>
-                  {testResult(job) !== "Under investigation" ? <button type="button" className="calendar-button" onClick={() => report(onTest(job.id, "Under investigation"), `${packingNumber(job)} is under investigation. Pass or fail it when the result is known.`)}><Search size={16} />Under investigation</button> : null}
-                </span> : null
-                : access.release && testResult(job) === "Failed" ? <button type="button" className="calendar-button danger-button" onClick={() => { if (window.confirm(`Reject ${packingNumber(job)}? It failed testing and will be closed as rejected.`)) report(onReject(job.id), `${packingNumber(job)} rejected.`); }}><XCircle size={16} />Rejected</button>
-                : access.release ? <button type="button" className={releasing === job.id ? "calendar-button" : "primary-button"} aria-expanded={releasing === job.id} onClick={() => setReleasing(releasing === job.id ? null : job.id)}>
-                  <PackageCheck size={16} />{releasing === job.id ? "Close" : "Release"}</button> : null}</td>
+              <td data-col="action">{choices(job).length ? <select className="status-action-select" aria-label={`Update ${packingNumber(job)}`} value="" onChange={(event) => act(job, event.target.value)}>
+                <option value="" disabled>{section === "testing" ? "Update result…" : "Choose action…"}</option>
+                {choices(job).map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+              </select> : <span className="route-muted">-</span>}</td>
               <td data-col="remarks">{job.notes ? <span className="cell-clamp" title={job.notes}>{job.notes}</span> : <span className="route-muted">-</span>}</td>
             </tr>
-            {releasing === job.id && section === "release" && testResult(job) !== "Failed" ? <tr className="release-panel-row"><td colSpan={columns.length + 2}>
+            {releasing === job.id && section === "release" && testResult(job) !== "Failed" ? <tr className="release-panel-row"><td colSpan={columns.length + 3}>
               <ReleasePanel job={job} orders={orders} lines={lines} transfers={transfers} directory={directory} formulaWaiting={formulaPending(job, orders)}
                 onRelease={(entries, text) => { const errors = onRelease(job.id, entries); report(errors, text); if (!errors.length && entries.length === jobParts(job).filter((part) => !releaseFor(job, part.orderId)).length) setReleasing(null); return errors; }} />
             </td></tr> : null}
@@ -195,10 +279,10 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
     </div>
     {pager}
     {printing && typeof document !== "undefined" ? createPortal(<section className="calendar-print-sheet print-orders" aria-hidden="true">
-      <header><h1>{section === "testing" ? "Testing" : "Release"} list</h1><p>{table.length} batch{table.length === 1 ? "" : "es"} pending{filtering ? " (filtered)" : ""} · printed {formatDateTime(new Date())}</p></header>
+      <header><h1>{listTitle}</h1><p>{printCaption} · {printRows.length} batch{printRows.length === 1 ? "" : "es"} · printed {formatDateTime(new Date())}</p></header>
       <table className="print-orders-table">
         <thead><tr><th>#</th><th>PJO no.</th><th>Product</th><th>Batch no.</th><th>Job order no.</th><th>PO</th><th>Final output</th><th>Final yield</th>{section === "testing" ? <><th>Finished</th><th>Status</th></> : <><th>Passed testing</th><th>Release quantity</th></>}<th>Remarks</th></tr></thead>
-        <tbody>{table.map((job, index) => { const { order, product, output } = details(job); return <tr key={job.id}>
+        <tbody>{table.filter((job) => printRows.includes(job.id)).map((job, index) => { const { order, product, output } = details(job); return <tr key={job.id}>
           <td>{index + 1}</td><td>{packingNumber(job)}</td><td>{product}</td><td>{job.batchNumber ?? ""}</td><td>{job.number}</td><td>{order?.poNumber ?? ""}</td><td>{output ? `${amount(output.quantity)} ${output.uom}` : ""}</td><td>{yieldText(job)}</td>
           {section === "testing" ? <><td>{day(finishedOn(job, lines, transfers))}</td><td>{testResult(job) ?? "Awaiting testing"}</td></> : <><td>{day(job.testedAt)}</td><td>{quantities[job.id] ?? (output ? amount(output.quantity) : "")} {output?.uom ?? ""}</td></>}
           <td>{job.notes ?? ""}</td>

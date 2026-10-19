@@ -1060,3 +1060,5 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .status-table [data-col="remarks"] { min-width: 220px; }
 /* Long text kept to two lines; the whole of it shows on pointing. */
 .cell-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* The next step for a batch, chosen at the end of its row. */
+.status-table .status-action-select { min-width: 170px; min-height: 32px; padding: 4px 8px; font-size: 13px; font-weight: 600; }
