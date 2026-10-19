@@ -139,7 +139,7 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
         raw: { number, trial: isNonProduction(orders.find((order) => order.id === line.productionOrderId)), priority: line.priority, completed: !!line.completedAt, warn: warnings?.get(line.id)?.join("\n") },
         // Process, then product, batch number, job order number and this process's quantity (actual once done).
         title: (() => { const facts = activityFacts(line, jobOrders, item?.uom); return `${line.activityType ? `${line.activityType}: ` : ""}${[item?.name ?? "Unknown product", facts.batchNumber, facts.jobNumber, facts.quantity].filter(Boolean).join(" · ")}`; })(),
-        start: line.plannedDate, end: lineEnd(line), isReadOnly: !canPlan || !!line.completedAt,
+        start: line.plannedDate, end: lineEnd(line), isReadOnly: !canPlan,
         color: "#1f2528", borderColor: color, backgroundColor: line.completedAt ? "#ecefed" : tint(color)
       };
     }));

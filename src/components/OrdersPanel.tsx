@@ -12,6 +12,7 @@ import { RecordPicker, type PickerColumn } from "./RecordPicker";
 import { usePager } from "./Pager";
 import { ordersWorkbook } from "@/lib/services/ordersExcel";
 import { batchYield, formatYield, limitText, type YieldTone } from "@/lib/services/yields";
+import { FillNote } from "./FillNote";
 import { useYieldLimits } from "./YieldLimitsContext";
 import { useDateCheck } from "./DateCheck";
 import { Who } from "./Who";
@@ -898,7 +899,7 @@ function OrderFlow({ order, orders, directory, jobOrders, lines, transfers, matr
             {stage?.ofTheoretical !== undefined ? chip(stage.ofTheoretical, stage.tone, `% of theoretical: ${stage.theoreticalWorking}${stage.limit ? ` · QA limits ${limitText(stage.limit)}` : ""}`, "Yield ") : null}
             {stage?.percent !== undefined ? <small className="yield-step" title={`Step yield: ${stage.working}`}>Step {formatYield(stage.percent)}{stage.powder ? " by powder" : ""}</small>
               : stage?.missing ? <small className="yield-chip yield-missing" title={`Yield can't be worked out: ${stage.missing}`}>Yield – · figure missing</small> : null}
-            {stage?.powder?.targetMg ? <small className="yield-step" title="Average net fill per capsule (filled weight less the empty shell) against the unit weight on the PO">Fill {stage.powder.fillMg.toLocaleString("en-MY", { maximumFractionDigits: 1 })} mg · target {stage.powder.targetMg.toLocaleString()}</small> : null}</>;
+            {stage?.powder?.targetMg ? <FillNote powder={stage.powder} /> : null}</>;
         };
         return <Fragment key={process.calendar.id}>{row(process.processName, cellView,
           <><div className="batch-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={`${process.processName} ${percent}% complete`}><span style={{ width: `${percent}%` }} /></div>

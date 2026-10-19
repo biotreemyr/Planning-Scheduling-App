@@ -21,7 +21,10 @@ import { isPerOrderLine, isShared, jobForOrder, jobParts, partFor } from "./shar
  * in capsules or tablets, ÷ the batch quantity.
  */
 export type YieldRange = { min?: number; max?: number };
-export type YieldLimits = { byProcess: Record<string, YieldRange>; final?: YieldRange };
+// fillTolerance: how far (±%) a capsule's average net fill may be from the unit weight on the PO.
+export type YieldLimits = { byProcess: Record<string, YieldRange>; final?: YieldRange; fillTolerance?: number };
+// Until QA sets its own, a net fill more than 5% off target stands out.
+export const DEFAULT_FILL_TOLERANCE = 5;
 export type YieldTone = "ok" | "near" | "out" | "none";
 
 type Kind = "weight" | "count" | "packs" | "boxes";
@@ -37,7 +40,8 @@ export type StageYield = {
   theoretical?: number; ofTheoretical?: number; theoreticalWorking?: string;
   tone: YieldTone; limit?: YieldRange;
   // Capsules weighed with their empty shell weight: step yield by powder, and the average net fill.
-  powder?: { kg: number; fillMg: number; targetMg?: number };
+  // diff: the net fill's difference from the target in %; out: beyond QA's fill tolerance.
+  powder?: { kg: number; fillMg: number; targetMg?: number; diff?: number; out?: boolean; tolerance: number };
 };
 export type FinalYield = { percent?: number; tone: YieldTone; limit?: YieldRange; working?: string; missing?: string };
 export type BatchYield = { stages: StageYield[]; final?: FinalYield; missing: string[] };
@@ -116,7 +120,9 @@ export function batchYield(job: JobOrder, orderId: string, lines: PlanLine[], or
     const shelled = kind === "count" && items.every((line) => line.weighedQuantity !== undefined && (line.weighedUom ?? "").toLowerCase() in KG && line.shellWeightMg);
     if (done && shelled && actual) {
       const kg = items.reduce((sum, line) => sum + line.weighedQuantity! * KG[(line.weighedUom ?? "").toLowerCase()] - line.yieldQuantity! * line.shellWeightMg! / 1e6, 0);
-      stage.powder = { kg: Number(kg.toPrecision(12)), fillMg: Math.round(kg * 1e6 / actual * 100) / 100, ...(unitWeight ? { targetMg: unitWeight } : {}) };
+      const fillMg = Math.round(kg * 1e6 / actual * 100) / 100, tolerance = limits?.fillTolerance ?? DEFAULT_FILL_TOLERANCE;
+      const diff = unitWeight ? round1((fillMg - unitWeight) / unitWeight * 100) : undefined;
+      stage.powder = { kg: Number(kg.toPrecision(12)), fillMg, tolerance, ...(unitWeight ? { targetMg: unitWeight, diff, out: Math.abs(diff!) > tolerance } : {}) };
     }
     if (actual !== undefined) {
       // Against the batch formula: the whole batch at the common stages, this PO's part at its own.

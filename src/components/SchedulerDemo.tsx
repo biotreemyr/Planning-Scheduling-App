@@ -913,21 +913,23 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setSelectedActivity(null);
     return [];
   }
+  // The planner's reason for a plan date before today, kept on the activities it applies to.
+  const withPastReason = (lines: PlanLine[], ids: string[], reason?: string) => !reason ? lines : lines.map((line) => ids.includes(line.id) ? { ...line, pastPlanReason: reason } : line);
   // Every date change (drag in calendar or list, or the activity's date field) goes through here,
   // so bookings, orders and reports follow. Process-flow problems are warned about, not blocked.
   // A drop on a day before today is confirmed first; the move then happens and reports as usual.
   function moveLine(id: string, date: string) {
     const line = allowedLines.find((item) => item.id === id);
     const checks = [{ label: `${line?.activityType ?? "Activity"} date`, value: date, rule: "plan" as const, was: line?.plannedDate }];
-    if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, () => setPlanNotice(applyMove(id, date))); return ""; }
+    if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, (reason) => setPlanNotice(applyMove(id, date, reason))); return ""; }
     return applyMove(id, date);
   }
-  function applyMove(id: string, date: string) {
+  function applyMove(id: string, date: string, reason?: string) {
     if (!canPlan || !allowedLines.some((item) => item.id === id)) return "You cannot move this activity.";
     const result = moveActivity(data.lines, data.entries, id, date, member.name);
     if ("error" in result) return result.error;
     if (result.lines === data.lines) return "";
-    setData((current) => ({ ...current, lines: result.lines, entries: result.entries }));
+    setData((current) => ({ ...current, lines: withPastReason(result.lines, [id], reason), entries: result.entries }));
     const when = formatDate(date);
     const moved = new Set(result.movedEntryIds);
     const clash = findMachineConflicts(result.entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => moved.has(entryId)));
@@ -940,15 +942,15 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   function resizeLine(id: string, endDate: string) {
     const line = allowedLines.find((item) => item.id === id);
     const checks = [{ label: `${line?.activityType ?? "Activity"} last day`, value: endDate, rule: "plan" as const, was: line ? lineEnd(line) : undefined }];
-    if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, () => setPlanNotice(applyResize(id, endDate))); return ""; }
+    if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, (reason) => setPlanNotice(applyResize(id, endDate, reason))); return ""; }
     return applyResize(id, endDate);
   }
-  function applyResize(id: string, endDate: string) {
+  function applyResize(id: string, endDate: string, reason?: string) {
     if (!canPlan || !allowedLines.some((item) => item.id === id)) return "You cannot change this activity.";
     const result = resizeActivity(data.lines, data.entries, id, endDate, member.name);
     if ("error" in result) return result.error;
     if (result.lines === data.lines) return "";
-    setData((current) => ({ ...current, lines: result.lines, entries: result.entries }));
+    setData((current) => ({ ...current, lines: withPastReason(result.lines, [id], reason), entries: result.entries }));
     const line = result.lines.find((item) => item.id === id)!;
     const day = (value: string) => formatDate(value.slice(0, 10));
     const span = line.endDate ? `${day(line.plannedDate)} – ${day(line.endDate)}` : day(line.plannedDate);
@@ -1040,7 +1042,15 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     // Corrections to existing activities.
     for (const row of keeping) {
       const line = lines.find((item) => item.id === row.lineId);
-      if (!line || line.completedAt) continue;
+      if (!line) continue;
+      // A completed activity keeps its quantity and machine; only its planned date can be corrected.
+      if (line.completedAt) {
+        if (line.plannedDate === row.plannedDate) continue;
+        const moved = moveActivity(lines, entries, line.id, row.plannedDate, member.name);
+        if ("error" in moved) return { error: moved.error };
+        lines = moved.lines; entries = moved.entries; updated += 1;
+        continue;
+      }
       if (line.plannedDate === row.plannedDate && line.quantity === row.quantity && line.uom === row.uom && line.priority === plan.priority) continue;
       updated += 1;
       lines = lines.map((item) => item.id === line.id ? { ...item, quantity: row.quantity, uom: row.uom, priority: plan.priority, ...(row.batchSizeKg !== undefined ? { batchSizeKg: row.batchSizeKg } : {}) } : item);
@@ -1071,7 +1081,11 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       if ("error" in booked) return { error: `${plan.rows[index].activityType}: ${booked.error}` };
       entries = booked.entries; machinesChanged += 1;
     }
-    setData((current) => ({ ...current, lines: finalLines, entries, jobOrders: batchChanged ? current.jobOrders.map((item) => item.id === savedJob.id ? savedJob : item) : current.jobOrders }));
+    // The reason for a date before today goes on each activity planned or moved into the past.
+    const today = localDateKey(new Date());
+    const pastIds = plan.rows.filter((row) => row.on && row.plannedDate < today).map((row) => row.lineId ? existing.find((line) => line.id === row.lineId)?.plannedDate !== row.plannedDate ? row.lineId : "" : added[adding.indexOf(row)]?.id ?? "").filter(Boolean);
+    const savedLines = withPastReason(finalLines, pastIds, plan.pastReason);
+    setData((current) => ({ ...current, lines: savedLines, entries, jobOrders: batchChanged ? current.jobOrders.map((item) => item.id === savedJob.id ? savedJob : item) : current.jobOrders }));
     const parts = [added.length ? `${added.length} added` : "", updated ? `${updated} updated` : "", removing.length ? `${removing.length} removed` : "", machinesChanged && mode === "edit" ? `${machinesChanged} machine${machinesChanged === 1 ? "" : "s"} changed` : ""].filter(Boolean).join(", ");
     const booked = plan.rows.filter((row) => row.on).reduce((total, row) => total + row.machineIds.length, 0);
     return { message: mode === "new" ? `${job.number} planned: ${added.map((line) => line.activityType).join(", ")}${batch ? ` · batch ${batch}` : ""}${booked ? ` · ${booked} machine${booked === 1 ? "" : "s"} booked` : ""}.` : `${job.number} planning saved (${parts || (batchChanged ? "batch number" : "no changes")}).` };
@@ -1239,9 +1253,9 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => ({ ...current, transfers: current.transfers.map((item) => item.id === id && !item.receivedAt ? { ...item, receivedAt: new Date().toISOString(), receivedBy: member.name } : item) }));
   }
   function planWip(id: string, date: string) {
-    checkDates([{ label: "Planned date for the received WIP", value: date, rule: "plan" }], () => applyPlanWip(id, date));
+    checkDates([{ label: "Planned date for the received WIP", value: date, rule: "plan" }], (reason) => applyPlanWip(id, date, reason));
   }
-  function applyPlanWip(id: string, date: string) {
+  function applyPlanWip(id: string, date: string, reason?: string) {
     if (!canCreate || !scope(data.transfers).some((item) => item.id === id)) return;
     if (validateActual({ actualQuantity: 0, productionDate: date, hasDeviation: false, deviation: "" }).length) return;
     setData((current) => {
@@ -1251,7 +1265,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       // Received work continues the same batch, so it keeps the source activity's job order and PO.
       const source = current.lines.find((item) => item.id === transfer.sourceLineId);
       const job = source?.productId === transfer.productId ? current.jobOrders.find((item) => item.id === source.jobOrderId) : undefined;
-      const line: PlanLine = { ...(job ? { jobOrderId: job.id, productionOrderId: job.orderId } : {}), id: lineId, planId: "production-plan", calendarId: transfer.calendarId, productId: transfer.productId, quantity: transfer.quantity, uom: transfer.uom, plannedDate: date, priority: "Normal", status: "Unscheduled", incomingWipId: id, notes: transfer.notes, orderReference: transfer.orderReference, activityType: directory.processes.find((item) => item.id === directory.calendars.find((entry) => entry.id === transfer.calendarId)?.processId)?.name };
+      const line: PlanLine = { ...(job ? { jobOrderId: job.id, productionOrderId: job.orderId } : {}), id: lineId, planId: "production-plan", calendarId: transfer.calendarId, productId: transfer.productId, quantity: transfer.quantity, uom: transfer.uom, plannedDate: date, priority: "Normal", status: "Unscheduled", incomingWipId: id, notes: transfer.notes, orderReference: transfer.orderReference, ...(reason ? { pastPlanReason: reason } : {}), activityType: directory.processes.find((item) => item.id === directory.calendars.find((entry) => entry.id === transfer.calendarId)?.processId)?.name };
       return { ...current, lines: [...current.lines, line], transfers: current.transfers.map((item) => item.id === id ? { ...item, plannedLineId: lineId } : item) };
     });
   }

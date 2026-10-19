@@ -45,4 +45,18 @@ describe("date checks", () => {
     fireEvent.click(view.getByText("Save anyway"));
     expect(saved).toHaveBeenCalledTimes(1);
   });
+  it("saves a plan date before today only with a reason, and passes the reason on", () => {
+    const saved = vi.fn();
+    const old = localDateKey(new Date(Date.now() - 20 * 86_400_000));
+    function Form() { const check = useDateCheck(); return <button type="button" onClick={() => check([{ label: "Capsulation date", value: old, rule: "plan" }], saved)}>Save</button>; }
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
+    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) { this.open = false; };
+    const view = render(<DateCheckProvider><Form /></DateCheckProvider>);
+    fireEvent.click(view.getByText("Save"));
+    const save = view.getByText("Save with reason") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.click(view.getByText("Keying in past production records"));
+    fireEvent.click(view.getByText("Save with reason"));
+    expect(saved).toHaveBeenCalledWith("Keying in past production records");
+  });
 });

@@ -17,11 +17,12 @@ describe("monthly planning list", () => {
     expect(monthDates("2027-01-01")[0]).toBe("2027-01-01");
     expect(monthDates("invalid")).toEqual([]);
   });
-  it("only allows planners to move known, unfinished activities", () => {
+  it("only allows planners to move known activities, completed ones included (to key in past production)", () => {
     const line = { id: "test" } as PlanLine;
     expect(canMovePlan(line, true)).toBe(true);
     expect(canMovePlan(line, false)).toBe(false);
     expect(canMovePlan(undefined, true)).toBe(false);
-    expect(canMovePlan({ ...line, completedAt: "2026-09-12" }, true)).toBe(false);
+    expect(canMovePlan({ ...line, completedAt: "2026-09-12" }, true)).toBe(true);
+    expect(canMovePlan({ ...line, completedAt: "2026-09-12" }, false)).toBe(false);
   });
 });

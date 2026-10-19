@@ -5,7 +5,8 @@ import { formatDate } from "./dates";
  * Nothing is refused: the person confirms and saves anyway when the date is right.
  *   today    - usually the day it is keyed in (PO received, production started/completed): more than
  *              RECENT_DAYS ago is unusual
- *   plan     - planning: a date before today is unusual
+ *   plan     - planning: a date before today is unusual, and saved only with a reason (keying in past
+ *              production, say)
  *   delivery - expected delivery: before today, or before the PO was received, is unusual
  * A date with today's day number in another month or year suggests today, the likely intent.
  */
@@ -32,3 +33,5 @@ export function dateWarning(check: DateCheck, today: string): string {
   return "";
 }
 export const dateWarnings = (checks: DateCheck[], today: string) => checks.map((check) => dateWarning(check, today)).filter(Boolean);
+/** A plan date before today is kept only with the planner's reason. */
+export const needsPastReason = (checks: DateCheck[], today: string) => checks.some((check) => check.rule === "plan" && !!dateWarning(check, today));

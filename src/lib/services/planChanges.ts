@@ -29,13 +29,13 @@ export function reopenMovedBookings<E extends ScheduleEntry>(before: E[], after:
 /**
  * Move an activity to a new date. Its open machine bookings move by the same number of
  * days, so the calendar, list, machine schedule, orders and reports all stay in step.
- * Every way of changing a planned date goes through here.
+ * Every way of changing a planned date goes through here. A completed activity can be moved too, so
+ * past production can be keyed in on the day it was planned; its finished bookings stay put.
  */
 export function moveActivity<L extends PlanLine, E extends ScheduleEntry>(lines: L[], entries: E[], lineId: string, date: string, changedBy: string):
   { lines: L[]; entries: E[]; movedEntryIds: string[] } | { error: string } {
   const line = lines.find((item) => item.id === lineId);
   if (!line) return { error: "This activity no longer exists." };
-  if (line.completedAt) return { error: "Completed activities cannot be moved." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: "Choose a valid date." };
   const days = daysBetween(line.plannedDate, date);
   if (!days) return { lines, entries, movedEntryIds: [] };
@@ -57,7 +57,6 @@ export function resizeActivity<L extends PlanLine, E extends ScheduleEntry>(line
   { lines: L[]; entries: E[]; changedEntryIds: string[] } | { error: string } {
   const line = lines.find((item) => item.id === lineId);
   if (!line) return { error: "This activity no longer exists." };
-  if (line.completedAt) return { error: "Completed activities cannot be changed." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return { error: "Choose a valid date." };
   if (endDate < line.plannedDate) return { error: "An activity cannot end before the day it starts." };
   if (endDate === lineEnd(line)) return { lines, entries, changedEntryIds: [] };

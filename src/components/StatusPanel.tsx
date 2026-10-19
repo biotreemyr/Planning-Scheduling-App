@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { CheckCircle2, PackageCheck, Printer, Search, XCircle } from "lucide-react";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
-import { batchYield, formatYield, limitText, type YieldLimits, type YieldRange } from "@/lib/services/yields";
+import { DEFAULT_FILL_TOLERANCE, batchYield, formatYield, limitText, type YieldLimits, type YieldRange } from "@/lib/services/yields";
 import { OTHER_USES, finalOutputFor, formulaPending, jobParts, needsFormulaCheck, releaseFor, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { finalOutput, finishedOn, packingNumber, releaseQueue, testingQueue, testResult, type JobOrder, type TestResult } from "@/lib/services/jobOrders";
 import type { PurchaseOrder } from "@/lib/services/orders";
@@ -226,6 +226,7 @@ function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: 
     ...Object.fromEntries(processes.map((process) => [process.id, { min: text(limits.byProcess[process.id]?.min), max: text(limits.byProcess[process.id]?.max) }])),
     final: { min: text(limits.final?.min), max: text(limits.final?.max) }
   }));
+  const [fill, setFill] = useState(text(limits.fillTolerance));
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const read = (value: string) => value.trim() === "" ? undefined : Number(value);
   const range = (key: string): YieldRange => ({ ...(read(draft[key].min) !== undefined ? { min: read(draft[key].min) } : {}), ...(read(draft[key].max) !== undefined ? { max: read(draft[key].max) } : {}) });
@@ -237,7 +238,7 @@ function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: 
   </tr>;
   return <section className="workspace-panel yield-limits">
     <div className="panel-title"><h2>Yield limits</h2></div>
-    <p className="orders-help">The acceptable yield at each process, as a % of theoretical (what it made against what the batch formula gives at that process with no loss, as in the batch record), and for the batch's final yield. Results within range show green, within reach of a limit amber, outside red. When a process comes out outside its range, production adds a deviation note as they save it. The step yield (against what the process before handed over) is shown beside it to find where a loss happened; it has no limits.</p>
+    <p className="orders-help">The acceptable yield at each process, as a % of theoretical (what it made against what the batch formula gives at that process with no loss, as in the batch record), and for the batch's final yield. Results within range show green, within reach of a limit amber, outside red. When a process comes out outside its range, production adds a deviation note as they save it. The step yield (against what the process before handed over) is shown beside it to find where a loss happened; it has no limits. Capsules weighed with their empty shell also show their average net fill, in bold red when it is further from target than the tolerance below.</p>
     {message ? <p role={message.error ? "alert" : "status"} className={message.error ? undefined : "calendar-notice"}>{message.text}</p> : null}
     <div className="orders-table-scroll" role="region" aria-label="Yield limits">
       <table className="orders-table yield-limits-table">
@@ -246,6 +247,10 @@ function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: 
           {processes.map((process) => row(process.id, process.name, "% of theoretical"))}
           <tr className="yield-limits-final-gap"><td colSpan={4} /></tr>
           {row("final", "Final yield", "Last stage's good output ÷ batch quantity")}
+          <tr className="yield-limits-final-gap"><td colSpan={4} /></tr>
+          <tr><th scope="row">Capsule fill weight<small>Average net fill (filled capsule less the empty shell) against the unit weight on the PO</small></th>
+            <td className="numeric" colSpan={2}><span className="yield-limit-input">± <input type="number" min="0.1" max="50" step="0.1" disabled={!editable} aria-label="Capsule fill weight tolerance %" value={fill} placeholder={String(DEFAULT_FILL_TOLERANCE)} onChange={(event) => setFill(event.target.value)} />%</span></td>
+            <td>{fill.trim() ? `Within ±${Number(fill)}% of target` : <span className="route-muted">±{DEFAULT_FILL_TOLERANCE}% until set</span>}. Beyond it shows in bold red.</td></tr>
         </tbody>
       </table>
     </div>
@@ -257,7 +262,9 @@ function YieldLimitsPanel({ directory, limits, editable, onSave }: { directory: 
         if ([min, max].some((value) => value !== undefined && (!Number.isFinite(value) || value < 0 || value > 200))) { setMessage({ text: `${name}: limits are percentages from 0 to 200.`, error: true }); return; }
         if (min !== undefined && max !== undefined && min > max) { setMessage({ text: `${name}: the minimum is above the maximum.`, error: true }); return; }
       }
-      const next: YieldLimits = { byProcess: Object.fromEntries(processes.map((process) => [process.id, range(process.id)]).filter(([, value]) => Object.keys(value as object).length)), ...(Object.keys(range("final")).length ? { final: range("final") } : {}) };
+      const tolerance = read(fill);
+      if (tolerance !== undefined && (!Number.isFinite(tolerance) || tolerance <= 0 || tolerance > 50)) { setMessage({ text: "Capsule fill weight: the tolerance is a percentage above 0, up to 50.", error: true }); return; }
+      const next: YieldLimits = { byProcess: Object.fromEntries(processes.map((process) => [process.id, range(process.id)]).filter(([, value]) => Object.keys(value as object).length)), ...(Object.keys(range("final")).length ? { final: range("final") } : {}), ...(tolerance !== undefined ? { fillTolerance: tolerance } : {}) };
       const errors = onSave(next);
       setMessage(errors.length ? { text: errors.join(" "), error: true } : { text: "Yield limits saved. Results across the scheduler follow them now.", error: false });
     }}>Save yield limits</button></div> : <p className="route-muted">Only QA can change these limits.</p>}

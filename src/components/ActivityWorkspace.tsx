@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type Rea
 import { Copy, Maximize2, Minus, Square, X } from "lucide-react";
 import type { PlanLine, Machine, ScheduleEntry, Product } from "@/lib/domain/types";
 import { batchYield, formatYield, limitText, type BatchYield } from "@/lib/services/yields";
+import { FillNote } from "./FillNote";
 import { useYieldLimits } from "./YieldLimitsContext";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import { bookedMachineIds, machineLabels } from "@/lib/services/machines";
@@ -136,7 +137,7 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
             : chosenKind === "final" ? "Final output" : chosenKind === "wip" ? `WIP room, for ${processOf(chosenCalendar)}` : chosenKind === "next" ? processOf(chosenCalendar) : "";
           const current = item.id === line.id;
           // Who planned shows beside the Planned cells, who last updated beside the Actual ones.
-          const plannedWho = hover(whoText("Planned", item.plannedBy, item.plannedAt));
+          const plannedWho = hover([whoText("Planned", item.plannedBy, item.plannedAt), item.pastPlanReason ? `Planned in the past: ${item.pastPlanReason}` : ""].filter(Boolean).join("\n"));
           const updatedWho = item.startedAt || item.completedAt || item.progressQuantity !== undefined || item.progressDestination ? whoText("Updated", item.updatedBy, item.updatedAt) : "";
           // Production can click anywhere on a day's Actual cells to key them in.
           const open = (className = "") => ({ className: `${className}${canUpdate ? " route-actual-open" : ""}`.trim() || undefined, ...hover(updatedWho), ...(canUpdate ? { onClick: () => { setTip(null); onOpenLine?.(item.id, true); } } : {}) });
@@ -164,7 +165,7 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
               if (stage?.ofTheoretical !== undefined || stage?.percent !== undefined) return <>
                 {stage.ofTheoretical !== undefined ? <span className={`yield-chip yield-${stage.tone}`} title={`% of theoretical: ${stage.theoreticalWorking}${stage.limit ? ` · QA limits ${limitText(stage.limit)}` : ""}`}>{formatYield(stage.ofTheoretical)}{stage.tone === "out" ? " · outside limits" : ""}</span> : null}
                 {stage.percent !== undefined ? <small className="yield-step" title={`Step yield: ${stage.working}`}>Step {formatYield(stage.percent)}{stage.powder ? " by powder" : ""}</small> : null}
-                {stage.powder?.targetMg ? <small className="yield-step" title="Average net fill per capsule (filled weight less the empty shell) against the unit weight on the PO">Fill {stage.powder.fillMg.toLocaleString("en-MY", { maximumFractionDigits: 1 })} mg · target {stage.powder.targetMg.toLocaleString()}</small> : null}</>;
+                {stage.powder?.targetMg ? <FillNote powder={stage.powder} /> : null}</>;
               if (stage?.missing) return <span className="yield-chip yield-missing" title={`Yield can't be worked out: ${stage.missing}`}>– figure missing</span>;
               return <span className="route-muted">{stage?.started && !stage.done ? "In progress" : "-"}</span>;
             })()}</td> : null}
