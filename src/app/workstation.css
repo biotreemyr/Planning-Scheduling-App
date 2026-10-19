@@ -1076,3 +1076,7 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .order-batch-table .order-batch-col { overflow-wrap: anywhere; }
 .order-batch-table .yield-step, .order-batch-table .yield-chip { white-space: normal; max-width: 100%; }
 .order-batch-table .yield-chip { display: inline-block; }
+/* Sections inside an order's details stay within the details' width, so the Progress and Job orders
+   boxes scroll sideways themselves rather than stretching the orders list. */
+.order-detail > *, .order-detail .order-section, .order-detail .job-orders { min-width: 0; max-width: 100%; }
+.order-detail .order-batch-scroll { max-width: 100%; }

@@ -8,6 +8,9 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Fixed
+- **Orders · Progress and Job orders** now also scroll sideways inside their own box. They stretched to the width of the whole orders list instead, so only the list scrolled.
+
 ## [1.10.0] - 2026-10-19
 
 ### Changed
