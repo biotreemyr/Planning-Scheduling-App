@@ -8,6 +8,8 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-19
+
 ### Added
 - **Capsule fill check** shows a batch's average net fill (filled capsule less the empty shell) in bold red when it is further from the unit weight on the PO than QA's tolerance, in Progress, the activity route and the capsulation update. QA sets the tolerance under QA/QC → Yield limits; until then it is ±5%. Often it means a weight was keyed in wrongly.
 - **Planning in the past** asks for a reason when a plan date is set before today, with quick picks such as "Keying in past production records". The reason is kept with the activity, shows when pointing at its planned cells, and appears in the audit trail.
