@@ -8,6 +8,9 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Changed
+- **Plan job order**: several processes can now be planned on the same day. Changing a process's date only moves the later processes that would then come before it; processes already on the same day or later keep their dates. Before, every later process was moved again, one working day apart, each time a date changed.
+
 ## [1.8.1] - 2026-10-18
 
 ### Fixed

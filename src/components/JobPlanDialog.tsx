@@ -33,16 +33,20 @@ function nextWorkday(date: string) {
   return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
 }
 /**
- * New plans: from row `from` on, each ticked process follows the ticked one before it on the next
- * working day, and an unticked process has no date and takes no day. Rows before `from` stay. The
- * first ticked process with no date takes `start`, the day the plan was opened for.
+ * New plans: row `from` was just changed (date picked, or ticked). A ticked process after it keeps
+ * its date when that is on or after the ticked process before it, so several processes can share a
+ * day; it moves to the next working day after that process only when it would otherwise come before
+ * it. A ticked process with no date yet takes the next working day after the one before it, or
+ * `start` (the day the plan was opened for) when it is the first. An unticked process has no date
+ * and takes no day. Rows before `from`, and completed (locked) rows, stay.
  */
 export function reflow(rows: PlanRow[], from: number, start = "") {
   let last = [...rows.slice(0, from)].reverse().find((row) => row.on && row.calendarId && row.date)?.date;
   return rows.map((row, position) => {
     if (position < from) return row;
     if (!row.on || !row.calendarId) return row.locked ? row : { ...row, date: "" };
-    const date = (position === from && row.date) || row.locked ? row.date : last ? nextWorkday(last) : row.date || start;
+    const keeps = row.locked || (position === from && row.date) || (row.date && (!last || row.date >= last));
+    const date = keeps ? row.date : last ? nextWorkday(last) : start;
     last = date || last;
     return { ...row, date };
   });
@@ -202,7 +206,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
         <p className="orders-help">{product?.name ?? "Unknown product"} · PO <strong>{poLabel(order, orders)}</strong>{order.customerName ? ` · ${order.customerName}` : ""} · {job.quantity.toLocaleString()} {job.uom}{job.batchSizeKg ? ` · ${job.batchSizeKg.toLocaleString()} kg` : ""}{job.packQuantity ? ` · ${job.packQuantity.toLocaleString()} ${job.packUom}` : ""}</p>
         <label>Batch number<input maxLength={60} autoComplete="off" value={batchNumber} onChange={(event) => setBatchNumber(event.target.value)} placeholder={`Batch number for ${job.number}`} /></label>
         <div className="route-plan">
-          <p className="orders-help">{format === "Other" ? "No fixed route for this dosage form: choose the process." : `${format}: ${rows.filter((row) => row.calendarId && row.key !== "single").map((row) => row.label).join(" → ")}.`} {editing ? "Correct any date or machine; untick to remove an activity, tick to add a missed process. Completed processes are locked." : "Tick each process to plan it now; an unticked process gets no date and stays off the calendar, to plan later. One working day each, from the first ticked process's date; change any date and the later ticked processes follow."} Theoretical quantities come from the job order; production keys in the actual quantity when it completes each process.</p>
+          <p className="orders-help">{format === "Other" ? "No fixed route for this dosage form: choose the process." : `${format}: ${rows.filter((row) => row.calendarId && row.key !== "single").map((row) => row.label).join(" → ")}.`} {editing ? "Correct any date or machine; untick to remove an activity, tick to add a missed process. Completed processes are locked." : "Tick each process to plan it now; an unticked process gets no date and stays off the calendar, to plan later. Each newly ticked process gets the next working day. Several processes can share a day: change a date and only the later processes that would then come before it move."} Theoretical quantities come from the job order; production keys in the actual quantity when it completes each process.</p>
           <div className="route-plan-scroll"><table className="route-plan-table"><thead><tr><th scope="col">Plan</th><th scope="col">Process</th><th scope="col">Date planned</th><th scope="col">Machine</th><th scope="col" className="numeric">Theoretical quantity</th></tr></thead>
             <tbody>{rows.map((row, index) => <tr key={row.key} className={row.calendarId ? undefined : "route-missing"}>
               <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => { const on = event.target.checked; setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, on } : item); return editing ? changed : reflow(changed, index, start); }); }} /></td>
@@ -211,7 +215,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
                   {row.orderId && short ? (() => { const share = short.shares.find((item) => item.orderId === row.orderId); const part = job ? jobParts(job).find((item) => item.orderId === row.orderId) : undefined;
                     return share && share.available < share.planned ? <small className="order-warning">Short yield: {share.available.toLocaleString()} of {share.planned.toLocaleString()} {job?.uom} for this PO{part?.packSize ? ` · about ${Math.floor(share.available / part.packSize).toLocaleString()} packs` : ""}</small> : null; })() : null}{!row.calendarId ? <small>Not set up in this unit (or filtered out)</small> : row.locked ? <small>Completed: locked</small> : row.lineId && !row.on ? <small>Will be removed</small> : null}</>}</td>
               <td>{row.calendarId ? <input type="date" aria-label={`${row.label} date`} disabled={row.locked || !row.on} value={row.on || row.locked ? row.date : ""} title={row.on ? undefined : "Not planned"} onChange={(event) => {
-                // Later processes follow on the working days after, so the route keeps its order.
+                // Later processes move only if they would now come before this one, so the route keeps its order.
                 const value = event.target.value;
                 setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, date: value } : item); return editing ? changed : reflow(changed, index, start); });
               }} /> : "-"}</td>
