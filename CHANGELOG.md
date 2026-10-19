@@ -8,7 +8,10 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-10-19
+
 ### Changed
+- **What each person's browser receives** now follows their Bio Tree rights. Without an Orders right, the page no longer gets the customer list, customer names, SO numbers, PO received dates, PO and job order remarks, or how a PO was closed; without a Testing or Release right it also no longer gets testing results and releases. Planning keeps PO numbers, products, quantities, wanted dates, job orders, batch numbers and every production result and yield. Saving from such a page leaves what it did not receive exactly as it was.
 - **Plan job order**: several processes can now be planned on the same day. Changing a process's date only moves the later processes that would then come before it; processes already on the same day or later keep their dates. Before, every later process was moved again, one working day apart, each time a date changed.
 
 ## [1.8.1] - 2026-10-18
@@ -28,7 +31,6 @@ Fixes from the 17/10/2026 security and workflow review.
 - **Production route** lets a batch be blended before or after Granulation (Granulation stays optional, Blending stays required, once per batch). The process-flow warnings, step yields and the activity window follow the planned days for those two. Other processes keep the order set in Admin.
 - **Job orders** for a capsule, tablet or sachet PO offer only capsules, tablets or sachets as the batch quantity unit. Existing job orders keep the unit they have.
 - **Production update** can start or complete a process only after the work in progress handed over to it from the process before is received. The handover shows in the activity window with an **Acknowledge receipt** button, so who took over the material is recorded. Handovers already received are unchanged; ones still waiting must be received before their next process starts.
-- **What each person's browser receives** now follows their Bio Tree rights. Without an Orders right, the page no longer gets the customer list, customer names, SO numbers, PO received dates, PO and job order remarks, or how a PO was closed; without a Testing or Release right it also no longer gets testing results and releases. Planning keeps PO numbers, products, quantities, wanted dates, job orders, batch numbers and every production result and yield. Saving from such a page leaves what it did not receive exactly as it was.
 - **Machine bookings** that are confirmed can be moved to another machine or time only by someone who can approve bookings. When anyone else moves the activity, its confirmed bookings move with it and go back to Draft, to be confirmed again. Deleting a booking that is past Draft needs the right to cancel bookings.
 
 ### Fixed
