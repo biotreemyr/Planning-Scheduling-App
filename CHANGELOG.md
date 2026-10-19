@@ -8,6 +8,13 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Added
+- **Edit planning and Activity workspace** windows have a Maximise button (or double-click the title bar) to fill the screen, and Restore to go back.
+
+### Changed
+- **Edit planning** opens wider, with each heading on one line and long machine names on two lines at most.
+- **Activity workspace** route table keeps its headings and the Plan and Process columns in view while scrolling, has wider columns, and shows its sideways scrollbar at the bottom of the window instead of the bottom of the table.
+
 ## [1.8.2] - 2026-10-19
 
 ### Changed

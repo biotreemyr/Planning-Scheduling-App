@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Maximize2, Minus, Plus, X } from "lucide-react";
+import { Copy, Maximize2, Minus, Plus, Square, X } from "lucide-react";
 import { useFloatingWindow } from "./useFloatingWindow";
 import { useDateCheck } from "./DateCheck";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
@@ -80,7 +80,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   const [error, setError] = useState("");
   const checkDates = useDateCheck();
   // A floating window: dragged by its title bar, minimised to it, left where it was put.
-  const { minimised, setMinimised, barProps, open, style } = useFloatingWindow(dialog);
+  const { minimised, setMinimised, maximised, setMaximised, barProps, open, style } = useFloatingWindow(dialog);
   const editing = request?.mode === "edit";
   const job = jobOrders.find((item) => item.id === jobId);
   const order = orders.find((item) => item.id === job?.orderId);
@@ -151,7 +151,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       setJobId(chosen?.id ?? ""); setRows(chosen ? reflow(rowsFor(chosen, request.date), 0, request.date) : []); setStart(request.date); setBatchNumber(chosen?.batchNumber ?? ""); setPriority("Normal");
     }
     if (!dialog.current?.open) dialog.current?.show();
-    open(720);
+    open(1120);
     // Opens once per request; later data changes must not reset what is being typed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.nonce]);
@@ -169,7 +169,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   // A shared batch that made less than planned: the PO due first keeps its share, the next takes what is left.
   const short = job ? shortYield(job, lines, orders, (calendarId) => settingsOf(calendarId ?? "").planned) : undefined;
 
-  return <dialog ref={dialog} className={`activity-dialog plan-window${job ? " activity-dialog-wide" : ""}${minimised ? " minimised" : ""}`} aria-labelledby="job-plan-title"
+  return <dialog ref={dialog} className={`activity-dialog plan-window${job ? " activity-dialog-wide" : ""}${minimised ? " minimised" : ""}${maximised ? " maximised" : ""}`} aria-labelledby="job-plan-title"
     style={style} onKeyDown={(event) => { if (event.key === "Escape" && !minimised) { event.stopPropagation(); setMinimised(true); } }}>
     <form className="form-panel" onSubmit={(event) => {
       event.preventDefault();
@@ -195,6 +195,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
         <h2 id="job-plan-title">{editing ? `Edit planning · ${job?.number ?? ""}` : "Production Planning"}{minimised && job && !editing ? ` · ${job.number}` : ""}</h2>
         <span className="plan-window-buttons">
           <button className="icon-button" type="button" aria-label={minimised ? "Restore" : "Minimise"} title={minimised ? "Restore" : "Minimise"} onClick={() => setMinimised(!minimised)}>{minimised ? <Maximize2 size={16} /> : <Minus size={18} />}</button>
+          {!minimised ? <button className="icon-button" type="button" aria-label={maximised ? "Restore size" : "Maximise"} title={maximised ? "Restore size" : "Maximise"} onClick={() => setMaximised(!maximised)}>{maximised ? <Copy size={15} /> : <Square size={14} />}</button> : null}
           <button className="icon-button" type="button" aria-label="Close" title="Close" onClick={() => dialog.current?.close()}><X size={18} /></button>
         </span>
       </div>

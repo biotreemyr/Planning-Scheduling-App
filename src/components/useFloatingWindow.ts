@@ -1,14 +1,16 @@
 "use client";
-import { useRef, useState, type PointerEvent, type RefObject } from "react";
+import { useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from "react";
 
 /**
  * A floating window rather than a modal, so the calendar behind stays in view and usable: dragged
  * by its title bar, minimised to that bar, and placed where it was left. Spread `barProps` on the
  * title bar and `style` on the dialog; `open(width)` places it centred near the top the first time.
+ * Maximised, it fills the screen (less a 12px margin) until restored to where it was.
  */
 export function useFloatingWindow(dialog: RefObject<HTMLDialogElement | null>) {
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
   const [minimised, setMinimised] = useState(false);
+  const [maximised, setMaximised] = useState(false);
   const dragging = useRef<{ dx: number; dy: number } | null>(null);
   const keepInView = (left: number, top: number) => {
     const width = dialog.current?.offsetWidth ?? 600;
@@ -19,7 +21,7 @@ export function useFloatingWindow(dialog: RefObject<HTMLDialogElement | null>) {
   const barProps = {
     title: "Drag to move",
     onPointerDown(event: PointerEvent<HTMLElement>) {
-      if ((event.target as HTMLElement).closest("button, a, input, select, textarea") || !dialog.current) return;
+      if ((event.target as HTMLElement).closest("button, a, input, select, textarea") || !dialog.current || (maximised && !minimised)) return;
       const box = dialog.current.getBoundingClientRect();
       dragging.current = { dx: event.clientX - box.left, dy: event.clientY - box.top };
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -27,11 +29,18 @@ export function useFloatingWindow(dialog: RefObject<HTMLDialogElement | null>) {
     onPointerMove(event: PointerEvent<HTMLElement>) {
       if (dragging.current) setPlace(keepInView(event.clientX - dragging.current.dx, event.clientY - dragging.current.dy));
     },
-    onPointerUp: stop, onPointerCancel: stop
+    onPointerUp: stop, onPointerCancel: stop,
+    // Double-click the title bar to maximise or restore.
+    onDoubleClick(event: MouseEvent<HTMLElement>) {
+      if (!(event.target as HTMLElement).closest("button, a, input, select, textarea") && !minimised) setMaximised(!maximised);
+    }
   };
   // First opening: centred for the window's width, near the top; later it stays where it was left.
   const open = (width: number) => { if (!place) setPlace(keepInView((window.innerWidth - Math.min(width, window.innerWidth - 24)) / 2, 72)); };
   // It ends 12px above the bottom of the screen wherever it is placed, so a long window scrolls inside
   // itself and its Save button can always be reached.
-  return { minimised, setMinimised, barProps, open, style: place ? { left: place.left, top: place.top, maxHeight: `max(120px, calc(100dvh - ${place.top + 12}px))` } : undefined };
+  const full = maximised && !minimised;
+  return { minimised, setMinimised, maximised: full, setMaximised, barProps, open,
+    style: full ? { left: 12, top: 12, width: "calc(100vw - 24px)", height: "calc(100dvh - 24px)", maxHeight: "calc(100dvh - 24px)" }
+      : place ? { left: place.left, top: place.top, maxHeight: `max(120px, calc(100dvh - ${place.top + 12}px))` } : undefined };
 }
