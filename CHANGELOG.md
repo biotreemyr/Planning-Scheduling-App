@@ -8,6 +8,8 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-10-22
+
 ### Added
 - **Off days**: planning now skips each unit's weekly off days (Saturday and Sunday unless Admin ticks them in **Setup · Units · Working days**) and the company's public holidays from Circulo, which QA keeps there. The calendar and list grey off days and say why ("Off", "Closed", the holiday's name). A process over several days counts only its working days ("4 working days · 1 off, skipped"), and the next process starts on the next working day.
 - **Planner Board · Off days**: planners, production managers and Admin can open an off day for overtime, or close a working day (a shutdown, say), with the reason. The Production Planning window also lists the off days in a plan, with **Work this day** to open one there. Each change, with who made it and why, goes into the audit trail. Existing plans stay as they are.
