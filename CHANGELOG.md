@@ -8,6 +8,9 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Added
+- **Production Planning: "More than 1 day"** under each process's date. Tick it for a process that runs over several days and an end date appears; untick it and the process takes one day again. The machine is booked until the end date, and the next process moves to the working day after it if it would otherwise start earlier. Edit job order planning shows the tick and end date too.
+
 ## [1.12.0] - 2026-10-21
 
 ### Changed
