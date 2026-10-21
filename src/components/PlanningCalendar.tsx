@@ -15,6 +15,7 @@ import { lineEnd } from "@/lib/services/scheduling";
 import type { ProcessSettings } from "@/lib/services/processSetup";
 import { JobPlanDialog, type JobPlan, type PlanRequest } from "./JobPlanDialog";
 import { formatDate } from "@/lib/services/dates";
+import { dayStatus, workingCalendar, type WorkingCalendar } from "@/lib/services/workingDays";
 
 type View = "month" | "week" | "day";
 const NO_ORDER = "#ffffff";
@@ -24,9 +25,13 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
 
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
-export default function PlanningCalendar({ processSettings = {}, canPrint = true, orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", planLines, products, initialDate, onPlanJob, onMove, onResize, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
+export default function PlanningCalendar({ workDays = workingCalendar(undefined), onOpenDay, processSettings = {}, canPrint = true, orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", planLines, products, initialDate, onPlanJob, onMove, onResize, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
   processNames: Record<string, string>;
   processSettings?: Record<string, ProcessSettings>;
+  // The unit's working days: off days are greyed and labelled, and planning skips them.
+  workDays?: WorkingCalendar;
+  // Opens an off day for overtime from the planning window (planners, production managers, Admin).
+  onOpenDay?: (date: string, reason: string) => string;
   // Core's "Print planner board": print, PDF and Excel.
   canPrint?: boolean;
   orders?: PurchaseOrder[];
@@ -54,6 +59,9 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
 }) {
   const callbacks = useRef({ onMove, onResize, canPlan, canCreate, onSelect });
   callbacks.current = { onMove, onResize, canPlan, canCreate, onSelect };
+  // Read by the calendar's day templates, which are set once when it loads.
+  const working = useRef(workDays);
+  working.current = workDays;
   // Planning happens per job order, in one form for its whole route.
   const [planRequest, setPlanRequest] = useState<PlanRequest | null>(null);
   useEffect(() => {
@@ -100,7 +108,18 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
         useDetailPopup: false, useFormPopup: false, gridSelection: { enableClick: true, enableDblClick: true },
         month: { startDayOfWeek: 1 },
         week: { startDayOfWeek: 1, taskView: false, eventView: ["allday"] },
-        template: { allday: (event) => {
+        template: {
+          // Each day's number, with what makes it off (Off, Closed, the holiday) or Overtime; CSS greys an off day's cell.
+          monthGridHeader: (cell) => {
+            const status = dayStatus(working.current, cell.date.slice(0, 10));
+            const label = status.label ? `<small class="day-label">${escapeHtml(status.label)}</small>` : "";
+            return `<span class="day-head${status.working ? "" : " day-off"}${status.kind === "overtime" ? " day-overtime" : ""}"${status.special ? ` title="${escapeHtml(status.special.reason)}"` : ""}><span class="toastui-calendar-weekday-grid-date${cell.isToday ? " toastui-calendar-weekday-grid-date-decorator" : ""}">${parseInt(cell.date.slice(8, 10), 10)}</span>${label}</span>`;
+          },
+          weekDayName: (model) => {
+            const status = dayStatus(working.current, dateKey(model.dateInstance.toDate()));
+            return `<span class="day-head${status.working ? "" : " day-off"}${status.kind === "overtime" ? " day-overtime" : ""}"><span class="toastui-calendar-day-name__date">${model.date}</span>&nbsp;&nbsp;<span class="toastui-calendar-day-name__name">${model.dayName}</span>${status.label ? ` <small class="day-label">${escapeHtml(status.label)}</small>` : ""}</span>`;
+          },
+          allday: (event) => {
           const { number, trial, priority, completed, warn } = (event.raw ?? {}) as { number?: number; trial?: boolean; priority?: string; completed?: boolean; warn?: string };
           const badge = number ? `<span class="order-badge${trial ? " trial" : ""}">${number}</span>` : "";
           const mark = priority === "High" || priority === "Urgent" ? `<span class="priority-mark ${priority.toLowerCase()}" title="${priority} priority">!</span>` : "";
@@ -145,6 +164,9 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
     }));
     instance.setOptions({ isReadOnly: !canPlan && !canCreate });
   }, [ready, planLines, products, canPlan, canCreate, orders, jobOrders, warnings]);
+
+  // A day opened or closed, or holidays read: redraw the day headers.
+  useEffect(() => { if (ready) calendar.current?.render(); }, [ready, workDays]);
 
   useEffect(() => {
     const instance = calendar.current;
@@ -212,7 +234,7 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
     {!ready && !failed ? <p role="status">Loading calendar...</p> : null}
     {notice ? <p role="status" className="calendar-notice">{notice}</p> : null}
     {!canPlan && planLines.some((line) => !line.completedAt) ? <p className="plan-grid-hint">Your role can view this plan but not move activities.{demo ? <> Switch <strong>User</strong> to a planner or administrator to drag and drop.</> : " Ask your Bio Tree administrator for planning access if you need it."}</p> : null}
-    {planningView === "list" ? <PlanningList key={date.slice(0, 7)} date={date} lines={planLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warnings} calendars={calendars} canPlan={canPlan} canCreate={canCreate} onResize={onResize} onMove={onMove} onSelect={(id) => { if (onSelect) onSelect(id); else setSelectedId(id); }} onCreate={openCreate} /> : null}
+    {planningView === "list" ? <PlanningList key={date.slice(0, 7)} workDays={workDays} date={date} lines={planLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warnings} calendars={calendars} canPlan={canPlan} canCreate={canCreate} onResize={onResize} onMove={onMove} onSelect={(id) => { if (onSelect) onSelect(id); else setSelectedId(id); }} onCreate={openCreate} /> : null}
     <div hidden={planningView === "list"} className="calendar-scroll" onScroll={() => setHover(null)}><div ref={host} className="calendar-host" onMouseOver={(event) => { if (!event.buttons) preview(event.target as HTMLElement); }} onMouseDown={() => setHover(null)} onFocus={(event) => preview(event.target as HTMLElement)} onBlur={() => setHover(null)} onClick={(event) => {
       const target = event.target as HTMLElement;
       const id = target.closest<HTMLElement>("[data-plan-id]")?.dataset.planId;
@@ -226,7 +248,7 @@ export default function PlanningCalendar({ processSettings = {}, canPrint = true
       {hoverLine.orderReference ? <p>{hoverLine.orderReference}{(() => { const batch = jobOrders.find((item) => item.id === hoverLine.jobOrderId)?.batchNumber; return batch ? ` · Batch no. ${batch}` : ""; })()}</p> : null}
       {hoverLine.notes ? <p>{hoverLine.notes}</p> : null}
     </div> : null}
-    <JobPlanDialog request={planRequest} jobOrders={jobOrders} orders={orders} products={products} calendars={calendars} processNames={processNames} processSettings={processSettings} lines={allLines ?? allPrintLines} machines={machines} entries={entries}
+    <JobPlanDialog workDays={workDays} onOpenDay={onOpenDay} request={planRequest} jobOrders={jobOrders} orders={orders} products={products} calendars={calendars} processNames={processNames} processSettings={processSettings} lines={allLines ?? allPrintLines} machines={machines} entries={entries}
       onPlan={onPlanJob} onDone={(message, firstDate) => { calendar.current?.clearGridSelections(); setNotice(message); if (firstDate) setDate(firstDate); }} />
     <div className="order-legend" aria-label="Legend">
       <span><span className="order-badge">1</span>Order number · tab colour</span>

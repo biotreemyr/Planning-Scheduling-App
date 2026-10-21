@@ -1,5 +1,6 @@
 import type { ProcessSettings } from "@/lib/services/processSetup";
-export type Unit = { id: string; name: string };
+// workingDays: the weekdays the unit works (0 is Sunday); without it, Monday to Friday.
+export type Unit = { id: string; name: string; workingDays?: number[] };
 // settings: how the process takes part in routes and quantities (see processSetup); processes
 // without them use the built-in defaults for their name.
 export type Process = { id: string; name: string; settings?: ProcessSettings };

@@ -167,6 +167,19 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
     .map((key) => `${processNames.get(key) ?? "A process"} ${rangeText(newLimits.byProcess?.[key])} (was ${rangeText(oldLimits.byProcess?.[key])})`);
   if (rangeText(oldLimits.final) !== rangeText(newLimits.final)) limitChanges.push(`final yield ${rangeText(newLimits.final)} (was ${rangeText(oldLimits.final)})`);
   if (limitChanges.length) changes.push({ kind: "Setup", text: `Yield limits set: ${limitChanges.join("; ")}` });
+  // Off days opened for overtime and working days closed, with their reason; and each unit's working week.
+  const units = [...(after.directory?.units ?? []), ...(before.directory?.units ?? [])];
+  const unitName = (id: unknown) => str(units.find((item) => item.id === id)?.name) || "A unit";
+  const special = (row: Row) => `${unitName(row.unitId)} ${day(row.date)} ${row.kind === "working" ? "opened as a working day" : "closed"}`;
+  const specialDiff = diff(list(before, "specialDays"), list(after, "specialDays"));
+  for (const row of specialDiff.added) changes.push({ kind: "Setup", text: `${special(row)}: ${str(row.reason)}` });
+  for (const { after: row } of specialDiff.changed) changes.push({ kind: "Setup", text: `${special(row)} changed: ${str(row.reason)}` });
+  for (const row of specialDiff.removed) changes.push({ kind: "Setup", text: `${special(row)}: special day removed` });
+  const weekNames = (row?: Row) => { const days = Array.isArray(row?.workingDays) ? row.workingDays as number[] : [1, 2, 3, 4, 5]; return [1, 2, 3, 4, 5, 6, 0].filter((item) => days.includes(item)).map((item) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][item]).join(", ") || "none"; };
+  for (const unit of after.directory?.units ?? []) {
+    const old = (before.directory?.units ?? []).find((item) => item.id === unit.id);
+    if (old && weekNames(old) !== weekNames(unit)) changes.push({ kind: "Setup", text: `${unitName(unit.id)} working days: ${weekNames(unit)} (was ${weekNames(old)})` });
+  }
   return changes;
 }
 

@@ -175,5 +175,11 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   }
   count("handovers", transfers.added.length + transfers.changed.length);
 
+  // Opening an off day for overtime, or closing a working day: planners, production managers and Admin
+  // (everyone who may edit the plan). The unit's weekly working days are Setup, above.
+  const specialDays = diff(before.data.specialDays ?? [], after.data.specialDays ?? []);
+  if (specialDays.added.length || specialDays.removed.length || specialDays.changed.length) need(can.editPlan, "open or close days");
+  count("special days added", specialDays.added.length); count("special days changed", specialDays.changed.length); count("special days removed", specialDays.removed.length);
+
   return { allowed: denied.length === 0, denied, summary };
 }

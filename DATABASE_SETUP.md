@@ -83,6 +83,22 @@ itself, so anyone who may create orders can add one; any other product change
 still needs Admin. Without MASTER_DATA_DATABASE_URL the order form offers the
 scheduler's own products as before.
 
+## Public holidays from Circulo
+
+Planning skips the company's public holidays, which QA keeps in Circulo
+(Controlled System · Public holidays). The server reads them live through
+CIRCULO_DATABASE_URL, for CIRCULO_COMPANY (default: MASTER_DATA_COMPANY, then btp),
+with a role that may only read Circulo's holidays table:
+
+    CREATE ROLE scheduler_circulo_reader LOGIN PASSWORD '…';
+    GRANT CONNECT ON DATABASE bio_tree_circulo TO scheduler_circulo_reader;
+    GRANT USAGE ON SCHEMA public TO scheduler_circulo_reader;
+    GRANT SELECT ON holidays TO scheduler_circulo_reader;
+
+Without CIRCULO_DATABASE_URL, or when Circulo cannot be reached, planning still
+opens and skips only the units' weekly off days and special days; the Off days
+window says so.
+
 ## Schema changes (Drizzle)
 
 The tables are defined in src/lib/persistence/schema.ts. After changing it, run
