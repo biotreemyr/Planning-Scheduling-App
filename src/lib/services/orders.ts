@@ -8,6 +8,9 @@ import { calendarSettings, plannedOrder, type ProcessSettings } from "./processS
 // these sharing a PO number, numbered by `item`. Plan lines link to one through `productionOrderId`.
 export type PurchaseOrder = {
   id: string; poNumber: string; productId: string; quantity: number; uom: string;
+  // Job orders may add up to more than the PO (waste, QC and retain samples...): the reason, the
+  // total it covers, and who gave it and when. A later plan above that total needs a new reason.
+  overPlanReason?: string; overPlannedTotal?: number; overPlannedBy?: string; overPlannedAt?: string;
   // Optional only so orders saved before the field existed still load.
   customerName?: string;
   // The customer record (customer ID and name). Older orders carry only the name.

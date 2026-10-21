@@ -1,7 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
-import { jobForOrder, jobsServing, orderedInJobs, overOrderedText, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
+import { jobForOrder, jobsServing, orderedInJobs, overOrderedText, overPlanAllowed, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
 import { lineEnd } from "./scheduling";
@@ -73,9 +73,10 @@ export function validateBatchNumber(value: string, job: JobOrder, jobs: JobOrder
 // The job orders' total in the PO item's own unit may not pass the ordered quantity. A shared batch
 // counts only each PO's share: the first PO keeps what the other POs' shares leave.
 // Every job order is counted in the PO's unit (boxes, bottles...), whatever unit its batch quantity is in.
-function overOrdered(order: PurchaseOrder, jobs: JobOrder[]) {
+// More than the PO is allowed with a reason (given now, or recorded on the PO for this total).
+function overOrdered(order: PurchaseOrder, jobs: JobOrder[], overPlanReason?: string) {
   const { total } = orderedInJobs(order, jobs);
-  return total > order.quantity + 1e-9 ? overOrderedText(order, total) : "";
+  return overPlanAllowed(order, total, overPlanReason) ? "" : overOrderedText(order, total);
 }
 
 /**
@@ -84,7 +85,7 @@ function overOrdered(order: PurchaseOrder, jobs: JobOrder[]) {
  */
 // routeFor: the PO item's route from Admin, so only figures its processes use are required.
 type RouteFor = (order: PurchaseOrder) => { name: string; settings: { planned: PlannedSource } }[] | undefined;
-export function updateJobOrder(next: JobOrder, jobs: JobOrder[], orders: PurchaseOrder[], products: Product[], routeFor?: RouteFor): JobOrder | { error: string } {
+export function updateJobOrder(next: JobOrder, jobs: JobOrder[], orders: PurchaseOrder[], products: Product[], routeFor?: RouteFor, overPlanReason?: string): JobOrder | { error: string } {
   const number = next.number.trim();
   if (!number) return { error: "Key in the job order number." };
   if (number.length > 60) return { error: "Keep the job order number to 60 characters." };
@@ -105,7 +106,7 @@ export function updateJobOrder(next: JobOrder, jobs: JobOrder[], orders: Purchas
   if (packingIssue) return { error: packingIssue };
   const batchProblem = validateBatchNumber(saved.batchNumber ?? "", saved, jobs);
   if (batchProblem) return { error: batchProblem };
-  const over = overOrdered(order, [...jobs.filter((job) => job.id !== saved.id), saved]);
+  const over = overOrdered(order, [...jobs.filter((job) => job.id !== saved.id), saved], overPlanReason);
   return over ? { error: over } : saved;
 }
 
@@ -124,7 +125,7 @@ export const findJobByNumber = (value: string, jobs: JobOrder[]) => {
   return number ? jobs.find((job) => job.number.trim().toLowerCase() === number) : undefined;
 };
 
-export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number; batchVolumeL?: number; packQuantity?: number; packUom?: string; packSize?: number; boxQuantity?: number; packingNumber?: string };
+export type ManualJob = { number: string; orderId: string; quantity: number; uom: string; batchSizeKg?: number; batchVolumeL?: number; packQuantity?: number; packUom?: string; packSize?: number; boxQuantity?: number; packingNumber?: string; overPlanReason?: string };
 
 export type ProcessQuantity = { quantity: number; uom: string };
 // A built-in step name stands for the job order figure it plans with (dispensing: batch size...).
@@ -206,7 +207,7 @@ export function createManualJobOrder(input: ManualJob, orders: PurchaseOrder[], 
   };
   const missing = missingQuantity(created, formatOf(order, products), context.routeFor?.(order)) || packingNumberProblem(created, jobs);
   if (missing) return { error: missing };
-  const over = overOrdered(order, [...jobs, created]);
+  const over = overOrdered(order, [...jobs, created], input.overPlanReason);
   return over ? { error: over } : created;
 }
 

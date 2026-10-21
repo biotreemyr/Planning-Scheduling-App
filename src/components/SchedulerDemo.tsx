@@ -41,7 +41,7 @@ import { priorities, type Customer } from "@/lib/domain/types";
 import { findMachineConflicts } from "@/lib/services/conflicts";
 import { formatYield, limitText, stepYieldWith, yieldWarnings, type YieldLimits } from "@/lib/services/yields";
 import { YieldLimitsProvider } from "./YieldLimitsContext";
-import { closeOrder, formulaPending, jobForOrder, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
+import { closeOrder, formulaPending, jobForOrder, orderedInJobs, overPlans, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
@@ -804,21 +804,41 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     return route.length ? route : undefined;
   };
   // Job orders: keyed in on the PO item, one per batch, each with its own number.
-  function addJobOrder(input: ManualJob) {
+  // Job orders over a PO's quantity (waste, QC and retain samples...) keep their reason on the PO, with
+  // the total it covers and who gave it; the server stamps who too.
+  const recordOverPlan = (orders: PurchaseOrder[], jobs: JobOrder[], orderIds: string[], reason?: string) => !reason?.trim() ? orders : orders.map((order) => {
+    if (!orderIds.includes(order.id)) return order;
+    const { total } = orderedInJobs(order, jobs);
+    return total > order.quantity + 1e-9 ? { ...order, overPlanReason: reason.trim(), overPlannedTotal: total, overPlannedBy: member.name, overPlannedAt: new Date().toISOString() } : order;
+  });
+  const servedBy = (job: JobOrder) => [job.orderId, ...(job.shares ?? []).map((share) => share.orderId)];
+  // What a job order about to be saved would put over its POs, so the form can ask for the reason first.
+  function overPlanFor(job: ManualJob | JobOrder) {
+    if ("id" in job) {
+      const result = updateJobOrder(job, data.jobOrders, data.orders, products, orderRoute, "check");
+      if ("error" in result) return [];
+      const jobs = data.jobOrders.map((item) => item.id === result.id ? result : item);
+      return overPlans(servedBy(result), jobs, data.orders).map((item) => ({ poNumber: item.order.poNumber, total: item.total, ordered: item.order.quantity, over: item.over, uom: item.order.uom }));
+    }
+    const created = createManualJobOrder({ ...job, overPlanReason: "check" }, data.orders, data.jobOrders, products, { today: new Date(), userName: member.name, newId: () => "check", routeFor: orderRoute });
+    if ("error" in created) return [];
+    return overPlans(servedBy(created), [...data.jobOrders, created], data.orders).map((item) => ({ poNumber: item.order.poNumber, total: item.total, ordered: item.order.quantity, over: item.over, uom: item.order.uom }));
+  }
+  function addJobOrder(input: ManualJob, overPlanReason?: string) {
     if (!canCreateOrders) return ["Your access does not include creating job orders."];
-    const created = createManualJobOrder(input, data.orders, data.jobOrders, products, { today: new Date(), userName: member.name, newId: () => newId("job"), routeFor: orderRoute });
+    const created = createManualJobOrder({ ...input, overPlanReason }, data.orders, data.jobOrders, products, { today: new Date(), userName: member.name, newId: () => newId("job"), routeFor: orderRoute });
     if ("error" in created) return [created.error];
-    setData((current) => ({ ...current, jobOrders: [...current.jobOrders, created] }));
+    setData((current) => { const jobOrders = [...current.jobOrders, created]; return { ...current, jobOrders, orders: recordOverPlan(current.orders, jobOrders, servedBy(created), overPlanReason) }; });
     return [];
   }
   // Editing a job order; a new number relabels the batch reference of its activities too.
-  function editJobOrder(next: JobOrder) {
+  function editJobOrder(next: JobOrder, overPlanReason?: string) {
     if (!canEditOrders) return ["Your access does not include editing job orders."];
     const current = data.jobOrders.find((job) => job.id === next.id);
     if (!current) return ["This job order no longer exists."];
-    const result = updateJobOrder(next, data.jobOrders, data.orders, products, orderRoute);
+    const result = updateJobOrder(next, data.jobOrders, data.orders, products, orderRoute, overPlanReason);
     if ("error" in result) return [result.error];
-    const shareIssue = sharesProblem(result, data.orders, data.jobOrders, (order) => order.format ?? inferFormat(products.find((item) => item.id === order.productId)));
+    const shareIssue = sharesProblem(result, data.orders, data.jobOrders, (order) => order.format ?? inferFormat(products.find((item) => item.id === order.productId)), overPlanReason);
     if (shareIssue) return [shareIssue];
     // A PO taken off a shared batch must not keep filling or packing planned for it.
     const dropped = (current.shares ?? []).filter((share) => !result.shares?.some((item) => item.orderId === share.orderId));
@@ -839,7 +859,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       if (!expected || line.completedAt || jobLines.filter((other) => other.calendarId === line.calendarId && other.productionOrderId === line.productionOrderId).length !== 1) return [];
       return [[line.id, { quantity: expected.quantity, uom: expected.uom, batchSizeKg: expected.uom === "kg" ? expected.quantity : batchKilograms(expected.quantity, expected.uom) }] as const];
     }));
-    setData((state) => ({ ...state, jobOrders: state.jobOrders.map((job) => job.id === saved.id ? saved : job),
+    setData((state) => { const jobOrders = state.jobOrders.map((job) => job.id === saved.id ? saved : job); return { ...state, jobOrders,
+      orders: recordOverPlan(state.orders, jobOrders, [...servedBy(saved), ...servedBy(current)], overPlanReason),
       lines: state.lines.map((line) => {
         if (line.jobOrderId !== saved.id) return line;
         const quantity = synced.get(line.id);
@@ -847,7 +868,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
         if (!quantity) return relabelled;
         const { batchSizeKg: _kg, ...rest } = relabelled;
         return { ...rest, quantity: quantity.quantity, uom: quantity.uom, ...(quantity.batchSizeKg !== undefined ? { batchSizeKg: quantity.batchSizeKg } : {}) };
-      }) }));
+      }) }; });
     return [];
   }
   function deleteJobOrder(id: string) {
@@ -1025,8 +1046,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers} directory={directory} onConfirmFormula={confirmFormula} yieldLimits={yieldLimits} onYieldLimits={saveYieldLimits}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
         section={statusSection} onSection={setStatusSection} onTest={testJob} onRelease={releaseJob} onReject={rejectJob} /> : null}
-      {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
-      {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
+      {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, overPlan: overPlanFor, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
+      {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, overPlan: overPlanFor, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
       {activeTab === "audit" && caps.auditTrail ? <HistoryPanel refreshKey={activeTab} canDownload={caps.printAuditTrail} /> : null}
       {activeTab === "news" ? <ReleaseNotes releases={releases} /> : null}
       {activeTab === "reports" && calendar && caps.reports ? <>

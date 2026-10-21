@@ -35,8 +35,11 @@ export type JobActions = {
   // Create adds job orders; edit changes or removes them (Core's orders create and edit tasks).
   canCreate: boolean; canEdit: boolean;
   // Job order numbers are keyed in; a PO item takes as many job orders as it has batches.
-  onCreate: (job: ManualJob) => string[];
-  onUpdate: (job: JobOrder) => string[];
+  // Planning more than a PO (process waste, samples) needs a reason: overPlan lists the POs a save
+  // would take over their quantity, and the reason goes with the save.
+  overPlan: (job: ManualJob | JobOrder) => { poNumber: string; total: number; ordered: number; over: number; uom: string }[];
+  onCreate: (job: ManualJob, overPlanReason?: string) => string[];
+  onUpdate: (job: JobOrder, overPlanReason?: string) => string[];
   onDelete: (id: string) => string[];
 };
 
@@ -576,6 +579,13 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
   const remaining = Math.max(0, Number((order.quantity - released).toPrecision(12)));
   const allowable = product?.batchQuantity;
   const report = (result: string[], success: string) => { setErrors(result); setNotice(result.length ? "" : success); return !result.length; };
+  const checkDates = useDateCheck();
+  // Saves at once, unless the job orders would add up to more than a PO: then only with a reason.
+  function withOverPlanReason(job: ManualJob | JobOrder, save: (reason?: string) => void) {
+    const over = actions.overPlan(job);
+    if (!over.length) { save(); return; }
+    checkDates([], save, { reason: "overplan", changes: over.map((item) => `${item.poNumber}: job orders ${item.total.toLocaleString()} ${item.uom}, ${item.over.toLocaleString()} (${(item.over / item.ordered * 100).toFixed(1)}%) more than the ${item.ordered.toLocaleString()} ordered`) });
+  }
   // Kilograms for a quantity, from the product's batch size when the quantity is in the PO's unit.
   const kgFor = (quantity: number, uom: string) => product?.batchSizeKg && product.batchQuantity && uom === order.uom ? Number((product.batchSizeKg * quantity / product.batchQuantity).toPrecision(6)) : undefined;
   const number = (value: FormDataEntryValue | null) => { const text = String(value ?? "").trim(); return text ? Number(text) : undefined; };
@@ -604,7 +614,7 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
     <summary className="order-section-summary"><h3>Job orders <span className="badge neutral">{jobs.length}</span></h3>
       <span className="route-muted">{released.toLocaleString()} of {order.quantity.toLocaleString()} {order.uom} in job orders{remaining ? ` · ${remaining.toLocaleString()} still to release` : ""}{allowable ? ` · allowable batch ${allowable.toLocaleString()} ${order.uom}` : ""}</span>
       {overage !== undefined ? <span className={overage > DISPENSING_OVERAGE_LIMIT ? "order-warning" : "route-muted"} title="Batch sizes keyed in on the job orders against the order's total weight">{formatKg(dispensedKg)} for dispensing against the order's {formatKg(orderTotalKg!)} · {overage >= 0 ? `${overage.toFixed(1)}% overage${overage > DISPENSING_OVERAGE_LIMIT ? `, above the ${DISPENSING_OVERAGE_LIMIT}% limit` : ""}` : `${(-overage).toFixed(1)}% short`}</span> : null}
-      {released > order.quantity ? <span className="order-warning">{(released - order.quantity).toLocaleString()} {order.uom} more than the PO</span> : null}
+      {released > order.quantity ? <span className="order-warning" title={order.overPlanReason ? `Reason given by ${order.overPlannedBy ?? "planning"}${order.overPlannedAt ? ` on ${displayDate(order.overPlannedAt)}` : ""}` : undefined}>{(released - order.quantity).toLocaleString()} {order.uom} ({((released - order.quantity) / order.quantity * 100).toFixed(1)}%) more than the PO{order.overPlanReason ? `: ${order.overPlanReason}` : ""}</span> : null}
       {uncounted.length ? <span className="order-warning">{uncounted.map((job) => job.number).join(", ")}: no figure in {order.uom}, not counted</span> : null}</summary>
     {jobs.length ? <div className="order-batch-scroll"><table className="job-order-table">
       <thead><tr><th scope="col">Job order no.</th><th scope="col" className="numeric">Batch size<small>Dispensing</small></th><th scope="col" className="numeric">Batch quantity<small>{countSteps || "Production"}</small></th><th scope="col">PJO no.<small>Packing</small></th><th scope="col" className="numeric">Pack quantity<small>Filling</small></th><th scope="col" className="numeric">Total packs<small>Packing</small></th><th scope="col">Batch number</th><th scope="col"><span className="admin-sr-only">Actions</span></th></tr></thead>
@@ -622,7 +632,7 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
             const next: JobOrder = { ...unshared, ...(shares.length ? { shares } : {}), number: read.number, quantity: read.quantity, uom: read.uom,
               ...(read.batchSizeKg ? { batchSizeKg: read.batchSizeKg } : {}), ...(read.batchVolumeL ? { batchVolumeL: read.batchVolumeL } : {}), ...(read.packQuantity ? { packQuantity: read.packQuantity } : {}),
               ...(read.packUom ? { packUom: read.packUom } : {}), ...(read.packSize ? { packSize: read.packSize } : {}), ...(read.boxQuantity ? { boxQuantity: read.boxQuantity } : {}), ...(read.packingNumber ? { packingNumber: read.packingNumber } : {}) };
-            if (report(actions.onUpdate(next), `${next.number.trim()} saved.${planned.some((line) => !line.completedAt) ? " Its planned activities now carry the new quantities." : ""}`)) setEditing(null);
+            withOverPlanReason(next, (reason) => { if (report(actions.onUpdate(next, reason), `${next.number.trim()} saved.${planned.some((line) => !line.completedAt) ? " Its planned activities now carry the new quantities." : ""}`)) setEditing(null); });
           }}>
             {fields(job, shareDrafts.reduce((sum, draft) => sum + (Number(draft.quantity) || 0), 0))}
             <JobSharesEditor job={job} order={order} format={format} orders={orders} products={products} drafts={shareDrafts} onChange={setShareDrafts} />
@@ -668,7 +678,8 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
       const data = new FormData(event.currentTarget);
       const read = readJob(data);
       const batchSizeKg = read.batchSizeKg ?? (read.batchVolumeL ? undefined : kgFor(read.quantity, read.uom));
-      if (report(actions.onCreate({ ...read, orderId: order.id, batchSizeKg }), `Job order ${read.number} added to ${order.poNumber}. Plan it on the Planner Board.`)) setAddVersion((value) => value + 1);
+      const input = { ...read, orderId: order.id, batchSizeKg };
+      withOverPlanReason(input, (reason) => { if (report(actions.onCreate(input, reason), `Job order ${read.number} added to ${order.poNumber}. Plan it on the Planner Board.`)) setAddVersion((value) => value + 1); });
     }}>
       {fields()}
       <div className="job-order-buttons"><button type="submit" className="primary-button"><Plus size={16} />Add job order</button></div>

@@ -61,7 +61,25 @@ export function orderedInJobs(order: PurchaseOrder, jobs: JobOrder[]) {
   const figures = serving.map((job) => partInOrderUnit(job, order));
   return { total: Number(figures.reduce<number>((sum, value) => sum + (value ?? 0), 0).toPrecision(12)), uncounted: serving.filter((_, index) => figures[index] === undefined) };
 }
-export const overOrderedText = (order: PurchaseOrder, total: number) => `Job orders for ${order.poNumber} would add up to ${total.toLocaleString()} ${order.uom}, more than the ${order.quantity.toLocaleString()} ordered.`;
+export const overOrderedText = (order: PurchaseOrder, total: number) => `Job orders for ${order.poNumber} would add up to ${total.toLocaleString()} ${order.uom}, more than the ${order.quantity.toLocaleString()} ordered. Give the reason for planning more (process waste, QC or retain samples...).`;
+/**
+ * Whether a PO's job orders may add up to `total`: within the PO, or more with a reason, either given
+ * now or recorded on the PO for at least this total. A plan above the recorded total needs a new one.
+ */
+export function overPlanAllowed(order: PurchaseOrder, total: number, reason?: string) {
+  if (total <= order.quantity + 1e-9) return true;
+  if (reason?.trim()) return true;
+  return !!order.overPlanReason?.trim() && total <= (order.overPlannedTotal ?? 0) + 1e-9;
+}
+// What a set of job orders would put over each PO they serve, beyond what a recorded reason covers.
+export function overPlans(orderIds: string[], jobs: JobOrder[], orders: PurchaseOrder[]) {
+  return [...new Set(orderIds)].flatMap((orderId) => {
+    const order = orders.find((item) => item.id === orderId);
+    if (!order) return [];
+    const { total } = orderedInJobs(order, jobs);
+    return overPlanAllowed(order, total) ? [] : [{ order, total, over: Number((total - order.quantity).toPrecision(12)) }];
+  });
+}
 
 /**
  * The job order as one PO sees it: that PO's share and packing in place of the first PO's, so a
@@ -89,7 +107,7 @@ export const formulaPending = (job: JobOrder, orders: PurchaseOrder[]) => needsF
  * form as the first, a share above zero for every PO (the first keeps the rest of the batch), and
  * no PO given more than it ordered across all its job orders (counted in the PO's own unit).
  */
-export function sharesProblem(job: JobOrder, orders: PurchaseOrder[], jobs: JobOrder[], formatOf: (order: PurchaseOrder) => string): string {
+export function sharesProblem(job: JobOrder, orders: PurchaseOrder[], jobs: JobOrder[], formatOf: (order: PurchaseOrder) => string, overPlanReason?: string): string {
   const shares = job.shares ?? [];
   if (!shares.length) return "";
   if (shares.length + 1 > MAX_POS_PER_JOB) return `One batch can serve at most ${MAX_POS_PER_JOB} POs.`;
@@ -117,7 +135,7 @@ export function sharesProblem(job: JobOrder, orders: PurchaseOrder[], jobs: JobO
   for (const part of jobParts(job)) {
     const order = orders.find((item) => item.id === part.orderId)!;
     const { total } = orderedInJobs(order, [...jobs.filter((other) => other.id !== job.id), job]);
-    if (total > order.quantity + 1e-9) return overOrderedText(order, total);
+    if (!overPlanAllowed(order, total, overPlanReason)) return overOrderedText(order, total);
   }
   return "";
 }

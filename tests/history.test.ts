@@ -85,3 +85,12 @@ describe("corrections in the audit trail", () => {
     expect(describeChanges(base, fixed).map((change) => change.text)).toEqual([expect.stringContaining("production update corrected: actual") && expect.stringContaining("(reason: Recount after reconciliation)")]);
   });
 });
+
+describe("planning above the PO in the audit trail", () => {
+  it("records the extra quantity and its reason", () => {
+    const order = base.data.orders.find((item) => item.poNumber === "PO-2610-142")!;
+    const next = structuredClone(base);
+    Object.assign(next.data.orders.find((item) => item.id === order.id)!, { overPlanReason: "Retain samples", overPlannedTotal: order.quantity + 6000, overPlannedBy: "Aida", overPlannedAt: "2026-10-21T08:00:00.000Z" });
+    expect(describeChanges(base, next).map((change) => change.text)).toEqual([`PO PO-2610-142 planned above the order: job orders 606,000 tablets, 6,000 (1.0%) more than the 600,000 ordered (reason: Retain samples)`]);
+  });
+});

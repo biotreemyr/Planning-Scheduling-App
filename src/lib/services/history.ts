@@ -65,6 +65,12 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
       changes.push({ kind: "PO", po: po(row.id), product: productName(row.productId), text: `PO ${po(row.id)} closed at ${num(row.closedQuantity)} ${str(row.closedUom ?? row.uom)} (ordered ${num(row.quantity)} ${str(row.uom)})${row.closeNote ? `: ${str(row.closeNote)}` : ""}` });
       if (!parts.length) continue;
     }
+    // Job orders planned above the PO (process waste, samples): its own entry, with the reason.
+    if (row.overPlanReason && old.overPlannedAt !== row.overPlannedAt) {
+      const over = Number(row.overPlannedTotal) - Number(row.quantity);
+      changes.push({ kind: "PO", po: po(row.id), product: productName(row.productId), text: `PO ${po(row.id)} planned above the order: job orders ${num(row.overPlannedTotal)} ${str(row.uom)}, ${num(over)} (${(over / Number(row.quantity) * 100).toFixed(1)}%) more than the ${num(row.quantity)} ordered (reason: ${str(row.overPlanReason)})` });
+      if (!parts.length) continue;
+    }
     changes.push({ kind: "PO", po: po(row.id), product: productName(row.productId), text: `PO ${po(row.id)} edited${parts.length ? `: ${parts.join("; ")}` : ""}` });
   }
 
