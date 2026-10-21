@@ -24,7 +24,9 @@ const only = (keys: string[], allowed: string[]) => keys.every((key) => allowed.
 
 // Who/when a record was last edited: they follow the change they stamp, so need no right of their own.
 const EDIT_STAMPS = ["updatedBy", "updatedAt"];
-const LINE_STAMPS = [...EDIT_STAMPS, "plannedBy", "plannedAt"];
+const LINE_STAMPS = [...EDIT_STAMPS, "plannedBy", "plannedAt", "correctionReason", "correctedBy", "correctedAt"];
+// What a completed process recorded: changing any of it later is a correction, which needs a reason.
+const LINE_RECORD = ["completedAt", "startedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "actualUnitVolumeMl", "shellWeightMg", "plannedDate", "endDate"];
 // An activity's dates, which production may change too, always with its reason.
 const LINE_DATES = ["plannedDate", "endDate", "planChangeReason"];
 // What production records on an activity.
@@ -122,6 +124,8 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
   if (lines.added.some((line) => LINE_RESULTS.some((key) => (line as Record<string, unknown>)[key] !== undefined))) need(can.produce, "record production results");
   for (const { before: old, after: line } of lines.changed) {
     const keys = changedKeys(old, line);
+    // Correcting a completed process's dates or quantity carries a fresh correction with its reason.
+    if (old.completedAt && keys.some((key) => LINE_RECORD.includes(key)) && !(keys.includes("correctedAt") && line.correctionReason?.trim())) need(false, "correct completed production without a reason");
     if (keys.some((key) => LINE_RESULTS.includes(key))) need(can.produce, "record production results");
     // When production reports another machine than planned, the planned one is kept on the activity.
     const keptMachine = (key: string) => key === "plannedMachineIds" && old.plannedMachineIds === undefined && old.plannedMachineId === undefined;

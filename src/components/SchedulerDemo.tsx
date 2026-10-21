@@ -24,7 +24,7 @@ import { HistoryPanel } from "@/components/HistoryPanel";
 import { inUnit, type JobPlan } from "@/components/JobPlanDialog";
 import { calendarProcessName, calendarSettings, unitRoute, type ProcessSettings } from "@/lib/services/processSetup";
 import { batchRoute, isNonProduction, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
-import { awaitingReceipt, validateCompletion, validateCorrection, withoutProgress, type CompletionInput, type Progress, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
+import { awaitingReceipt, correctsRecord, validateCompletion, validateCorrection, withoutProgress, type CompletionInput, type Progress, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
 import { validateActual, type ProductionActual } from "@/lib/services/actuals";
@@ -556,16 +556,21 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     const completedAt = sameDay ? line.completedAt! : input.completedDate === localDateKey(now) ? now.toISOString() : new Date(`${input.completedDate}T17:00`).toISOString();
     const uom = input.uom || (line.uom ?? "");
     const handedOver = !!outgoing && !!(outgoing.receivedAt || outgoing.plannedLineId);
+    const corrected = correctsRecord(line, input);
     setData((current) => {
       const lines = current.lines.map((item) => {
         if (item.id !== line.id) return item;
         const { yieldUom: _u, startedAt: _s, productionNotes: _n, weighedQuantity: _wq, weighedUom: _wu, actualUnitWeightMg: _wm, actualUnitVolumeMl: _wv, shellWeightMg: _sw, ...rest } = item;
         return { ...rest, completedAt, yieldQuantity: input.quantity, ...(uom !== (item.uom ?? "") ? { yieldUom: uom } : {}), ...weighedFields(input),
-          startedAt: input.startedAt || input.completedDate!, ...(input.notes ? { productionNotes: input.notes } : {}) };
+          startedAt: input.startedAt || input.completedDate!, ...(input.notes ? { productionNotes: input.notes } : {}),
+          // A correction to the dates or quantity keeps its reason, with who and when (stamped by the server too).
+          ...(corrected ? { correctionReason: input.reason!.trim(), correctedBy: member.name, correctedAt: now.toISOString() } : {}) };
       });
       const actuals = current.actuals.map((item) => item.planLineId === line.id ? { ...item, actualQuantity: input.quantity, uom, productionDate: input.completedDate!, updatedAt: now.toISOString(), updatedBy: member.name,
         ...(input.deviation?.trim() ? { hasDeviation: true, deviation: input.deviation.trim() } : {}) } : item);
       let transfers = current.transfers;
+      // Already received: the handover stays where it went, but carries the corrected quantity.
+      if (handedOver && outgoing && outgoing.quantity !== input.quantity) transfers = transfers.map((item) => item.id === outgoing.id ? { ...item, quantity: input.quantity } : item);
       if (!handedOver) {
         transfers = transfers.filter((item) => item.sourceLineId !== line.id);
         if (input.destinationId) transfers = [...transfers, { ...(outgoing ?? { id: newId("wip"), sourceLineId: line.id, sourceCalendarId: line.calendarId!, productId: line.productId, orderReference: line.orderReference, createdBy: member.name }),
@@ -613,17 +618,20 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   function moveLine(id: string, date: string) {
     const line = allowedLines.find((item) => item.id === id);
     const checks = [{ label: `${line?.activityType ?? "Activity"} date`, value: date, rule: "plan" as const, was: line?.plannedDate }];
+    // A completed process's date is a recorded fact: moving it is a correction, with its reason.
+    if (line?.completedAt && line.plannedDate !== date) { checkDates(checks, (reason) => setPlanNotice(applyMove(id, date, reason, true)), { reason: "correction" }); return ""; }
     if (line && !canPlan && canProduce) { checkDates(checks, (reason) => setPlanNotice(applyMove(id, date, reason)), { reason: "always" }); return ""; }
     if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, (reason) => setPlanNotice(applyMove(id, date, reason))); return ""; }
     return applyMove(id, date);
   }
-  function applyMove(id: string, date: string, reason?: string) {
+  function applyMove(id: string, date: string, reason?: string, correction = false) {
     if (!canMoveDates || !allowedLines.some((item) => item.id === id)) return "You cannot move this activity.";
-    if (!canPlan && !reason) return "Give a reason for changing the plan.";
+    if ((!canPlan || correction) && !reason) return correction ? "Give the reason for correcting a completed process's date." : "Give a reason for changing the plan.";
     const result = moveActivity(data.lines, data.entries, id, date, member.name);
     if ("error" in result) return result.error;
     if (result.lines === data.lines) return "";
-    setData((current) => ({ ...current, lines: withPlanReason(result.lines, [id], reason), entries: result.entries }));
+    const lines = correction ? result.lines.map((item) => item.id === id ? { ...item, correctionReason: reason!.trim(), correctedBy: member.name, correctedAt: new Date().toISOString() } : item) : withPlanReason(result.lines, [id], reason);
+    setData((current) => ({ ...current, lines, entries: result.entries }));
     const when = formatDate(date);
     const moved = new Set(result.movedEntryIds);
     const clash = findMachineConflicts(result.entries, machines, products).find((conflict) => conflict.entryIds.some((entryId) => moved.has(entryId)));
@@ -636,17 +644,18 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   function resizeLine(id: string, endDate: string) {
     const line = allowedLines.find((item) => item.id === id);
     const checks = [{ label: `${line?.activityType ?? "Activity"} last day`, value: endDate, rule: "plan" as const, was: line ? lineEnd(line) : undefined }];
+    if (line?.completedAt && lineEnd(line) !== endDate) { checkDates(checks, (reason) => setPlanNotice(applyResize(id, endDate, reason, true)), { reason: "correction" }); return ""; }
     if (line && !canPlan && canProduce) { checkDates(checks, (reason) => setPlanNotice(applyResize(id, endDate, reason)), { reason: "always" }); return ""; }
     if (canPlan && line && dateWarnings(checks, localDateKey(new Date())).length) { checkDates(checks, (reason) => setPlanNotice(applyResize(id, endDate, reason))); return ""; }
     return applyResize(id, endDate);
   }
-  function applyResize(id: string, endDate: string, reason?: string) {
+  function applyResize(id: string, endDate: string, reason?: string, correction = false) {
     if (!canMoveDates || !allowedLines.some((item) => item.id === id)) return "You cannot change this activity.";
-    if (!canPlan && !reason) return "Give a reason for changing the plan.";
+    if ((!canPlan || correction) && !reason) return correction ? "Give the reason for correcting a completed process's dates." : "Give a reason for changing the plan.";
     const result = resizeActivity(data.lines, data.entries, id, endDate, member.name);
     if ("error" in result) return result.error;
     if (result.lines === data.lines) return "";
-    setData((current) => ({ ...current, lines: withPlanReason(result.lines, [id], reason), entries: result.entries }));
+    setData((current) => ({ ...current, lines: correction ? result.lines.map((item) => item.id === id ? { ...item, correctionReason: reason!.trim(), correctedBy: member.name, correctedAt: new Date().toISOString() } : item) : withPlanReason(result.lines, [id], reason), entries: result.entries }));
     const line = result.lines.find((item) => item.id === id)!;
     const day = (value: string) => formatDate(value.slice(0, 10));
     const span = line.endDate ? `${day(line.plannedDate)} – ${day(line.endDate)}` : day(line.plannedDate);
@@ -742,9 +751,12 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       // A completed activity keeps its quantity and machine; only its planned date can be corrected.
       if (line.completedAt) {
         if (line.plannedDate === row.plannedDate) continue;
+        // A completed process's planned date is a recorded fact: changing it needs a reason.
+        if (!plan.correctionReason?.trim()) return { error: `${row.activityType} is completed: give the reason for changing its planned date.` };
         const moved = moveActivity(lines, entries, line.id, row.plannedDate, member.name);
         if ("error" in moved) return { error: moved.error };
-        lines = moved.lines; entries = moved.entries; updated += 1;
+        lines = moved.lines.map((item) => item.id === line.id ? { ...item, correctionReason: plan.correctionReason!.trim(), correctedBy: member.name, correctedAt: new Date().toISOString() } : item);
+        entries = moved.entries; updated += 1;
         continue;
       }
       if (line.plannedDate === row.plannedDate && line.quantity === row.quantity && line.uom === row.uom && line.priority === plan.priority) continue;

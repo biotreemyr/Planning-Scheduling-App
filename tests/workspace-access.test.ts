@@ -175,3 +175,21 @@ describe("workspace change review", () => {
     expect(reviewWorkspaceChange(base, forged, role("schedule.edit")).denied).toEqual(["move or edit plan activities"]);
   });
 });
+
+describe("corrections to completed production", () => {
+  it("refuses a change to a completed process's dates or quantity without a fresh reason", () => {
+    const done = base.data.lines.find((line) => line.completedAt && line.yieldQuantity)!;
+    const everyone = capabilitiesFromPermissions(["planning.view", "planning.create", "planning.edit", "schedule.view", "schedule.edit"].map((key) => `scheduler.${key}`));
+    const silent = copy();
+    silent.data.lines.find((line) => line.id === done.id)!.yieldQuantity = done.yieldQuantity! - 1;
+    silent.data.actuals = silent.data.actuals.map((actual) => actual.planLineId === done.id ? { ...actual, actualQuantity: done.yieldQuantity! - 1 } : actual);
+    expect(reviewWorkspaceChange(base, silent, everyone).denied).toContain("correct completed production without a reason");
+    const explained = structuredClone(silent);
+    Object.assign(explained.data.lines.find((line) => line.id === done.id)!, { correctionReason: "Wrong figure keyed in", correctedBy: "QC", correctedAt: "2026-10-21T08:00:00.000Z" });
+    expect(reviewWorkspaceChange(base, explained, everyone).denied).not.toContain("correct completed production without a reason");
+    // Moving a completed process's planned date is a correction too.
+    const moved = copy();
+    moved.data.lines.find((line) => line.id === done.id)!.plannedDate = "2026-01-05";
+    expect(reviewWorkspaceChange(base, moved, everyone).denied).toContain("correct completed production without a reason");
+  });
+});

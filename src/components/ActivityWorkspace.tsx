@@ -137,7 +137,8 @@ function ProductionRoute({ line, route, format, warnings, machines, entries, tra
             : chosenKind === "final" ? "Final output" : chosenKind === "wip" ? `WIP room, for ${processOf(chosenCalendar)}` : chosenKind === "next" ? processOf(chosenCalendar) : "";
           const current = item.id === line.id;
           // Who planned shows beside the Planned cells, who last updated beside the Actual ones.
-          const plannedWho = hover([whoText("Planned", item.plannedBy, item.plannedAt), item.planChangeReason ? `Reason for the plan change: ${item.planChangeReason}` : ""].filter(Boolean).join("\n"));
+          const plannedWho = hover([whoText("Planned", item.plannedBy, item.plannedAt), item.planChangeReason ? `Reason for the plan change: ${item.planChangeReason}` : "",
+            item.correctionReason ? `${whoText("Corrected", item.correctedBy, item.correctedAt)}: ${item.correctionReason}` : ""].filter(Boolean).join("\n"));
           const updatedWho = item.startedAt || item.completedAt || item.progressQuantity !== undefined || item.progressDestination ? whoText("Updated", item.updatedBy, item.updatedAt) : "";
           // Production can click anywhere on a day's Actual cells to key them in.
           const open = (className = "") => ({ className: `${className}${canUpdate ? " route-actual-open" : ""}`.trim() || undefined, ...hover(updatedWho), ...(canUpdate ? { onClick: () => { setTip(null); onOpenLine?.(item.id, true); } } : {}) });

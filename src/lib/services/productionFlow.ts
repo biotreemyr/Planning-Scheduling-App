@@ -55,12 +55,24 @@ export function validateCompletion(line: PlanLine, input: CompletionInput, perso
 }
 
 // Correcting a completed activity: the same fields as completing it, plus the start date.
-export type CorrectionInput = CompletionInput & { startedAt: string };
+// reason: why the dates or quantity of a completed process are corrected (required when they change).
+export type CorrectionInput = CompletionInput & { startedAt: string; reason?: string };
+
+// Whether a correction changes what was recorded: the dates or the quantity (count, weight or unit).
+export function correctsRecord(line: PlanLine, input: CorrectionInput) {
+  const day = (value?: string) => value ? value.slice(0, 10) : "";
+  const completedDay = line.completedAt ? new Date(line.completedAt) : undefined;
+  const completedLocal = completedDay ? `${completedDay.getFullYear()}-${String(completedDay.getMonth() + 1).padStart(2, "0")}-${String(completedDay.getDate()).padStart(2, "0")}` : "";
+  return (input.completedDate ?? "") !== completedLocal || (input.startedAt || input.completedDate || "") !== day(line.startedAt)
+    || input.quantity !== line.yieldQuantity || (input.uom || line.uom) !== (line.yieldUom ?? line.uom)
+    || (input.weighed?.quantity ?? line.weighedQuantity) !== line.weighedQuantity || (input.weighed ? input.weighed.unitWeightMg !== (line.actualUnitWeightMg ?? line.actualUnitVolumeMl) : false);
+}
 
 /**
- * Check a correction to a completed production update. Dates and notes can always be corrected;
- * the actual quantity, its unit and where the output went only until the receiving process has
- * acknowledged the handover (or planning has added it to the plan), so its stock stays true.
+ * Check a correction to a completed production update. Dates, the actual quantity and notes can
+ * always be corrected, with a reason when the dates or quantity change. Once the receiving process
+ * has acknowledged the handover (or planning has added it to the plan), where the output went and
+ * its unit stay as they are; a corrected quantity then updates the handover too.
  */
 export function validateCorrection(line: PlanLine, input: CorrectionInput, outgoing: WipTransfer | undefined, person: CalendarPerson, directory: CalendarDirectory, requireReceivingTeam = true) {
   if (!line.completedAt) return ["This activity is not complete yet."];
@@ -69,7 +81,8 @@ export function validateCorrection(line: PlanLine, input: CorrectionInput, outgo
   if (input.startedAt && !/^\d{4}-\d{2}-\d{2}$/.test(input.startedAt)) errors.push("Choose the date production started.");
   const handedOver = outgoing && (outgoing.receivedAt || outgoing.plannedLineId);
   const destinationChanged = (outgoing?.calendarId ?? "") !== input.destinationId || !!outgoing?.wipRoom !== !!input.wipRoom;
-  const quantityChanged = input.quantity !== line.yieldQuantity || (input.uom || line.uom) !== (line.yieldUom ?? line.uom);
-  if (handedOver && (destinationChanged || quantityChanged)) errors.push(`${outgoing.receivedBy ?? "The next process"} has already received this output, so its quantity and destination stay as they are. Dates and notes can still be corrected.`);
+  const unitChanged = (input.uom || line.uom) !== (line.yieldUom ?? line.uom);
+  if (handedOver && (destinationChanged || unitChanged)) errors.push(`${outgoing.receivedBy ?? "The next process"} has already received this output, so where it went and its unit stay as they are. Dates and the quantity can still be corrected, with a reason.`);
+  if (correctsRecord(line, input) && !input.reason?.trim()) errors.push("Give the reason for correcting the dates or quantity of completed production.");
   return errors;
 }

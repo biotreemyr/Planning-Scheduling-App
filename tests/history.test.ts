@@ -76,3 +76,12 @@ describe("shared batches in the transaction history", () => {
     expect(describeChanges(released, closed).map((change) => change.text)).toEqual([`PO PO-2610-142 closed at 2,006 ${order.uom} (ordered ${order.quantity.toLocaleString("en-GB")} ${order.uom}): Customer took the extra 6`]);
   });
 });
+
+describe("corrections in the audit trail", () => {
+  it("records the reason for correcting completed production", () => {
+    const line = base.data.lines.find((item) => item.completedAt && item.yieldQuantity)!;
+    const fixed = structuredClone(base);
+    Object.assign(fixed.data.lines.find((item) => item.id === line.id)!, { yieldQuantity: line.yieldQuantity! - 1, correctionReason: "Recount after reconciliation", correctedBy: "QC", correctedAt: "2026-10-21T08:00:00.000Z" });
+    expect(describeChanges(base, fixed).map((change) => change.text)).toEqual([expect.stringContaining("production update corrected: actual") && expect.stringContaining("(reason: Recount after reconciliation)")]);
+  });
+});
