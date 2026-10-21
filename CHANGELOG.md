@@ -8,6 +8,9 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Changed
+- **Job orders may add up to more than the PO**, to allow for process waste, QC and retain samples, stability samples and the like. Saving asks for the reason first and shows how much more is planned (e.g. "PWL005178: job orders 2,776 boxes, 276 (11.0%) more than the 2,500 ordered"). The reason, with who gave it and when, is kept on the PO, shows beside the job orders and goes into the audit trail. Planning more again later needs a new reason.
+
 ## [1.11.0] - 2026-10-21
 
 ### Changed

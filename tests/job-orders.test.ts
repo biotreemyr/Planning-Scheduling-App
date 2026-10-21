@@ -20,7 +20,20 @@ describe("job orders", () => {
     const first = keyIn("JO0010", 300000) as JobOrder;
     const second = keyIn("JO0011", 300000, [...state.data.jobOrders, first]) as JobOrder;
     expect([first.sequence, second.sequence, second.orderId]).toEqual([1, 2, order.id]);
-    expect(keyIn("JO0012", 1, [...state.data.jobOrders, first, second])).toEqual({ error: "Job orders for PO-2610-142 would add up to 600,001 tablets, more than the 600,000 ordered." });
+    expect(keyIn("JO0012", 1, [...state.data.jobOrders, first, second])).toEqual({ error: expect.stringContaining("Job orders for PO-2610-142 would add up to 600,001 tablets, more than the 600,000 ordered.") });
+  });
+  it("plans more than the PO only with a reason, kept on the PO up to the total it was given for", () => {
+    const first = keyIn("JO0010", 300000) as JobOrder;
+    const second = keyIn("JO0011", 300000, [...state.data.jobOrders, first]) as JobOrder;
+    const jobs = [...state.data.jobOrders, first, second];
+    const extra = createManualJobOrder({ number: "JO0012", orderId: order.id, quantity: 6000, uom: "tablets", ...measures, overPlanReason: "Retain samples" }, state.data.orders, jobs, state.products, { today, userName: "Aida", newId: () => "job-JO0012" }) as JobOrder;
+    expect(extra.number).toBe("JO0012");
+    // The reason stays on the PO, not the job order: a later edit within that total needs no new reason.
+    expect(extra).not.toHaveProperty("overPlanReason");
+    const orders = state.data.orders.map((item) => item.id === order.id ? { ...item, overPlanReason: "Retain samples", overPlannedTotal: 606000 } : item);
+    expect(updateJobOrder({ ...extra, quantity: 5000 }, [...jobs, extra], orders, state.products)).toMatchObject({ quantity: 5000 });
+    expect(updateJobOrder({ ...extra, quantity: 7000 }, [...jobs, extra], orders, state.products)).toMatchObject({ error: expect.stringContaining("607,000 tablets") });
+    expect(updateJobOrder({ ...extra, quantity: 7000 }, [...jobs, extra], orders, state.products, undefined, "QC testing samples")).toMatchObject({ quantity: 7000 });
   });
   it("edits a job order: new number, quantity and batch number, still checked", () => {
     const first = keyIn("JO0010", 300000) as JobOrder;
@@ -62,11 +75,13 @@ describe("job orders", () => {
     Object.assign(job, { batchNumber: "FA-099", batchNumberBy: "Kumar", batchNumberAt: "2026-10-07T02:00:00.000Z" });
     expect(reviewWorkspaceChange(state, withBatch, production).allowed).toBe(true);
     const created = structuredClone(state);
-    created.data.jobOrders.push({ ...job, id: "job-extra", number: "JO-2610-050", batchNumber: undefined });
+    // On a PO with no job orders yet, so the new batch stays within it.
+    const room = state.data.orders.find((item) => item.uom === job.uom && item.quantity >= job.quantity && !state.data.jobOrders.some((other) => other.orderId === item.id))!;
+    created.data.jobOrders.push({ ...job, id: "job-extra", number: "JO-2610-050", orderId: room.id, batchNumber: undefined, batchNumberBy: undefined, batchNumberAt: undefined });
     expect(reviewWorkspaceChange(state, created, production)).toMatchObject({ allowed: false, denied: ["create or remove job orders"] });
     expect(reviewWorkspaceChange(state, created, capabilitiesForDemoRole("planner")).allowed).toBe(true);
     const resized = structuredClone(state);
-    resized.data.jobOrders[0].quantity += 1;
+    resized.data.jobOrders[0].quantity -= 1;
     expect(reviewWorkspaceChange(state, resized, production).denied).toEqual(["edit job orders"]);
   });
   it("requires every new activity to carry out a job order, and never unlinks one", () => {

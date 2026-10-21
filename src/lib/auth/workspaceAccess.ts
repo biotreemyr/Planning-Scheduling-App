@@ -5,6 +5,7 @@ import type { Customer, Product } from "@/lib/domain/types";
 import { customerFor, productFor, type MasterLists } from "@/lib/services/masterData";
 import type { WorkspaceCapabilities } from "./capabilities";
 import { bookingMoved } from "@/lib/services/planChanges";
+import { orderedInJobs, overPlanAllowed } from "@/lib/services/sharedJobs";
 
 type Keyed = { id: string };
 function diff<T extends Keyed>(before: T[], after: T[]) {
@@ -25,6 +26,8 @@ const only = (keys: string[], allowed: string[]) => keys.every((key) => allowed.
 // Who/when a record was last edited: they follow the change they stamp, so need no right of their own.
 const EDIT_STAMPS = ["updatedBy", "updatedAt"];
 const LINE_STAMPS = [...EDIT_STAMPS, "plannedBy", "plannedAt", "correctionReason", "correctedBy", "correctedAt"];
+// The reason for job orders adding up to more than a PO, given while creating or editing job orders.
+const OVER_PLAN = ["overPlanReason", "overPlannedTotal", "overPlannedBy", "overPlannedAt"];
 // What a completed process recorded: changing any of it later is a correction, which needs a reason.
 const LINE_RECORD = ["completedAt", "startedAt", "yieldQuantity", "yieldUom", "weighedQuantity", "weighedUom", "actualUnitWeightMg", "actualUnitVolumeMl", "shellWeightMg", "plannedDate", "endDate"];
 // An activity's dates, which production may change too, always with its reason.
@@ -85,7 +88,9 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
 
   const orders = diff(before.data.orders, after.data.orders);
   if (orders.added.length) need(can.createOrders, "add orders");
-  if (orders.removed.length || orders.changed.length) need(can.editOrders, "edit or delete orders");
+  const overPlanOnly = orders.changed.filter((change) => only(changedKeys(change.before, change.after), [...OVER_PLAN, ...EDIT_STAMPS]) && !!change.after.overPlanReason?.trim());
+  if (overPlanOnly.length) need(can.createOrders || can.editOrders, "give a reason for planning more than a PO");
+  if (orders.removed.length || orders.changed.length > overPlanOnly.length) need(can.editOrders, "edit or delete orders");
   count("orders added", orders.added.length); count("orders changed", orders.changed.length); count("orders removed", orders.removed.length);
 
   const customers = diff(before.data.customers, after.data.customers);
@@ -111,6 +116,12 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
     }
     const rest = keys.filter((key) => !JOB_GROUPED.has(key));
     if (rest.some((key) => !EDIT_STAMPS.includes(key)) || (rest.length && rest.length === keys.length)) need(can.editOrders, "edit job orders");
+  }
+  // Job orders may add up to more than a PO (process waste, samples) only with a reason kept on the PO.
+  for (const order of after.data.orders) {
+    const { total } = orderedInJobs(order, after.data.jobOrders);
+    const was = before.data.orders.find((item) => item.id === order.id);
+    if (total > (was ? orderedInJobs(was, before.data.jobOrders).total : 0) + 1e-9 && !overPlanAllowed(order, total)) need(false, "plan job orders above the PO without a reason");
   }
   count("job orders added", jobs.added.length); count("job orders changed", jobs.changed.length); count("job orders removed", jobs.removed.length);
 

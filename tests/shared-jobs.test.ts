@@ -103,6 +103,8 @@ describe("who may change a shared batch", () => {
     const { reviewWorkspaceChange } = await import("../src/lib/auth/workspaceAccess");
     const base = addSampleData(newWorkspace(), new Date(2026, 9, 7, 10)).state!;
     const [first, second] = base.data.orders;
+    // Both POs are fully planned already: the extra batch is planned above them with a reason.
+    for (const order of [first, second]) Object.assign(order, { overPlanReason: "Retain samples", overPlannedTotal: order.quantity + 100 });
     base.data.jobOrders.push({ id: "job-s", number: "JO0070", orderId: first.id, sequence: 9, quantity: 100, uom: first.uom, createdAt: "2026-10-07T00:00:00Z", createdBy: "Aida" });
     const role = (...keys: string[]) => capabilitiesFromPermissions(keys.map((key) => `scheduler.${key}`));
     const qa = role("release.view", "release.edit"), planner = role("orders.view", "orders.edit");

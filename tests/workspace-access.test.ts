@@ -114,7 +114,7 @@ describe("workspace change review", () => {
     expect(reviewWorkspaceChange(base, bundled, planner).denied).toEqual(["record testing results"]);
     expect(reviewWorkspaceChange(base, bundled, role("orders.edit", "testing.edit")).allowed).toBe(true);
     const released = copy();
-    Object.assign(released.data.jobOrders[0], { quantity: released.data.jobOrders[0].quantity + 1, releaseQuantity: 10, releaseUom: "boxes", releasedAt: "2026-10-09T10:00:00.000Z", releasedBy: "QA" });
+    Object.assign(released.data.jobOrders[0], { quantity: released.data.jobOrders[0].quantity - 1, releaseQuantity: 10, releaseUom: "boxes", releasedAt: "2026-10-09T10:00:00.000Z", releasedBy: "QA" });
     expect(reviewWorkspaceChange(base, released, planner).denied).toEqual(["release or reject batches"]);
     const confirmed = copy();
     Object.assign(confirmed.data.jobOrders[0], { notes: "x", formulaConfirmedBy: "QA", formulaConfirmedAt: "2026-10-09T10:00:00.000Z" });
@@ -134,7 +134,9 @@ describe("workspace change review", () => {
     expect(reviewWorkspaceChange(before, cleared, planner).allowed).toBe(true);
   });
   it("refuses a new job order that already carries testing, release or a batch number", () => {
-    const fresh = () => { const next = copy(); next.data.jobOrders.push({ ...structuredClone(base.data.jobOrders[0]), id: "job-new", number: "JO-NEW" }); return next.data.jobOrders.at(-1)!; };
+    // On a PO with no job orders yet, so the new batch stays within it.
+    const room = base.data.orders.find((order) => order.uom === base.data.jobOrders[0].uom && order.quantity >= base.data.jobOrders[0].quantity && !base.data.jobOrders.some((job) => job.orderId === order.id))!;
+    const fresh = () => { const next = copy(); next.data.jobOrders.push({ ...structuredClone(base.data.jobOrders[0]), id: "job-new", number: "JO-NEW", orderId: room.id }); return next.data.jobOrders.at(-1)!; };
     const tested = copy(); tested.data.jobOrders.push({ ...fresh(), testedAt: "2026-10-08T10:00:00.000Z", testedBy: "QC", testResult: "Passed" });
     expect(reviewWorkspaceChange(base, tested, planner).denied).toContain("record testing results");
     const released = copy(); released.data.jobOrders.push({ ...fresh(), releasedAt: "2026-10-08T10:00:00.000Z", releasedBy: "QA", releaseQuantity: 1, releaseUom: "boxes" });
@@ -191,5 +193,31 @@ describe("corrections to completed production", () => {
     const moved = copy();
     moved.data.lines.find((line) => line.id === done.id)!.plannedDate = "2026-01-05";
     expect(reviewWorkspaceChange(base, moved, everyone).denied).toContain("correct completed production without a reason");
+  });
+});
+
+describe("planning more than a PO", () => {
+  // A PO item and a job order for all of it, then one more batch on top.
+  const poOrder = base.data.orders.find((item) => item.poNumber === "PO-2610-142")!;
+  const full = { id: "job-full", number: "JO-FULL", orderId: poOrder.id, quantity: poOrder.quantity, uom: poOrder.uom, sequence: 1, createdAt: "2026-10-07T00:00:00Z", createdBy: "Aida" };
+  const start = structuredClone(base); start.data.jobOrders.push(full);
+  const extra = { ...full, id: "job-extra", number: "JO-EXTRA", quantity: 6000, sequence: 2 };
+  it("refuses job orders above the PO without a reason on it", () => {
+    const next = structuredClone(start); next.data.jobOrders.push(extra);
+    expect(reviewWorkspaceChange(start, next, planner).denied).toEqual(["plan job orders above the PO without a reason"]);
+  });
+  it("takes the reason on the PO with the job order, from someone who may only create orders", () => {
+    const next = structuredClone(start); next.data.jobOrders.push(extra);
+    Object.assign(next.data.orders.find((item) => item.id === poOrder.id)!, { overPlanReason: "Retain samples", overPlannedTotal: poOrder.quantity + 6000, overPlannedBy: "Aida", overPlannedAt: "2026-10-21T08:00:00.000Z" });
+    expect(reviewWorkspaceChange(start, next, planner)).toMatchObject({ allowed: true, denied: [] });
+    expect(reviewWorkspaceChange(start, next, role("orders.view", "orders.create")).denied).toEqual([]);
+    // The reason covers that total only: more on top needs a new one.
+    const more = structuredClone(next); more.data.jobOrders.find((job) => job.id === "job-extra")!.quantity = 7000;
+    expect(reviewWorkspaceChange(next, more, planner).denied).toEqual(["plan job orders above the PO without a reason"]);
+  });
+  it("keeps the rest of the PO for those who may edit orders", () => {
+    const next = structuredClone(start);
+    Object.assign(next.data.orders.find((item) => item.id === poOrder.id)!, { overPlanReason: "Retain samples", overPlannedTotal: 1, quantity: 1 });
+    expect(reviewWorkspaceChange(start, next, role("orders.view", "orders.create")).denied).toEqual(["edit or delete orders"]);
   });
 });
