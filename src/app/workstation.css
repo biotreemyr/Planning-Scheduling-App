@@ -526,6 +526,10 @@
 .route-plan-table td:first-child { width: 44px; }
 .route-plan-table input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; }
 .route-plan-table input[type="date"] { min-height: 34px; }
+/* A process over several days: "More than 1 day" ticked shows its end date under the start date. */
+.route-plan-table .plan-multi-day { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-weight: 400; white-space: nowrap; }
+.route-plan-table .plan-multi-day input[type="checkbox"] { width: 15px; height: 15px; }
+.route-plan-table .plan-end-date { display: grid; gap: 2px; margin-top: 4px; color: var(--muted); font-weight: 400; }
 .route-plan-table small { display: block; color: var(--muted); }
 .route-plan-table .route-missing td { color: #9f3030; }
 .route-plan-scroll { overflow-x: auto; }

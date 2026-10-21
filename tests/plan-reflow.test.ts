@@ -49,3 +49,23 @@ describe("changing a date moves later processes only when they would come before
     expect(reflow(locked, 0)[3].date).toBe("2026-10-01");
   });
 });
+
+describe("processes over several days", () => {
+  it("starts the next process on the working day after the last day", () => {
+    const rows = route().map((item, index) => index === 0 ? { ...item, multiDay: true, endDate: "2026-10-13" } : item);
+    expect(dates(reflow(rows, 0))).toEqual(["Dispensing 2026-10-09", "Blending 2026-10-14", "Granulation 2026-10-15", "Compression 2026-10-16", "Packing 2026-10-19"]);
+  });
+  it("keeps its length when it is moved", () => {
+    const rows = route().map((item, index) => index === 1 ? { ...item, multiDay: true, endDate: "2026-10-14" } : item);
+    // Blending (Mon 12 to Wed 14) moved to Tue 13 runs to Thu 15; granulation follows on Fri 16.
+    const later = reflow(rows.map((item, index) => index === 1 ? { ...item, date: "2026-10-13", endDate: "2026-10-15" } : item), 1);
+    expect(later[2].date).toBe("2026-10-16");
+    // Pushed by dispensing over several days, blending keeps its three days.
+    const pushed = reflow(later.map((item, index) => index === 0 ? { ...item, multiDay: true, endDate: "2026-10-14" } : item), 0);
+    expect(`${pushed[1].date} ${pushed[1].endDate}`).toBe("2026-10-15 2026-10-17");
+  });
+  it("counts one day when the box is unticked", () => {
+    const rows = route().map((item, index) => index === 0 ? { ...item, multiDay: false, endDate: "" } : item);
+    expect(reflow(rows, 0)[1].date).toBe("2026-10-12");
+  });
+});

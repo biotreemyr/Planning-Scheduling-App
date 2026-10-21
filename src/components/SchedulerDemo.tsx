@@ -737,6 +737,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       if (!visibleCalendars.some((item) => item.id === row.calendarId)) return { error: `You cannot plan ${row.activityType} in this view.` };
       if (!(row.quantity > 0) || !row.uom) return { error: `Enter a quantity and UOM for ${row.activityType}.` };
       if (!/^\d{4}-\d{2}-\d{2}$/.test(row.plannedDate)) return { error: `Choose a date for ${row.activityType}.` };
+      if (row.endDate !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(row.endDate) && row.endDate > row.plannedDate)) return { error: `Choose an end date after the start date for ${row.activityType}.` };
     }
     if (removing.some((row) => existing.find((line) => line.id === row.lineId)?.completedAt)) return { error: "Completed activities cannot be removed." };
     const batch = plan.batchNumber.trim();
@@ -759,12 +760,15 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
         entries = moved.entries; updated += 1;
         continue;
       }
-      if (line.plannedDate === row.plannedDate && line.quantity === row.quantity && line.uom === row.uom && line.priority === plan.priority) continue;
+      if (line.plannedDate === row.plannedDate && lineEnd(line) === (row.endDate ?? row.plannedDate) && line.quantity === row.quantity && line.uom === row.uom && line.priority === plan.priority) continue;
       updated += 1;
       lines = lines.map((item) => item.id === line.id ? { ...item, quantity: row.quantity, uom: row.uom, priority: plan.priority, ...(row.batchSizeKg !== undefined ? { batchSizeKg: row.batchSizeKg } : {}) } : item);
       const moved = moveActivity(lines, entries, line.id, row.plannedDate, member.name);
       if ("error" in moved) return { error: moved.error };
-      lines = moved.lines; entries = moved.entries;
+      // Then its last day: the end date ticked in, or the start day alone when "More than 1 day" is unticked.
+      const resized = resizeActivity(moved.lines, moved.entries, line.id, row.endDate ?? row.plannedDate, member.name);
+      if ("error" in resized) return { error: resized.error };
+      lines = resized.lines; entries = resized.entries;
     }
     // Unticked activities go, with their machine bookings.
     const removedIds = new Set(removing.map((row) => row.lineId!));
@@ -772,7 +776,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     entries = entries.filter((entry) => !removedIds.has(entry.planLineId ?? ""));
     const added: PlanLine[] = adding.map((row) => ({
       id: newId("line"), planId: "production-plan", calendarId: row.calendarId, productId: orderOfRow(row).productId, productionOrderId: orderOfRow(row).id, jobOrderId: job.id, orderReference: job.number,
-      plannedDate: row.plannedDate, quantity: row.quantity, uom: row.uom, activityType: row.activityType, priority: plan.priority, status: "Unscheduled",
+      plannedDate: row.plannedDate, ...(row.endDate ? { endDate: row.endDate } : {}), quantity: row.quantity, uom: row.uom, activityType: row.activityType, priority: plan.priority, status: "Unscheduled",
       ...(row.batchSizeKg !== undefined ? { batchSizeKg: row.batchSizeKg } : {}), ...(plan.notes.trim() ? { notes: plan.notes.trim() } : {})
     }));
     const savedJob: JobOrder = !batchChanged ? job : batch ? { ...job, batchNumber: batch, batchNumberBy: member.name, batchNumberAt: new Date().toISOString() }
