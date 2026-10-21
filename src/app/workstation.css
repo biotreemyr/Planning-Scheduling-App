@@ -1080,3 +1080,4 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
    boxes scroll sideways themselves rather than stretching the orders list. */
 .order-detail > *, .order-detail .order-section, .order-detail .job-orders { min-width: 0; max-width: 100%; }
 .order-detail .order-batch-scroll { max-width: 100%; }
+.correction-note { font-size: 13px; background: #fff6cc; border-left: 3px solid #e0a800; padding: 6px 10px; margin: 6px 0; }

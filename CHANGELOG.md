@@ -8,6 +8,10 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Changed
+- **Production update · Correct** now lets production correct a completed process's dates and actual quantity even after the next process has received the output. The handover then carries the corrected quantity. Where the output went and its unit still stay as they were.
+- **Correcting completed production needs a reason**: changing a completed process's start or completed date, its actual quantity, or its planned date (in Edit job order planning, or by dragging it on the plan) asks for the reason first. The reason, with who corrected it and when, shows on the activity and in the audit trail.
+
 ## [1.10.1] - 2026-10-19
 
 ### Fixed

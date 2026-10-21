@@ -25,7 +25,8 @@ export type PlanRow = { key: string; label: string; calendarId?: string; date: s
 export type PlannedRow = { calendarId: string; lineId?: string; on: boolean; activityType: string; plannedDate: string; quantity: number; uom: string; batchSizeKg?: number; machineIds: string[]; orderId?: string };
 export type PlanRequest = { mode: "new"; date: string; calendarId?: string; jobId?: string; nonce: number } | { mode: "edit"; jobId: string; nonce: number };
 // pastReason: why a date before today was chosen, kept on the activities planned in the past.
-export type JobPlan = { jobId: string; rows: PlannedRow[]; batchNumber: string; priority: PlanLine["priority"]; notes: string; pastReason?: string };
+// correctionReason: why the planned date of a completed process is changed (required for that).
+export type JobPlan = { jobId: string; rows: PlannedRow[]; batchNumber: string; priority: PlanLine["priority"]; notes: string; pastReason?: string; correctionReason?: string };
 
 // The next working day after a date (weekends skipped).
 function nextWorkday(date: string) {
@@ -186,10 +187,16 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
         const quantity = Number(row.quantity);
         return { calendarId: row.calendarId!, lineId: row.lineId, on: row.on, activityType: nameOf(row.calendarId!), plannedDate: row.date, quantity, uom: row.uom, batchSizeKg: kilograms(quantity, row.uom), machineIds: row.machineIds, ...(row.orderId ? { orderId: row.orderId } : {}) };
       });
-      const result = onPlan({ jobId: job.id, rows: planned, batchNumber, priority, notes, ...(reason ? { pastReason: reason } : {}) }, editing ? "edit" : "new");
-      if ("error" in result) { setError(result.error); return; }
-      dialog.current?.close();
-      onDone(result.message, planned.filter((row) => row.on).map((row) => row.plannedDate).sort()[0] ?? start);
+      const submit = (correctionReason?: string) => {
+        const result = onPlan({ jobId: job.id, rows: planned, batchNumber, priority, notes, ...(reason ? { pastReason: reason } : {}), ...(correctionReason ? { correctionReason } : {}) }, editing ? "edit" : "new");
+        if ("error" in result) { setError(result.error); return; }
+        dialog.current?.close();
+        onDone(result.message, planned.filter((row) => row.on).map((row) => row.plannedDate).sort()[0] ?? start);
+      };
+      // Moving a completed process's planned date is a correction to a record, so it needs its reason.
+      const correctedRows = rows.filter((row) => row.locked && row.lineId && lines.find((line) => line.id === row.lineId)?.plannedDate !== row.date);
+      if (correctedRows.length) checkDates(correctedRows.map((row) => ({ label: `${nameOf(row.calendarId!)} planned date (completed)`, value: row.date, rule: "plan" as const, was: lines.find((line) => line.id === row.lineId)?.plannedDate })), submit, { reason: "correction" });
+      else submit();
       });
     }}>
       <div className="panel-title plan-window-bar" {...barProps}>

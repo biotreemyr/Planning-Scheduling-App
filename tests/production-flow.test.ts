@@ -32,9 +32,9 @@ describe("production completion", () => {
 });
 
 describe("correcting a completed production update", async () => {
-  const { validateCorrection } = await import("../src/lib/services/productionFlow");
+  const { validateCorrection, correctsRecord } = await import("../src/lib/services/productionFlow");
   const done = { ...line, startedAt: "2026-09-10", completedAt: "2026-09-12T09:00:00.000Z", yieldQuantity: 1140, uom: "kg" };
-  const fix = { ...input, quantity: 1100, uom: "kg", completedDate: "2026-09-11", startedAt: "2026-09-10" };
+  const fix = { ...input, quantity: 1100, uom: "kg", completedDate: "2026-09-11", startedAt: "2026-09-10", reason: "Wrong figure keyed in" };
   const handover = { id: "wip", sourceLineId: done.id, sourceCalendarId: done.calendarId, calendarId: "mfg-production", productId: done.productId, quantity: 1140, uom: "kg", notes: "", createdAt: "2026-09-12T09:00:00.000Z", createdBy: "Lim" };
   it("lets production fix the quantity, dates and destination while the handover is not received", () => {
     expect(validateCorrection(done, fix, handover, person, d)).toEqual([]);
@@ -43,9 +43,20 @@ describe("correcting a completed production update", async () => {
     expect(validateCorrection(done, { ...fix, completedDate: "2026-09-09" }, handover, person, d)).toContain("The completed date cannot be before the start date.");
     expect(validateCorrection(done, fix, handover, { ...person, role: "planner" }, d)).not.toEqual([]);
   });
-  it("keeps quantity and destination once the next process has received the output", () => {
+  it("needs a reason whenever the dates or quantity of completed production change", () => {
+    const { reason: _r, ...noReason } = fix;
+    expect(correctsRecord(done, noReason)).toBe(true);
+    expect(validateCorrection(done, noReason, handover, person, d)).toContain("Give the reason for correcting the dates or quantity of completed production.");
+    expect(validateCorrection(done, { ...noReason, reason: "  " }, handover, person, d)).toContain("Give the reason for correcting the dates or quantity of completed production.");
+    // Notes or where the output goes alone need no reason.
+    const same = { ...input, quantity: 1140, uom: "kg", completedDate: "2026-09-12", startedAt: "2026-09-10", notes: "Checked" };
+    expect(correctsRecord(done, same)).toBe(false);
+    expect(validateCorrection(done, same, handover, person, d)).toEqual([]);
+  });
+  it("lets the quantity and dates be corrected after the next process received the output, but not where it went or its unit", () => {
     const received = { ...handover, receivedAt: "2026-09-13T08:00:00.000Z", receivedBy: "Mei" };
-    expect(validateCorrection(done, fix, received, person, d)[0]).toContain("Mei has already received this output");
-    expect(validateCorrection(done, { ...fix, quantity: 1140, destinationId: "mfg-production" }, received, person, d)).toEqual([]);
+    expect(validateCorrection(done, { ...fix, destinationId: "mfg-production" }, received, person, d)).toEqual([]);
+    expect(validateCorrection(done, { ...fix, destinationId: "" }, received, person, d)[0]).toContain("Mei has already received this output");
+    expect(validateCorrection(done, { ...fix, destinationId: "mfg-production", uom: "g" }, received, person, d)[0]).toContain("Mei has already received this output");
   });
 });

@@ -138,6 +138,9 @@ export type PlanLine = {
   plannedBy?: string; plannedAt?: string; updatedBy?: string; updatedAt?: string;
   // Why the plan was changed: a date before today (keying in past production, say), or any change by production.
   planChangeReason?: string;
+  // The last correction to a completed process (its dates or quantity): why, who and when. Every
+  // correction, with its reason, is also in the audit trail.
+  correctionReason?: string; correctedBy?: string; correctedAt?: string;
   // The machines planned, kept when production reported running on others. Older records hold one id.
   plannedMachineIds?: string[];
   plannedMachineId?: string;

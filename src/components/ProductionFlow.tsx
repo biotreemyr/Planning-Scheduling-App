@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 import { useDateCheck } from "./DateCheck";
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Machine, PlanLine, Product } from "@/lib/domain/types";
-import type { CompletionInput, CorrectionInput, Progress, WipTransfer } from "@/lib/services/productionFlow";
+import { correctsRecord, type CompletionInput, type CorrectionInput, type Progress, type WipTransfer } from "@/lib/services/productionFlow";
 import { stepOf } from "@/lib/services/processRules";
 import { REPORT_UOMS, calendarSettings } from "@/lib/services/processSetup";
 import { countFromWeight, unitSizeUom } from "@/lib/services/measurements";
@@ -107,6 +107,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       <div><dt>Output</dt><dd>{outgoing ? `${outgoing.wipRoom ? "WIP room, for " : "Transferred to "}${processName(outgoing.calendarId)} · ${outgoing.receivedAt ? `received by ${outgoing.receivedBy}` : "awaiting receipt"}` : "Final output - no transfer"}</dd></div>
     </dl>
     {line.productionNotes ? <p><strong>Notes:</strong> {line.productionNotes}</p> : null}
+    {line.correctionReason ? <p className="correction-note"><strong>Corrected</strong>{line.correctedAt ? ` ${formatDateTime(line.correctedAt)}` : ""}{line.correctedBy ? ` by ${line.correctedBy}` : ""}: {line.correctionReason}</p> : null}
     {saved ? <p role="status">{saved}</p> : null}
     {editable && onCorrect ? <button type="button" className="calendar-button" onClick={() => { setCorrecting(true); setErrors([]); setSaved(""); }}>Correct this update</button> : null}
   </section>;
@@ -117,15 +118,15 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
   const formId = `production-update-${line.id}`;
   const started = <label>{inRow ? "Started" : "Date started"}<input form={formId} name="startedAt" type="date" defaultValue={line.startedAt ?? ""} /></label>;
   const completed = <label>{inRow ? "Completed" : "Date completed"}<input form={formId} name="completedAt" type="date" defaultValue={completedDay} max={today()} /></label>;
-  const quantity = <div className={weighing ? "quantity-fields weighed-row" : "quantity-fields"}><label>{weighing ? `Output ${sizeUom === "mL" ? "volume" : "weight"}` : "Actual quantity"}<input form={formId} name="quantity" type="number" min="0" step="any" value={quantityText} onChange={(event) => setQuantityText(event.target.value)} readOnly={handedOver} placeholder={weighing ? "e.g. 23.975" : `Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
+  const quantity = <div className={weighing ? "quantity-fields weighed-row" : "quantity-fields"}><label>{weighing ? `Output ${sizeUom === "mL" ? "volume" : "weight"}` : "Actual quantity"}<input form={formId} name="quantity" type="number" min="0" step="any" value={quantityText} onChange={(event) => setQuantityText(event.target.value)} placeholder={weighing ? "e.g. 23.975" : `Planned ${line.quantity.toLocaleString()} ${uom}`} /></label>
     <label>UOM<select form={formId} name="yieldUom" value={chosenUom} onChange={(event) => setChosenUom(event.target.value)} disabled={handedOver}>{[...new Set([...reportUoms, ...(line.completedAt && !counting ? [doneUom] : []), ...(line.weighedUom ? [line.weighedUom] : [])])].map((name) => <option key={name}>{name}</option>)}</select></label>
     {handedOver ? <input form={formId} type="hidden" name="yieldUom" value={chosenUom} /> : null}
     {weighing ? <>
-      <label>{unitLabel} ({sizeUom} each)<input form={formId} name="unitWeightMg" type="number" min="0" step="any" required value={unitMg} onChange={(event) => setUnitMg(event.target.value)} readOnly={handedOver} placeholder={sizeUom === "mL" ? "e.g. 5" : "e.g. 350"} /></label>
-      {shelling ? <label>Empty shell (mg each)<input form={formId} name="shellWeightMg" type="number" min="0" step="any" list="shell-sizes" value={shellMg} onChange={(event) => setShellMg(event.target.value)} readOnly={handedOver} placeholder="e.g. 127"
+      <label>{unitLabel} ({sizeUom} each)<input form={formId} name="unitWeightMg" type="number" min="0" step="any" required value={unitMg} onChange={(event) => setUnitMg(event.target.value)} placeholder={sizeUom === "mL" ? "e.g. 5" : "e.g. 350"} /></label>
+      {shelling ? <label>Empty shell (mg each)<input form={formId} name="shellWeightMg" type="number" min="0" step="any" list="shell-sizes" value={shellMg} onChange={(event) => setShellMg(event.target.value)} placeholder="e.g. 127"
         title="One empty capsule shell, in mg: weigh 20 and divide, or pick the supplier's average for the size. Gives the powder in the capsules, so overfill is not counted as a loss." />
         <datalist id="shell-sizes">{SHELL_SIZES.map(([size, mg]) => <option key={size} value={mg}>Size {size} · ACG cellulose average</option>)}</datalist></label> : null}
-      <label>Actual quantity ({countUom})<input form={formId} name="actualQuantity" type="number" min="0" step="1" value={actualShown} readOnly={handedOver} placeholder={`Planned ${line.quantity.toLocaleString()}`}
+      <label>Actual quantity ({countUom})<input form={formId} name="actualQuantity" type="number" min="0" step="1" value={actualShown} placeholder={`Planned ${line.quantity.toLocaleString()}`}
         onChange={(event) => { setActualText(event.target.value); setActualEdited(true); }} /></label>
     </> : null}</div>;
   // The yields the typed actual gives, shown as it is keyed in; outside QA's limits it needs a deviation note.
@@ -183,7 +184,25 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       const done = (result: string[], message: string) => { setErrors(result); if (!result.length) { if (onSaved) onSaved(message); else setSaved(message); } return result; };
       if (correcting) {
         if (!completedDate || !quantityText) { setErrors(["Enter the completed date and the actual quantity."]); return; }
-        if (!done(onCorrect!({ ...output, startedAt }), "Production update corrected.").length) setCorrecting(false);
+        // Changing the dates or quantity of completed production always needs a reason.
+        const correction = { ...output, startedAt };
+        const save = (reason?: string) => { if (!done(onCorrect!(reason ? { ...correction, reason } : correction), "Production update corrected.").length) setCorrecting(false); };
+        if (correctsRecord(line, correction)) {
+          // List just what is corrected: each changed date, and the quantity.
+          const started = startedAt || completedDate, wasStarted = line.startedAt?.slice(0, 10) ?? "", wasCompleted = completedDay;
+          const amount = (value?: number) => value === undefined ? "-" : value.toLocaleString("en-MY", { maximumFractionDigits: 3 });
+          const changes = [
+            started !== wasStarted ? `Date started ${wasStarted ? display(wasStarted) : "-"} → ${display(started)}` : "",
+            completedDate !== wasCompleted ? `Date completed ${display(wasCompleted)} → ${display(completedDate)}` : "",
+            correction.quantity !== line.yieldQuantity || correction.uom !== (line.yieldUom ?? line.uom) ? `Actual quantity ${amount(line.yieldQuantity)} ${doneUom} → ${amount(correction.quantity)} ${correction.uom}` : "",
+            correction.weighed && line.weighedQuantity !== undefined && correction.weighed.quantity !== line.weighedQuantity ? `Output ${amount(line.weighedQuantity)} ${line.weighedUom} → ${amount(correction.weighed.quantity)} ${correction.weighed.uom}` : ""
+          ].filter(Boolean);
+          checkDates([
+            { label: "Date started", value: started, rule: "today", was: wasStarted || undefined },
+            { label: "Date completed", value: completedDate, rule: "today", was: wasCompleted }
+          ], save, { reason: "correction", changes: changes.length ? changes : ["Production record corrected"] });
+        }
+        else save();
         return;
       }
       // Save progress keeps the amount run so far as keyed in (an emptied box clears it) and the destination.
@@ -194,8 +213,7 @@ export function ProductionUpdate({ line, uom, directory: d, editable, nextCalend
       done(onComplete(output), "Production completed.");
       });
     }}>{content}</form>;
-  const help = correcting ? handedOver ? `${processName(outgoing!.calendarId)} has already received this output, so its quantity and destination stay as they are. Dates and notes can still be corrected.` : "Correct anything keyed in by mistake. The handover to the next process follows the correction."
-    : `Save progress records the start date, the amount run so far, notes and where the output goes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`;
+  const help = correcting ? handedOver ? `${processName(outgoing!.calendarId)} has already received this output, so where it went stays as it is. Dates and the quantity can still be corrected; a corrected quantity updates the handover, and needs a reason.` : "Correct anything keyed in by mistake. Changing the dates or quantity needs a reason, kept with the activity and in the audit trail. The handover to the next process follows the correction." : `Save progress records the start date, the amount run so far, notes and where the output goes. Complete production also needs the completed date and ${weighing ? `the output ${sizeUom === "mL" ? "volume" : "weight"} with the ${unitLabel.toLowerCase()}, which give the actual quantity` : "actual quantity"}. A mistake can be corrected afterwards.`;
 
   const receipts = incoming.length && !line.completedAt ? <div className="wip-receipt">{incoming.map((item) => <p key={item.id}>
     <strong>Awaiting receipt:</strong> {item.quantity.toLocaleString()} {item.uom} from {processName(item.sourceCalendarId)}, sent by {item.createdBy} · {formatDateTime(item.createdAt)}{item.wipRoom ? " · in the WIP room" : ""}

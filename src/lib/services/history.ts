@@ -110,13 +110,16 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
         old.yieldQuantity !== row.yieldQuantity || (old.yieldUom ?? old.uom) !== (row.yieldUom ?? row.uom) ? `actual ${num(old.yieldQuantity)} ${str(old.yieldUom) || str(old.uom)} → ${num(row.yieldQuantity)} ${str(row.yieldUom) || str(row.uom)}` : "",
         old.startedAt !== row.startedAt ? `started ${old.startedAt ? day(old.startedAt) : "-"} → ${row.startedAt ? day(row.startedAt) : "-"}` : ""
       ].filter(Boolean);
-      if (fixed.length) changes.push({ kind: "Production", ...reference, text: `${what(row)} production update corrected: ${fixed.join("; ")}` });
+      const why = row.correctionReason && old.correctedAt !== row.correctedAt ? ` (reason: ${str(row.correctionReason)})` : "";
+      if (fixed.length) changes.push({ kind: "Production", ...reference, text: `${what(row)} production update corrected: ${fixed.join("; ")}${why}` });
     }
     if (row.progressQuantity !== undefined && !row.completedAt && (old.progressQuantity !== row.progressQuantity || old.progressUom !== row.progressUom)) changes.push({ kind: "Production", ...reference, text: `${what(row)}: ${num(row.progressQuantity)} ${str(row.progressUom) || str(row.uom)} run so far` });
     if (row.productionNotes && old.productionNotes !== row.productionNotes) changes.push({ kind: "Production", ...reference, text: `Note on ${what(row)}: ${str(row.productionNotes)}` });
     const parts = [
       old.plannedDate !== row.plannedDate ? `moved ${day(old.plannedDate)} → ${day(row.plannedDate)}` : "",
       row.planChangeReason && (old.planChangeReason !== row.planChangeReason || old.plannedDate !== row.plannedDate || old.endDate !== row.endDate) ? `reason: ${str(row.planChangeReason)}` : "",
+      // A completed process's planned date corrected, with its reason.
+      old.completedAt && row.correctionReason && old.correctedAt !== row.correctedAt && (old.plannedDate !== row.plannedDate || old.endDate !== row.endDate) ? `correction reason: ${str(row.correctionReason)}` : "",
       old.quantity !== row.quantity || old.uom !== row.uom ? `quantity ${num(old.quantity)} ${str(old.uom)} → ${num(row.quantity)} ${str(row.uom)}` : "",
       old.priority !== row.priority ? `priority ${str(old.priority)} → ${str(row.priority)}` : "",
       old.jobOrderId !== row.jobOrderId ? `linked to job order ${reference.job ?? "-"}` : "",
