@@ -14,6 +14,7 @@ import { linesForJob, measureName, processQuantity, type JobOrder } from "@/lib/
 import { routeDrafts } from "@/lib/services/planChanges";
 import { inferFormat } from "@/lib/services/processRules";
 import { defaultSettings, type PlannedSource, type ProcessSettings } from "@/lib/services/processSetup";
+import { dayStatus, isWorkingDay, nextWorkingDay, shortDay, spanDays, workingCalendar, type WorkingCalendar } from "@/lib/services/workingDays";
 
 // One row per process of the job order's route. In edit mode a row may already have its activity.
 // Quantity and UOM are the job order's theoretical figure for the process (blank when not keyed in).
@@ -40,29 +41,24 @@ function startOn(row: PlanRow, date: string): PlanRow {
   if (!row.multiDay || !row.endDate || !row.date || !date || row.date === date) return { ...row, date };
   return { ...row, date, endDate: addDays(row.endDate, dayNumber(date) - dayNumber(row.date)) };
 }
-// The next working day after a date (weekends skipped).
-function nextWorkday(date: string) {
-  const day = new Date(`${date}T12:00:00`);
-  do day.setDate(day.getDate() + 1); while (day.getDay() === 0 || day.getDay() === 6);
-  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
-}
 /**
  * New plans: row `from` was just changed (date picked, or ticked). A ticked process after it keeps
  * its date when that is on or after the ticked process before it, so several processes can share a
  * day; it moves to the next working day after that process only when it would otherwise come before
  * it. A ticked process with no date yet takes the next working day after the one before it, or
- * `start` (the day the plan was opened for) when it is the first. An unticked process has no date
- * and takes no day. Rows before `from`, and completed (locked) rows, stay. A process over several
- * days counts from its last day, and keeps its length when it moves.
+ * `start` (the day the plan was opened for, or the next working day when that is off) when it is the
+ * first. An unticked process has no date and takes no day. Rows before `from`, and completed (locked)
+ * rows, stay. A process over several days counts from its last day, and keeps its length when it
+ * moves. Working days are the unit's (`work`): its week, public holidays and days opened or closed.
  */
-export function reflow(rows: PlanRow[], from: number, start = "") {
+export function reflow(rows: PlanRow[], from: number, start = "", work: WorkingCalendar = workingCalendar(undefined)) {
   const before = [...rows.slice(0, from)].reverse().find((row) => row.on && row.calendarId && row.date);
   let last = before ? lastDay(before) : undefined;
   return rows.map((row, position) => {
     if (position < from) return row;
     if (!row.on || !row.calendarId) return row.locked ? row : { ...row, date: "" };
     const keeps = row.locked || (position === from && row.date) || (row.date && (!last || row.date >= last));
-    const moved = keeps ? row : startOn(row, last ? nextWorkday(last) : start);
+    const moved = keeps ? row : startOn(row, last ? nextWorkingDay(work, last) : start && !isWorkingDay(work, start) ? nextWorkingDay(work, start) : start);
     last = moved.date ? lastDay(moved) : last;
     return moved;
   });
@@ -74,7 +70,7 @@ export function reflow(rows: PlanRow[], from: number, start = "") {
  * theoretical figure for it and cannot be changed here. Opened with an edit request, it shows a
  * planned job order's activities instead, to correct them; completed processes stay locked.
  */
-export function JobPlanDialog({ request, jobOrders, orders, products, calendars, processNames, processSettings = {}, lines, machines = [], entries = [], onPlan, onDone }: {
+export function JobPlanDialog({ workDays = workingCalendar(undefined), onOpenDay, request, jobOrders, orders, products, calendars, processNames, processSettings = {}, lines, machines = [], entries = [], onPlan, onDone }: {
   request: PlanRequest | null; jobOrders: JobOrder[]; orders: PurchaseOrder[]; products: Product[]; calendars: UnitCalendar[];
   processNames: Record<string, string>;
   // Each process's settings from Admin (route membership and the job order figure it plans with).
@@ -85,6 +81,9 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   lines: PlanLine[];
   onPlan: (plan: JobPlan, mode: "new" | "edit") => { error: string } | { message: string };
   onDone: (message: string, firstDate: string) => void;
+  // The unit's working days, and opening an off day for overtime (when this person may).
+  workDays?: WorkingCalendar;
+  onOpenDay?: (date: string, reason: string) => string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [jobId, setJobId] = useState("");
@@ -94,6 +93,8 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   const [priority, setPriority] = useState<PlanLine["priority"]>("Normal");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  // An off day being opened for overtime from here: the day, and the reason being typed.
+  const [opening, setOpening] = useState<{ date: string; reason: string } | null>(null);
   const checkDates = useDateCheck();
   // A floating window: dragged by its title bar, minimised to it, left where it was put.
   const { minimised, setMinimised, maximised, setMaximised, barProps, open, style } = useFloatingWindow(dialog);
@@ -155,7 +156,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
     if (!request) return;
     // A day clicked on the calendar while a plan is being keyed in brings the window back, keeping it.
     if (request.mode !== "edit" && !request.jobId && dialog.current?.open && jobId) { setMinimised(false); return; }
-    setError(""); setNotes(""); setMinimised(false);
+    setError(""); setNotes(""); setMinimised(false); setOpening(null);
     if (request.mode === "edit") {
       const chosen = jobOrders.find((item) => item.id === request.jobId);
       if (!chosen) return;
@@ -164,7 +165,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       setBatchNumber(chosen.batchNumber ?? ""); setPriority(planned[0]?.priority ?? "Normal");
     } else {
       const chosen = request.jobId ? jobOrders.find((item) => item.id === request.jobId) : undefined;
-      setJobId(chosen?.id ?? ""); setRows(chosen ? reflow(rowsFor(chosen, request.date), 0, request.date) : []); setStart(request.date); setBatchNumber(chosen?.batchNumber ?? ""); setPriority("Normal");
+      setJobId(chosen?.id ?? ""); setRows(chosen ? reflow(rowsFor(chosen, request.date), 0, request.date, workDays) : []); setStart(request.date); setBatchNumber(chosen?.batchNumber ?? ""); setPriority("Normal");
     }
     if (!dialog.current?.open) dialog.current?.show();
     open(1120);
@@ -175,7 +176,7 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
   function choose(id: string) {
     const chosen = jobOrders.find((item) => item.id === id);
     setJobId(id); setError("");
-    setRows(chosen ? reflow(rowsFor(chosen, start), 0, start) : []);
+    setRows(chosen ? reflow(rowsFor(chosen, start), 0, start, workDays) : []);
     setBatchNumber(chosen?.batchNumber ?? "");
   }
   const update = (index: number, change: Partial<PlanRow>) => setRows((current) => current.map((row, position) => position === index ? { ...row, ...change } : row));
@@ -196,6 +197,8 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
       const bad = rows.find((row) => row.on && row.calendarId && !/^\d{4}-\d{2}-\d{2}$/.test(row.date));
       if (bad) { setError(`Choose a date for ${bad.calendarId ? nameOf(bad.calendarId) : bad.label}.`); return; }
       const noEnd = rows.find((row) => row.on && row.calendarId && row.multiDay && !(/^\d{4}-\d{2}-\d{2}$/.test(row.endDate ?? "") && row.endDate! > row.date));
+      const offStart = rows.find((row) => row.on && row.calendarId && !row.locked && row.date && !isWorkingDay(workDays, row.date));
+      if (offStart) { const status = dayStatus(workDays, offStart.date); setError(`${nameOf(offStart.calendarId!)} starts on ${shortDay(offStart.date)}, ${status.kind === "holiday" ? `a public holiday (${status.label})` : status.kind === "closed" ? "a closed day" : "an off day"}. Choose a working day${onOpenDay ? ", or open the day for overtime below" : ""}.`); return; }
       if (noEnd) { setError(`Choose an end date after the start date for ${noEnd.calendarId ? nameOf(noEnd.calendarId) : noEnd.label}, or untick “More than 1 day”.`); return; }
       // Each ticked process's date, against what it was planned for when editing.
       checkDates(rows.filter((row) => row.on && row.calendarId).map((row) => ({ label: `${nameOf(row.calendarId!)} date`, value: row.date, rule: "plan" as const, was: lines.find((line) => line.id === row.lineId)?.plannedDate })), (reason) => {
@@ -231,10 +234,10 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
         <p className="orders-help">{product?.name ?? "Unknown product"} · PO <strong>{poLabel(order, orders)}</strong>{order.customerName ? ` · ${order.customerName}` : ""} · {job.quantity.toLocaleString()} {job.uom}{job.batchSizeKg ? ` · ${job.batchSizeKg.toLocaleString()} kg` : ""}{job.packQuantity ? ` · ${job.packQuantity.toLocaleString()} ${job.packUom}` : ""}</p>
         <label>Batch number<input maxLength={60} autoComplete="off" value={batchNumber} onChange={(event) => setBatchNumber(event.target.value)} placeholder={`Batch number for ${job.number}`} /></label>
         <div className="route-plan">
-          <p className="orders-help">{format === "Other" ? "No fixed route for this dosage form: choose the process." : `${format}: ${rows.filter((row) => row.calendarId && row.key !== "single").map((row) => row.label).join(" → ")}.`} {editing ? "Correct any date or machine; untick to remove an activity, tick to add a missed process. A completed process keeps its machine and quantity, but its date can be corrected. A date before today asks for the reason." : "Tick each process to plan it now; an unticked process gets no date and stays off the calendar, to plan later. Each newly ticked process gets the next working day. Several processes can share a day: change a date and only the later processes that would then come before it move."} Tick “More than 1 day” for a process that runs over several days, then choose its end date. Theoretical quantities come from the job order; production keys in the actual quantity when it completes each process.</p>
+          <p className="orders-help">{format === "Other" ? "No fixed route for this dosage form: choose the process." : `${format}: ${rows.filter((row) => row.calendarId && row.key !== "single").map((row) => row.label).join(" → ")}.`} {editing ? "Correct any date or machine; untick to remove an activity, tick to add a missed process. A completed process keeps its machine and quantity, but its date can be corrected. A date before today asks for the reason." : "Tick each process to plan it now; an unticked process gets no date and stays off the calendar, to plan later. Each newly ticked process gets the next working day. Several processes can share a day: change a date and only the later processes that would then come before it move."} Tick “More than 1 day” for a process that runs over several days, then choose its end date. Off days (weekly off days, public holidays, closed days) are skipped. Theoretical quantities come from the job order; production keys in the actual quantity when it completes each process.</p>
           <div className="route-plan-scroll"><table className="route-plan-table"><thead><tr><th scope="col">Plan</th><th scope="col">Process</th><th scope="col">Date planned</th><th scope="col">Machine</th><th scope="col" className="numeric">Theoretical quantity</th></tr></thead>
             <tbody>{rows.map((row, index) => <tr key={row.key} className={row.calendarId ? undefined : "route-missing"}>
-              <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => { const on = event.target.checked; setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, on } : item); return editing ? changed : reflow(changed, index, start); }); }} /></td>
+              <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => { const on = event.target.checked; setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, on } : item); return editing ? changed : reflow(changed, index, start, workDays); }); }} /></td>
               <td>{row.key === "single" ? <select aria-label="Process" value={row.calendarId ?? ""} onChange={(event) => update(index, { calendarId: event.target.value })}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
                 : <>{row.calendarId ? nameOf(row.calendarId) : row.label}{row.orderId ? <small className="plan-row-po">for {orders.find((item) => item.id === row.orderId)?.poNumber ?? "PO"}</small> : null}
                   {row.orderId && short ? (() => { const share = short.shares.find((item) => item.orderId === row.orderId); const part = job ? jobParts(job).find((item) => item.orderId === row.orderId) : undefined;
@@ -242,17 +245,24 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
               <td>{row.calendarId ? <input type="date" aria-label={`${row.label} date`} disabled={!row.on} value={row.on || row.locked ? row.date : ""} title={row.on ? undefined : "Not planned"} onChange={(event) => {
                 // Later processes move only if they would now come before this one, so the route keeps its order.
                 const value = event.target.value;
-                setRows((current) => { const changed = current.map((item, position) => position === index ? startOn(item, value) : item); return editing ? changed : reflow(changed, index, start); });
+                setRows((current) => { const changed = current.map((item, position) => position === index ? startOn(item, value) : item); return editing ? changed : reflow(changed, index, start, workDays); });
               }} /> : "-"}
                 {row.calendarId && row.on ? <label className="plan-multi-day"><input type="checkbox" checked={!!row.multiDay} disabled={row.locked} onChange={(event) => {
                   // Ticked, the end date shows, starting on the next day; unticked, the process takes one day again.
                   const multiDay = event.target.checked;
-                  setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, multiDay, endDate: multiDay ? item.endDate && item.endDate > item.date ? item.endDate : item.date ? addDays(item.date, 1) : "" : "" } : item); return editing ? changed : reflow(changed, index, start); });
+                  setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, multiDay, endDate: multiDay ? item.endDate && item.endDate > item.date ? item.endDate : item.date ? nextWorkingDay(workDays, item.date) : "" : "" } : item); return editing ? changed : reflow(changed, index, start, workDays); });
                 }} />More than 1 day</label> : null}
                 {row.calendarId && row.on && row.multiDay ? <label className="plan-end-date">End date<input type="date" aria-label={`${row.label} end date`} min={row.date ? addDays(row.date, 1) : undefined} disabled={row.locked} value={row.endDate ?? ""} onChange={(event) => {
                   const value = event.target.value;
-                  setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, endDate: value } : item); return editing ? changed : reflow(changed, index, start); });
-                }} /></label> : null}</td>
+                  setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, endDate: value } : item); return editing ? changed : reflow(changed, index, start, workDays); });
+                }} /></label> : null}
+                {row.calendarId && row.on && row.date ? (() => {
+                  // What the dates come to in working days, and the off days skipped.
+                  const status = dayStatus(workDays, row.date);
+                  if (!row.multiDay || !row.endDate || row.endDate <= row.date) return !status.working ? <small className="order-warning">{shortDay(row.date)}: {status.label}</small> : status.kind === "overtime" ? <small>Overtime day</small> : null;
+                  const span = spanDays(workDays, row.date, row.endDate);
+                  return <small className={span.off.length ? "plan-off-days" : undefined}>{span.working} working day{span.working === 1 ? "" : "s"}{span.off.length ? ` · ${span.off.length} off, skipped` : ""}</small>;
+                })() : null}</td>
               <td>{row.calendarId ? (() => {
                 const options = machinesFor(row.calendarId);
                 // A machine already booked stays listed even if it is no longer active.
@@ -265,6 +275,26 @@ export function JobPlanDialog({ request, jobOrders, orders, products, calendars,
             </tr>)}</tbody>
           </table></div>
         </div>
+        {(() => {
+          // Every off day the ticked processes start on or run over: skipped, or opened for overtime here.
+          const offDays = new Map<string, string[]>();
+          for (const row of rows) {
+            if (!row.on || !row.calendarId || !row.date) continue;
+            const end = row.multiDay && row.endDate && row.endDate > row.date ? row.endDate : row.date;
+            for (const day of spanDays(workDays, row.date, end).off) offDays.set(day.date, [...offDays.get(day.date) ?? [], nameOf(row.calendarId)]);
+          }
+          if (!offDays.size) return null;
+          return <div className="plan-off-notes" role="group" aria-label="Off days in this plan">
+            <p className="orders-help"><strong>Off days in this plan.</strong> {onOpenDay ? "No production on these days. If the team comes in for overtime, open the day." : "No production on these days. A planner, production manager or Admin can open one for overtime."}</p>
+            <ul>{[...offDays].sort(([a], [b]) => a.localeCompare(b)).map(([day, processes]) => { const status = dayStatus(workDays, day);
+              return <li key={day}><span>{shortDay(day)} · {status.label} · {processes.join(", ")}</span>
+                {onOpenDay && status.kind !== "closed" ? opening?.date === day ? <span className="plan-open-day">
+                  <input aria-label={`Reason for working on ${shortDay(day)}`} maxLength={300} autoFocus placeholder="Reason, e.g. overtime for this batch" value={opening.reason} onChange={(event) => setOpening({ date: day, reason: event.target.value })} />
+                  <button type="button" className="calendar-button" disabled={!opening.reason.trim()} onClick={() => { const problem = onOpenDay(day, opening.reason); if (problem) setError(problem); else { setOpening(null); setError(""); } }}>Open day</button>
+                  <button type="button" className="link-button" onClick={() => setOpening(null)}>Cancel</button>
+                </span> : <button type="button" className="calendar-button" onClick={() => setOpening({ date: day, reason: "" })}>Work this day</button> : null}</li>; })}</ul>
+          </div>;
+        })()}
         <label>Priority<select value={priority} onChange={(event) => setPriority(event.target.value as PlanLine["priority"])}>{priorities.map((item) => <option key={item}>{item}</option>)}</select></label>
         {editing ? null : <label>Remarks<textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label>}
       </> : null}

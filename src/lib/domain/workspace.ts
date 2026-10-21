@@ -21,7 +21,8 @@ export const measurementDefaults = {
 export const workspaceSchema = z.object({
   schemaVersion: z.literal(1),
   directory: z.object({
-    units: z.array(record),
+    // workingDays: the weekdays the unit works (0 is Sunday); units without it work Monday to Friday.
+    units: z.array(record.extend({ workingDays: z.array(number.int().min(0).max(6)).max(7).optional() })),
     processes: z.array(record.extend({ settings: z.object({
       forms: z.array(z.enum(["Capsule", "Tablet", "Sachet"])), optional: z.boolean(),
       planned: z.enum(["batchSize", "batchQuantity", "packQuantity", "boxes", "none"]), report: z.enum(["measure", "count", "packs", "boxes"])
@@ -72,7 +73,9 @@ export const workspaceSchema = z.object({
       testedAt: timestamp.optional(), testedBy: text.optional(), testResult: z.enum(["Passed", "Failed", "Under investigation"]).optional(),
       releaseQuantity: number.nonnegative().optional(), releaseUom: name.optional(), releasedAt: timestamp.optional(), releasedBy: text.optional(), rejectedAt: timestamp.optional(), rejectedBy: text.optional(),
       batchNumber: z.string().trim().max(60).optional(), batchNumberBy: text.optional(), batchNumberAt: timestamp.optional(),
-      notes: text.optional(), createdAt: timestamp, createdBy: name })).default([])
+      notes: text.optional(), createdAt: timestamp, createdBy: name })).default([]),
+    // Off days opened for overtime and working days closed, per unit, each with its reason.
+    specialDays: z.array(z.object({ id, unitId: id, date, kind: z.enum(["working", "closed"]), reason: z.string().trim().min(1).max(300), addedBy: name, addedAt: timestamp })).default([])
   })
 }).strict();
 
@@ -81,7 +84,7 @@ export type WorkspaceEnvelope = { revision: number; snapshot: WorkspaceSnapshot 
 
 export function newWorkspace(): WorkspaceSnapshot {
   return workspaceSchema.parse({ schemaVersion: 1, directory: emptyDirectory(), products: [], workCentres: [], machines: [],
-    measurements: measurementDefaults, data: { lines: [], entries: [], actuals: [], transfers: [], orders: [], customers: [], jobOrders: [] } });
+    measurements: measurementDefaults, data: { lines: [], entries: [], actuals: [], transfers: [], orders: [], customers: [], jobOrders: [], specialDays: [] } });
 }
 
 // Validate structure and references before accepting a complete atomic save.
@@ -148,6 +151,10 @@ export function parseWorkspace(input: unknown): WorkspaceSnapshot {
   });
   data.orders.forEach((order) => require(has(state.products, order.productId), "Invalid order product"));
   data.orders.forEach((order) => require(!order.unitId || has(d.units, order.unitId), "Invalid order production unit"));
+  d.units.forEach((unit) => require(!unit.workingDays || new Set(unit.workingDays).size === unit.workingDays.length, "Invalid working days"));
+  require(new Set(data.specialDays.map((item) => item.id)).size === data.specialDays.length, "Duplicate record ID");
+  require(new Set(data.specialDays.map((item) => `${item.unitId}:${item.date}`)).size === data.specialDays.length, "A day can have only one special day per unit");
+  data.specialDays.forEach((item) => require(has(d.units, item.unitId), "Invalid special day unit"));
   require(new Set(data.customers.map((item) => item.code.trim().toLowerCase())).size === data.customers.length, "Duplicate customer ID");
   data.orders.forEach((order) => require(!order.customerId || has(data.customers, order.customerId), "Invalid order customer"));
   require(new Set(data.jobOrders.map((item) => item.number.trim().toLowerCase())).size === data.jobOrders.length, "Duplicate job order number");

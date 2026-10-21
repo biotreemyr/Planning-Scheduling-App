@@ -10,6 +10,7 @@ import { isNonProduction, orderColor, orderNumbers, type PurchaseOrder } from "@
 import { OrderBadge, PriorityMark } from "./OrderBadge";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
 import { lineDays, lineEnd } from "@/lib/services/scheduling";
+import { dayStatus, workingCalendar, type WorkingCalendar } from "@/lib/services/workingDays";
 import { formatDate } from "@/lib/services/dates";
 
 type Target = { date: string; calendarId: string };
@@ -22,11 +23,13 @@ const LONG_PRESS_SLOP = 8;
 const EDGE = 56;
 
 // Month grid: dates down the side, one column per process, like the planning spreadsheet.
-export function PlanningList({ date, lines, products, orders = [], jobOrders = [], warnings, calendars, canPlan, canCreate = canPlan, onMove, onResize, onSelect, onCreate }: {
+export function PlanningList({ workDays = workingCalendar(undefined), date, lines, products, orders = [], jobOrders = [], warnings, calendars, canPlan, canCreate = canPlan, onMove, onResize, onSelect, onCreate }: {
   date: string; lines: PlanLine[]; products: Product[]; orders?: PurchaseOrder[]; jobOrders?: JobOrder[]; warnings?: Map<string, string[]>; calendars: UnitCalendar[]; canPlan: boolean; canCreate?: boolean;
   onMove: (id: string, date: string) => string; onSelect: (id: string) => void; onCreate: (date: string, calendarId: string) => void;
   // Dragging a card's bottom edge down its column sets the activity's last day.
   onResize?: (id: string, endDate: string) => string;
+  // The unit's working days: off days are shaded and say why.
+  workDays?: WorkingCalendar;
 }) {
   const dates = monthDates(date);
   const numbers = orderNumbers(orders);
@@ -201,9 +204,9 @@ export function PlanningList({ date, lines, products, orders = [], jobOrders = [
           <tr>{columns.map((item) => <th scope="col" key={item.id}>{item.name}</th>)}</tr>
         </thead>
         <tbody>{dates.map((day) => {
-          const weekday = new Date(`${day}T12:00:00`).getDay();
-          return <tr key={day} data-list-date={day} className={[day === today ? "plan-grid-today" : "", weekday === 0 || weekday === 6 ? "plan-grid-weekend" : ""].join(" ").trim() || undefined}>
-            <th scope="row"><time dateTime={day}>{formatDate(day)}<small>{label(day, { weekday: "short" })}</small></time></th>
+          const status = dayStatus(workDays, day);
+          return <tr key={day} data-list-date={day} className={[day === today ? "plan-grid-today" : "", status.working ? "" : "plan-grid-weekend", status.kind === "overtime" ? "plan-grid-overtime" : ""].join(" ").trim() || undefined}>
+            <th scope="row" title={status.special?.reason}><time dateTime={day}>{formatDate(day)}<small>{label(day, { weekday: "short" })}{status.label ? ` · ${status.label}` : ""}</small></time></th>
             {columns.map((calendar) => {
               const target = { date: day, calendarId: calendar.id };
               const isTarget = moving?.target?.date === day && moving.target.calendarId === calendar.id;

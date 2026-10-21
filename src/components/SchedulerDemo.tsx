@@ -26,6 +26,8 @@ import { calendarProcessName, calendarSettings, unitRoute, type ProcessSettings 
 import { batchRoute, isNonProduction, validateOrder, type PurchaseOrder } from "@/lib/services/orders";
 import { awaitingReceipt, correctsRecord, validateCompletion, validateCorrection, withoutProgress, type CompletionInput, type Progress, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
+import { dayStatus, shortDay, workingCalendar, type HolidayList, type SpecialDay, type WorkingCalendar } from "@/lib/services/workingDays";
+import { OffDaysButton } from "./OffDaysDialog";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
 import { validateActual, type ProductionActual } from "@/lib/services/actuals";
 import { batchKilograms, isVolume } from "@/lib/services/measurements";
@@ -180,7 +182,8 @@ function PlannerBoard({
   demo,
   onSelect,
   planningView,
-  onPlanningView
+  onPlanningView,
+  offDays
 }: {
   processNames: Record<string, string>;
   processSettings: Record<string, ProcessSettings>;
@@ -209,6 +212,8 @@ function PlannerBoard({
   onSelect: (id: string) => void;
   planningView: PlanningView;
   onPlanningView: (view: PlanningView) => void;
+  // The unit's working days, and opening or closing a day (planners, production managers, Admin).
+  offDays: { unitName: string; calendar: WorkingCalendar; holidays: HolidayList; canEdit: boolean; onAdd: (date: string, kind: SpecialDay["kind"], reason: string) => string; onRemove: (id: string) => string };
 }) {
   const setPlanningView = onPlanningView;
   const [initialDate] = useState(() => localDateKey(new Date()));
@@ -235,6 +240,7 @@ function PlannerBoard({
             </div>
           </ToolbarMenu>
           <JobOrderQueue jobOrders={jobOrders} orders={orders} products={products} lines={allLines} calendars={calendars} />
+          <OffDaysButton {...offDays} today={initialDate} />
           <span className="result-count" aria-live="polite">{visibleLines.length} of {planLines.length} lines</span>
           <div className="view-switch" aria-label="Planning view">
             <button type="button" aria-pressed={planningView === "calendar"} onClick={() => setPlanningView("calendar")}>Calendar</button>
@@ -243,7 +249,7 @@ function PlannerBoard({
         </div>
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar canPrint={canPrint} processNames={processNames} processSettings={processSettings} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} onMove={onMoveLine} onResize={onResizeLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
+        <PlanningCalendar canPrint={canPrint} processNames={processNames} processSettings={processSettings} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} workDays={offDays.calendar} onOpenDay={offDays.canEdit ? (date, reason) => offDays.onAdd(date, "working", reason) : undefined} onMove={onMoveLine} onResize={onResizeLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
           const result = onJobPlan(plan, mode);
           if ("message" in result) { setQuery(""); setPriorityFilter(""); setStatusFilter(""); }
           return result;
@@ -367,11 +373,12 @@ function ReportsPanel({
 // A person verified by Bio Tree Core. Their permissions come from Core; the server rechecks every save.
 export type CoreIdentity = { id: string; name: string; permissions: string[] };
 
-export default function SchedulerDemo({ initial, writeToken, identity, catalog, equipment, releases = [] }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; equipment?: EquipmentCatalog; releases?: Release[] }) {
-  return <MeasurementProvider initial={initial.snapshot.measurements}><DateCheckProvider><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} catalog={catalog} equipment={equipment} releases={releases} /></DateCheckProvider></MeasurementProvider>;
+// holidays: the company's public holidays, read from Circulo by the server.
+export default function SchedulerDemo({ initial, writeToken, identity, catalog, equipment, releases = [], holidays = { status: "off", holidays: [] } }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; equipment?: EquipmentCatalog; releases?: Release[]; holidays?: HolidayList }) {
+  return <MeasurementProvider initial={initial.snapshot.measurements}><DateCheckProvider><TeamWorkspace initial={initial} writeToken={writeToken} identity={identity} catalog={catalog} equipment={equipment} releases={releases} holidays={holidays} /></DateCheckProvider></MeasurementProvider>;
 }
 
-function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, releases }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; equipment?: EquipmentCatalog; releases: Release[] }) {
+function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, releases, holidays }: { initial: WorkspaceEnvelope; writeToken: string; identity?: CoreIdentity; catalog?: OrderCatalog; equipment?: EquipmentCatalog; releases: Release[]; holidays: HolidayList }) {
   const [directory, setDirectory] = useState<CalendarDirectory>(initial.snapshot.directory);
   const [memberId, setMemberId] = useState(initial.snapshot.directory.people.find((person) => person.role === "admin")!.id);
   // In Core mode the signed-in user replaces the demo person picker. Core has no unit model
@@ -419,8 +426,8 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const [yieldLimits, setYieldLimits] = useState<YieldLimits>(initial.snapshot.yieldLimits ?? { byProcess: {} });
   // Shown and booked with Master Data's current Equipment ID, name and active state; saved as stored.
   const machines = useMemo(() => withMasterEquipment(storedMachines, equipment), [storedMachines, equipment]);
-  const [data, setRawData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] }>(initial.snapshot.data);
-  type WorkspaceData = { lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[] };
+  const [data, setRawData] = useState<{ lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[]; specialDays: SpecialDay[] }>(initial.snapshot.data);
+  type WorkspaceData = { lines: PlanLine[]; entries: ScheduleEntry[]; actuals: ProductionActual[]; transfers: WipTransfer[]; orders: PurchaseOrder[]; customers: Customer[]; jobOrders: JobOrder[]; specialDays: SpecialDay[] };
   // Every change goes through here and is stamped with who made it and when (see stamps.ts).
   const setData = (update: WorkspaceData | ((current: WorkspaceData) => WorkspaceData)) =>
     setRawData((current) => {
@@ -428,6 +435,24 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       const entries = reopenMovedBookings(current.entries, next.entries, caps.approve);
       return stampChanges(current, entries === next.entries ? next : { ...next, entries }, member.name, new Date().toISOString());
     });
+  // The unit's working days: its week, Circulo's public holidays and the days planners opened or closed.
+  const workDays = workingCalendar(unit, data.specialDays, holidays.holidays);
+  function addSpecialDay(date: string, kind: SpecialDay["kind"], reason: string) {
+    if (!caps.editPlan || !unit) return "Planning access is required to open or close a day.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "Choose the date.";
+    if (!reason.trim()) return "Give the reason.";
+    const status = dayStatus(workDays, date);
+    if (status.special) return `${shortDay(date)} is already ${status.special.kind === "working" ? "opened" : "closed"}: remove it first to change it.`;
+    if (kind === "working" && status.working) return `${shortDay(date)} is already a working day.`;
+    if (kind === "closed" && !status.working) return `${shortDay(date)} is already off${status.kind === "holiday" ? ` (${status.label})` : ""}.`;
+    setData((current) => ({ ...current, specialDays: [...current.specialDays, { id: newId("day"), unitId: unit.id, date, kind, reason: reason.trim(), addedBy: member.name, addedAt: new Date().toISOString() }] }));
+    return "";
+  }
+  function removeSpecialDay(id: string) {
+    if (!caps.editPlan) return "Planning access is required to open or close a day.";
+    setData((current) => ({ ...current, specialDays: current.specialDays.filter((item) => item.id !== id) }));
+    return "";
+  }
   const { uoms, activities } = useSettings();
   const snapshot = { schemaVersion: 1, directory, products, workCentres, machines: storedMachines, measurements: { uoms, activities }, yieldLimits, data } as WorkspaceSnapshot;
   const persistenceStatus = useWorkspacePersistence(initial, snapshot, writeToken);
@@ -618,6 +643,9 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   function moveLine(id: string, date: string) {
     const line = allowedLines.find((item) => item.id === id);
     const checks = [{ label: `${line?.activityType ?? "Activity"} date`, value: date, rule: "plan" as const, was: line?.plannedDate }];
+    // An open activity cannot start on an off day; a planner opens the day first (Off days) for overtime.
+    const day = dayStatus(workDays, date);
+    if (line && !line.completedAt && line.plannedDate !== date && !day.working) return `${shortDay(date)} is ${day.kind === "holiday" ? `a public holiday (${day.label})` : day.kind === "closed" ? "closed" : "an off day"}: ${line.activityType ?? "the activity"} stays on ${shortDay(line.plannedDate)}. To work that day, open it under Off days first.`;
     // A completed process's date is a recorded fact: moving it is a correction, with its reason.
     if (line?.completedAt && line.plannedDate !== date) { checkDates(checks, (reason) => setPlanNotice(applyMove(id, date, reason, true)), { reason: "correction" }); return ""; }
     if (line && !canPlan && canProduce) { checkDates(checks, (reason) => setPlanNotice(applyMove(id, date, reason)), { reason: "always" }); return ""; }
@@ -1031,7 +1059,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       {!unit && activeTab !== "master" && activeTab !== "news" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Setup." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canMoveDates && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
+      {unit && activeTab === "planner" ? <PlannerBoard offDays={{ unitName: unit.name, calendar: workDays, holidays, canEdit: caps.editPlan, onAdd: addSpecialDay, onRemove: removeSpecialDay }} planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canMoveDates && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine} onResizeLine={resizeLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace directory={directory} allLines={data.lines} key={`${selectedLine.jobOrderId ?? selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}

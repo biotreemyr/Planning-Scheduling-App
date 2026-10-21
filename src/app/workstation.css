@@ -1085,3 +1085,34 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .order-detail > *, .order-detail .order-section, .order-detail .job-orders { min-width: 0; max-width: 100%; }
 .order-detail .order-batch-scroll { max-width: 100%; }
 .correction-note { font-size: 13px; background: #fff6cc; border-left: 3px solid #e0a800; padding: 6px 10px; margin: 6px 0; }
+
+/* Off days: the unit's weekly off days, public holidays (from Circulo) and closed days are greyed and
+   labelled on the calendar and list; an off day opened for overtime is marked. */
+/* Toast UI sets each cell's background inline, and its date box to a fixed width. */
+.planning-calendar .toastui-calendar-daygrid-cell:has(.day-off) { background-color: #f1f2f0 !important; }
+.planning-calendar .toastui-calendar-grid-cell-date:has(.day-head) { width: auto; max-width: 100%; }
+.planning-calendar .toastui-calendar-grid-cell-header:has(.toastui-calendar-grid-cell-more-events) .toastui-calendar-grid-cell-date { max-width: calc(100% - 52px); }
+.planning-calendar .day-head { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; }
+.planning-calendar .day-label { overflow: hidden; color: var(--muted); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.planning-calendar .day-off .day-label { color: #9f3030; }
+.planning-calendar .day-overtime .day-label { color: #1d6b48; font-weight: 600; }
+.workstation .plan-grid-overtime th small { color: #1d6b48; font-weight: 600; }
+.activity-dialog.off-days-dialog { width: min(820px, calc(100vw - 24px)); }
+.off-days-dialog h3 { margin: 12px 0 4px; font-size: 13px; }
+.calendar-button:has(> svg) { display: inline-flex; align-items: center; gap: 6px; }
+.off-days-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.off-days-form label { flex: 0 1 200px; }
+.off-days-form .off-days-reason { flex: 1 1 260px; }
+.off-days-form .off-days-chosen { flex-basis: 100%; color: var(--muted); }
+.off-days-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.off-days-table th, .off-days-table td { padding: 5px 6px; border-bottom: 1px solid var(--line, #d9dfdc); text-align: left; vertical-align: top; }
+.off-days-table th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.off-days-table td:first-child { width: 32px; color: var(--muted); }
+.off-days-table td:nth-child(4) { min-width: 200px; }
+.off-days-table small { display: block; color: var(--muted); }
+.route-plan-table .plan-off-days { color: #8a5a00; }
+.plan-off-notes { padding: 8px 10px; border: 1px solid #ecd9a6; border-radius: 6px; background: #fffaf0; }
+.plan-off-notes ul { display: grid; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.plan-off-notes li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.plan-off-notes .plan-open-day { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.plan-off-notes .plan-open-day input { min-width: 240px; }

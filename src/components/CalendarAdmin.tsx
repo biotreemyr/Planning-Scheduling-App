@@ -6,6 +6,7 @@ import type { Machine, WorkCentre } from "@/lib/domain/types";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { machineLabel } from "@/lib/services/machines";
 import { configureUnit, removeDirectoryItem } from "@/lib/services/adminConfiguration";
+import { DEFAULT_WORKING_DAYS, WEEKDAYS, WEEK_ORDER, offDayNames } from "@/lib/services/workingDays";
 import { DOSAGE_FORMS, NEW_PROCESS, PLANNED_LABEL, REPORT_LABEL, settingsOf, type DosageForm, type PlannedSource, type ProcessSettings, type ReportKind } from "@/lib/services/processSetup";
 
 const id = () => crypto.randomUUID();
@@ -52,7 +53,7 @@ export function CalendarAdmin({ directory: d, onSave, machines, savedMachines = 
     finish(onSave(removeDirectoryItem(d, section, pendingDelete.id)), "Item deleted.");
   }
   function summary(recordId: string) {
-    if (section === "units") return d.calendars.filter((item) => item.unitId === recordId).map((item) => d.processes.find((process) => process.id === item.processId)?.name).join(", ") || "No processes assigned";
+    if (section === "units") return `${d.calendars.filter((item) => item.unitId === recordId).map((item) => d.processes.find((process) => process.id === item.processId)?.name).join(", ") || "No processes assigned"} | Off: ${offDayNames(d.units.find((unit) => unit.id === recordId)?.workingDays ?? DEFAULT_WORKING_DAYS)}`;
     if (section === "people") { const person = d.people.find((item) => item.id === recordId)!; return `${person.role} | ${d.units.filter((unit) => person.unitIds.includes(unit.id)).map((unit) => unit.name).join(", ") || "No units assigned"}`; }
     if (section === "machines") { const machine = machines.find((item) => item.id === recordId)!; return `${machine.masterDataId ? "Master Data" : "Not in Master Data"} | ${d.units.find((unit) => unit.id === machine.unitId)?.name} | Setup: ${machine.setupMinutes ?? 0} min | ${machine.active}`; }
     const process = d.processes.find((item) => item.id === recordId);
@@ -84,10 +85,16 @@ export function CalendarAdmin({ directory: d, onSave, machines, savedMachines = 
 // A unit: its name, which processes it has, and their order, which is the production route order.
 function UnitForm({ directory: d, unitId, onSave }: { directory: CalendarDirectory; unitId: string | null; onSave: (directory: CalendarDirectory) => boolean }) {
   const [processIds, setProcessIds] = useState(d.calendars.filter((calendar) => calendar.unitId === unitId).map((calendar) => calendar.processId));
+  // The weekdays the unit works; planning skips the others unless a planner opens one for overtime.
+  const saved = d.units.find((unit) => unit.id === unitId);
+  const [workingDays, setWorkingDays] = useState((saved?.workingDays ?? DEFAULT_WORKING_DAYS).map(String));
   const nameOf = (processId: string) => d.processes.find((item) => item.id === processId)?.name ?? "Process";
   const move = (index: number, by: number) => setProcessIds((current) => { const next = [...current]; const [item] = next.splice(index, 1); next.splice(Math.max(0, Math.min(next.length, index + by)), 0, item); return next; });
-  return <form onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onSave(configureUnit(d, { id: unitId ?? id(), name: value(data, "name") }, processIds, id)); }}><label>Unit name<input name="name" required defaultValue={d.units.find((unit) => unit.id === unitId)?.name} /></label>
+  return <form onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); const days = workingDays.map(Number).sort();
+    onSave(configureUnit(d, { id: unitId ?? id(), name: value(data, "name"), ...(days.join() === DEFAULT_WORKING_DAYS.join() ? {} : { workingDays: days }) }, processIds, id)); }}><label>Unit name<input name="name" required defaultValue={d.units.find((unit) => unit.id === unitId)?.name} /></label>
     <Checks title="Processes in this unit" items={d.processes} selected={processIds} onChange={(ids) => setProcessIds([...processIds.filter((item) => ids.includes(item)), ...ids.filter((item) => !processIds.includes(item))])} />
+    <Checks title="Working days" items={WEEK_ORDER.map((day) => ({ id: String(day), name: WEEKDAYS[day] }))} selected={workingDays} onChange={setWorkingDays} />
+    <p className="orders-help">Planning skips the other days, and the company&apos;s public holidays from Circulo. Planners open an off day for overtime, or close a working day, under Off days on the Planner Board.</p>
     {processIds.length ? <fieldset className="route-order"><legend>Route order</legend>
       <p className="orders-help">Production follows this order. Each dosage form uses the processes ticked for it under Processes.</p>
       <ol>{processIds.map((processId, index) => <li key={processId}><span>{index + 1}. {nameOf(processId)}</span>
