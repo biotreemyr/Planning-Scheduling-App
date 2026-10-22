@@ -5,7 +5,7 @@ import { CheckCircle2, GripVertical, Plus } from "lucide-react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import type { PlanLine, Product } from "@/lib/domain/types";
 import { localDateKey } from "@/lib/services/calendarPrint";
-import { canMovePlan, monthDates } from "@/lib/services/planningMonth";
+import { canMovePlan, monthDates, movedStart, shownOn } from "@/lib/services/planningMonth";
 import { isNonProduction, orderColor, orderNumbers, type PurchaseOrder } from "@/lib/services/orders";
 import { OrderBadge, PriorityMark } from "./OrderBadge";
 import { activityFacts, type JobOrder } from "@/lib/services/jobOrders";
@@ -47,8 +47,10 @@ export function PlanningList({ workDays = workingCalendar(undefined), date, line
 
   function finish(id: string, target: Target | null) {
     const line = lines.find((item) => item.id === id);
-    if (target && canMovePlan(line, canPlan) && dates.includes(target.date) && line!.calendarId === target.calendarId && line!.plannedDate !== target.date) {
-      setNotice(onMove(id, target.date));
+    const shown = line && shownOn(line, dates);
+    // An activity carried in from last month is shown on the 1st: dropping it moves it by as many days.
+    if (target && shown && canMovePlan(line, canPlan) && dates.includes(target.date) && line.calendarId === target.calendarId && shown !== target.date) {
+      setNotice(onMove(id, movedStart(line, shown, target.date)));
     }
     setMoving(null);
   }
@@ -217,9 +219,12 @@ export function PlanningList({ workDays = workingCalendar(undefined), date, line
                 <div className="plan-grid-cell">
                   {/* The later days of an activity that runs over several days keep its place in the column;
                       the activity's own box is drawn down over them, so it reads as one box. */}
-                  {lines.filter((line) => line.calendarId === calendar.id && line.plannedDate < day && lineEnd(line) >= day).map((line) =>
+                  {lines.filter((line) => { const shown = line.calendarId === calendar.id ? shownOn(line, dates) : undefined; return !!shown && shown < day && lineEnd(line) >= day; }).map((line) =>
                     <div key={`${line.id}-${day}`} className="plan-span-slot" aria-hidden="true" data-span-part={line.id} data-span-end={lineEnd(line) === day ? line.id : undefined} />)}
-                  {lines.filter((line) => line.plannedDate === day && line.calendarId === calendar.id).sort((a, b) => Number(lineDays(b) > 1) - Number(lineDays(a) > 1)).map((line) => {
+                  {/* Each activity's card is in the row of its first day this month: its start, or the 1st for one carried in. */}
+                  {lines.filter((line) => line.calendarId === calendar.id && shownOn(line, dates) === day).sort((a, b) => Number(lineDays(b) > 1) - Number(lineDays(a) > 1)).map((line) => {
+                    const carried = line.plannedDate < day;
+                    const spans = lineEnd(line) > day;
                     const product = products.find((item) => item.id === line.productId);
                     const name = product?.name ?? "Unknown product";
                     const movable = canMovePlan(line, canPlan);
@@ -231,7 +236,7 @@ export function PlanningList({ workDays = workingCalendar(undefined), date, line
                     const facts = activityFacts(line, jobOrders, product?.uom);
                     const batch = [facts.batchNumber, facts.jobNumber].filter(Boolean).join(" · ");
                     const detail = facts.quantity;
-                    return <div key={line.id} data-movable={movable || undefined} data-span-id={lineDays(line) > 1 ? line.id : undefined} className={`plan-grid-item${lineDays(line) > 1 ? " plan-grid-spanning" : ""}${number ? "" : " no-order"}${line.completedAt ? " completed" : lineEnd(line) < today ? " late" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
+                    return <div key={line.id} data-movable={movable || undefined} data-span-id={spans ? line.id : undefined} className={`plan-grid-item${spans ? " plan-grid-spanning" : ""}${carried ? " carried-in" : ""}${number ? "" : " no-order"}${line.completedAt ? " completed" : lineEnd(line) < today ? " late" : ""}${dragging?.id === line.id ? " is-dragging" : ""}`}
                       style={number ? { "--order-color": orderColor(number) } as React.CSSProperties : undefined}
                       onPointerDown={(event) => pointerDown(event, line, name)} onContextMenu={(event) => { if (drag.current?.touch) event.preventDefault(); }}>
                       {movable ? <button type="button" className="icon-button plan-list-grip" title={`Move ${name}`} aria-label={`Move ${name}`} aria-describedby="list-move-help"
@@ -245,8 +250,9 @@ export function PlanningList({ workDays = workingCalendar(undefined), date, line
                         <strong><OrderBadge number={number} poNumber={order?.poNumber} trial={isNonProduction(order)} /><PriorityMark priority={line.priority} />{warnings?.get(line.id) ? <span className="flow-mark" aria-label="Process-flow warning">⚠</span> : null}{line.completedAt ? <CheckCircle2 size={12} aria-label="Completed" /> : null}{name}</strong>
                         {batch ? <span className="plan-list-batch">{batch}</span> : null}
                         <small>{detail}</small>
+                        {carried ? <small className="plan-list-carried">Started {formatDate(line.plannedDate)}</small> : null}
                       </button>
-                      {lineDays(line) > 1 ? <div className="plan-span-extension" data-extension-for={line.id} onClick={() => { if (!suppressClick.current) onSelect(line.id); }} title={`${name} · ${batch} · ${detail}`}>
+                      {spans ? <div className="plan-span-extension" data-extension-for={line.id} onClick={() => { if (!suppressClick.current) onSelect(line.id); }} title={`${name} · ${batch} · ${detail}`}>
                         {movable && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag to change the last day of ${name}`} /> : null}
                       </div> : movable && onResize ? <span className="plan-list-resize" role="presentation" title={`Drag down to the last day of ${name}`} /> : null}
                     </div>;

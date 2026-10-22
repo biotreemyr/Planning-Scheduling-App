@@ -96,3 +96,34 @@ describe("dragging in the list view", () => {
     expect(onMove).toHaveBeenCalledWith("a", "2026-10-13");
   });
 });
+
+describe("an activity carried in from last month", () => {
+  // jsdom has no CSS.escape, which the several-day box uses to find its parts.
+  globalThis.CSS ??= { escape: (value: string) => value } as unknown as typeof CSS;
+  // Capsulation 23/09 to 05/10, still running when October opens (as JO-00010 on 22/10/2026).
+  const carried = line("c", { plannedDate: "2026-09-23", endDate: "2026-10-05" });
+  it("shows its card on the 1st, saying when it started, with its later days held below", () => {
+    setup([carried, line("a")]);
+    const card = cell("2026-10-01", "dispensing").querySelector<HTMLElement>(".plan-grid-item")!;
+    expect(card.textContent).toContain("Vitamin C");
+    expect(card.textContent).toContain("Started 23/09/2026");
+    expect(card.dataset.spanId).toBe("c");
+    expect(document.querySelectorAll('[data-span-part="c"]')).toHaveLength(4);
+    expect(document.querySelector('[data-span-end="c"]')?.closest("td")?.dataset.cellDate).toBe("2026-10-05");
+    expect(document.querySelectorAll(".plan-grid-item")).toHaveLength(2);
+  });
+  it("moves by the days it is dragged, keeping its real start", () => {
+    const { onMove } = setup([carried]);
+    const card = cell("2026-10-01", "dispensing").querySelector<HTMLElement>(".plan-grid-item")!;
+    pointer(card.querySelector(".plan-list-product")!, "pointerdown", 100, 100);
+    over = cell("2026-10-05", "dispensing");
+    pointer(window, "pointermove", 100, 140);
+    pointer(window, "pointermove", 100, 180);
+    pointer(window, "pointerup", 100, 180);
+    expect(onMove).toHaveBeenCalledWith("c", "2026-09-27");
+  });
+  it("leaves out an activity that ended before the month", () => {
+    setup([line("old", { plannedDate: "2026-09-20", endDate: "2026-09-30" })]);
+    expect(document.querySelectorAll(".plan-grid-item")).toHaveLength(0);
+  });
+});

@@ -8,6 +8,9 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Fixed
+- **Planner Board · List**: an activity that started last month and is still running now shows at the top of the month, marked "Started 23/09/2026", and runs down to its last day. Before, its card was missing and only blank space showed (JO-00010 Capsulation was missing from October). Dragging it moves it by the days it is dragged.
+
 ## [1.14.0] - 2026-10-22
 
 ### Added
