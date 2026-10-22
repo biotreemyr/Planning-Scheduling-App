@@ -252,6 +252,9 @@
 .workstation .plan-grid-item.completed { background: var(--gray-soft); }
 /* Open after its planned day: a red edge, with the late warning on the ⚠. */
 .workstation .plan-grid-item.late { box-shadow: inset 3px 0 0 #b42318; }
+/* An activity carried in from last month: its card starts on the 1st and says when it began. */
+.workstation .plan-grid-item.carried-in { border-top-style: dashed; }
+.workstation .plan-list-carried { font-style: italic; }
 .workstation .plan-grid-item.completed .plan-list-product strong { color: #4f5a60; }
 .workstation .plan-grid-item[data-movable], .workstation .plan-grid-item[data-movable] .plan-list-product { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .workstation .plan-grid-item.is-dragging { opacity: 0.4; }
