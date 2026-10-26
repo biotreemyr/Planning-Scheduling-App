@@ -29,6 +29,7 @@ import { localDateKey } from "@/lib/services/calendarPrint";
 import { dayStatus, shortDay, workingCalendar, type HolidayList, type SpecialDay, type WorkingCalendar } from "@/lib/services/workingDays";
 import { OffDaysButton } from "./OffDaysDialog";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
+import { ReportsOverview } from "@/components/ReportsOverview";
 import { validateActual, type ProductionActual } from "@/lib/services/actuals";
 import { batchKilograms, isVolume } from "@/lib/services/measurements";
 import { MeasurementProvider, MeasurementAdmin, useSettings } from "@/components/MeasurementSettings";
@@ -56,6 +57,9 @@ import { ReleaseNotes } from "./ReleaseNotes";
 import { formatDate } from "@/lib/services/dates";
 import type { OrderCatalog } from "@/lib/services/masterData";
 
+// Reports' sections: the Overview's charts first, then the existing reports.
+type ReportSection = "overview" | "actuals" | "load";
+const REPORT_SECTIONS: { id: ReportSection; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "actuals", label: "Actuals & WIP" }, { id: "load", label: "Schedule load" }];
 type Tab = "planner" | "orders" | "trials" | "status" | "master" | "reports" | "audit" | "news";
 type PlanningView = "calendar" | "list";
 
@@ -93,6 +97,8 @@ function AppHeader({
   statusSections,
   statusSection,
   onStatusSection,
+  reportSection,
+  onReportSection,
   version,
   badges = {}
 }: {
@@ -108,6 +114,8 @@ function AppHeader({
   showOrders: boolean; showStatus: boolean;
   // QA/QC's sections (Testing, Release) the person may open, listed under it while it is open.
   statusSections: { id: StatusSection; label: string }[]; statusSection: StatusSection; onStatusSection: (section: StatusSection) => void;
+  // Reports' sections (Overview first), listed under it while it is open.
+  reportSection: ReportSection; onReportSection: (section: ReportSection) => void;
   // The released version in use, from CHANGELOG.md; it opens What's new.
   version?: string;
   // Work waiting in a tab, e.g. POs ready for planning to close.
@@ -126,8 +134,8 @@ function AppHeader({
             <button
               className={activeTab === tab.id ? "tab active" : "tab"}
               onClick={() => { onTabChange(tab.id); if (tab.id === "status" && statusSections.length && !statusSections.some((item) => item.id === statusSection)) onStatusSection(statusSections[0].id); }}
-              aria-current={activeTab === tab.id && tab.id !== "status" ? "page" : undefined}
-              aria-expanded={tab.id === "status" ? activeTab === "status" : undefined}
+              aria-current={activeTab === tab.id && tab.id !== "status" && tab.id !== "reports" ? "page" : undefined}
+              aria-expanded={tab.id === "status" || tab.id === "reports" ? activeTab === tab.id : undefined}
               type="button"
             >
               <Icon size={17} />
@@ -137,10 +145,13 @@ function AppHeader({
             {tab.id === "status" && activeTab === "status" ? <div className="tab-sub" role="group" aria-label="QA/QC sections">
               {statusSections.map((item) => <button key={item.id} type="button" className={statusSection === item.id ? "tab sub active" : "tab sub"} aria-current={statusSection === item.id ? "page" : undefined} onClick={() => onStatusSection(item.id)}>{item.label}</button>)}
             </div> : null}
+            {tab.id === "reports" && activeTab === "reports" ? <div className="tab-sub" role="group" aria-label="Report sections">
+              {REPORT_SECTIONS.map((item) => <button key={item.id} type="button" className={reportSection === item.id ? "tab sub active" : "tab sub"} aria-current={reportSection === item.id ? "page" : undefined} onClick={() => onReportSection(item.id)}>{item.label}</button>)}
+            </div> : null}
           </Fragment>;
         })}
       </nav>
-      <button type="button" onClick={() => onTabChange(showReports ? "reports" : "planner")} className={conflictCount > 0 ? "alert-pill visible" : "alert-pill"}>
+      <button type="button" onClick={() => { onTabChange(showReports ? "reports" : "planner"); if (showReports) onReportSection("load"); }} className={conflictCount > 0 ? "alert-pill visible" : "alert-pill"}>
         <AlertTriangle size={16} />
         <span>{conflictCount} conflict{conflictCount === 1 ? "" : "s"}</span>
       </button>
@@ -410,6 +421,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
   // Which QA/QC section is open: Testing or Release.
   const [statusSection, setStatusSection] = useState<StatusSection>("testing");
+  const [reportSection, setReportSection] = useState<ReportSection>("overview");
   // What the last save from the activity panel did, shown once the panel closes.
   const [planNotice, setPlanNotice] = useState("");
   // In the activity window: whether the selected day's production form is open, and the last result.
@@ -1053,7 +1065,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   return <YieldLimitsProvider value={yieldLimits}><main className="workstation">
     <AppHeader version={releases[0]?.version} badges={canEditOrders ? { orders: data.orders.filter((order) => !isNonProduction(order) && readyToClose(order, data.jobOrders)).length, trials: data.orders.filter((order) => isNonProduction(order) && readyToClose(order, data.jobOrders)).length } : {}} activeTab={activeTab} conflictCount={conflicts.length} onTabChange={setActiveTab} showReports={caps.reports} showAudit={caps.auditTrail} showAdmin={!identity || canManage} showOrders={caps.viewOrders || caps.createOrders || caps.editOrders} showStatus={caps.viewTesting || caps.viewRelease}
       statusSections={[...(caps.viewTesting ? [{ id: "testing" as const, label: "Testing" }] : []), ...(caps.viewRelease ? [{ id: "release" as const, label: "Release" }, { id: "yield" as const, label: "Yield limits" }] : [])]}
-      statusSection={statusSection} onStatusSection={setStatusSection} />
+      statusSection={statusSection} onStatusSection={setStatusSection} reportSection={reportSection} onReportSection={setReportSection} />
     <div className="workstation-content">
       <header className="workstation-topbar"><div className="topbar-title"><h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>{persistenceStatus}</div>{identity ? <span className="user-selector signed-in">Signed in as <strong>{identity.name}</strong></span> : <label className="user-selector">User<select value={memberId} onChange={(event) => { setMemberId(event.target.value); setProcessSelection(null); setSelectedActivity(null); }}>{directory.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>}</header>
       {!unit && activeTab !== "master" && activeTab !== "news" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
@@ -1082,10 +1094,16 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, overPlan: overPlanFor, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
       {activeTab === "audit" && caps.auditTrail ? <HistoryPanel refreshKey={activeTab} canDownload={caps.printAuditTrail} /> : null}
       {activeTab === "news" ? <ReleaseNotes releases={releases} /> : null}
-      {activeTab === "reports" && calendar && caps.reports ? <>
+      {activeTab === "reports" && calendar && caps.reports && reportSection === "overview" ? <ReportsOverview filterControls={filterControls} lines={planLines} allLines={data.lines} entries={entries}
+        orders={data.orders} jobs={data.jobOrders} transfers={data.transfers} calendars={visibleCalendars} machines={calendarMachines} directory={directory} products={products}
+        workDays={workDays} yieldLimits={yieldLimits} unitName={unit?.name ?? ""} today={localDateKey(new Date())} /> : null}
+      {activeTab === "reports" && calendar && caps.reports && reportSection === "actuals" ? <>
         {filterControls}
         <ProductionActuals key={`${calendarId}-${memberId}-${visibleCalendars.map((item) => item.id).join("-")}`} lines={planLines} products={products} actuals={scope(data.actuals)} editable={canProduce} onSave={saveActual} />
         <details className="wip-reports"><summary>Incoming WIP ({scope(data.transfers).filter((item) => !item.receivedAt).length})</summary><WipInbox transfers={scope(data.transfers)} products={products} directory={directory} canReceive={canProduce} canPlan={canCreate} onReceive={receiveWip} onPlan={planWip} /></details>
+      </> : null}
+      {activeTab === "reports" && calendar && caps.reports && reportSection === "load" ? <>
+        {filterControls}
         <ReportsPanel planLines={planLines} entries={entries} products={products} processName={(calendarId) => calendarProcessName(directory, calendarId)} machines={calendarMachines} />
       </> : null}
     </div>
