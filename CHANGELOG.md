@@ -8,6 +8,9 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Added
+- **Reports · Overview**: Reports now opens on an Overview of the unit's production for a month, quarter or year: key figures (activities planned and completed, late activities, overdue POs, open and released batches, stages outside QA's yield limits, machine use, overtime days) and charts of activities by week and by process, yield by process against QA's limits, machine use, POs due by status, open batches by status and working, off and overtime days. Late activities are listed under the charts, newest first. The existing reports are now under **Actuals & WIP** and **Schedule load** beneath Reports in the menu.
+
 ## [1.14.1] - 2026-10-22
 
 ### Fixed
