@@ -91,9 +91,63 @@ export function jobForOrder(job: JobOrder, orderId: string): JobOrder {
   return { ...job, orderId, quantity: part.quantity, packQuantity: part.packQuantity, packUom: part.packUom, packSize: part.packSize, boxQuantity: part.boxQuantity, packingNumber: part.packingNumber };
 }
 
-// Filling and packing plan from the pack quantity and the boxes: they are done for each PO.
+// Filling and packing plan from the pack quantity and the boxes.
 export const perOrderSource = (planned: PlannedSource) => planned === "packQuantity" || planned === "boxes";
 export const isPerOrderLine = (line: Pick<PlanLine, "calendarId">, directory: CalendarDirectory) => perOrderSource(calendarSettings(directory, line.calendarId).planned);
+
+/**
+ * A shared batch's filling and packing are planned once, for the whole batch (since 29/10/2026).
+ * Batches planned before then have one activity per PO; this tells them apart: a filling or packing
+ * activity of the batch was planned for another of its POs.
+ */
+export function splitPerOrder(job: Pick<JobOrder, "id" | "orderId" | "shares">, lines: PlanLine[], directory: CalendarDirectory) {
+  return isShared(job) && lines.some((line) => line.jobOrderId === job.id && isPerOrderLine(line, directory) && !!line.productionOrderId && line.productionOrderId !== job.orderId);
+}
+
+// Every PO's figure added up, when they share a unit; undefined when none has one or units differ.
+function total(values: { quantity?: number; uom?: string }[]) {
+  const known = values.filter((item) => item.quantity !== undefined);
+  if (!known.length || new Set(known.map((item) => item.uom?.trim().toLowerCase())).size > 1) return undefined;
+  return { quantity: Number(known.reduce((sum, item) => sum + item.quantity!, 0).toPrecision(12)), uom: known[0].uom };
+}
+/**
+ * The job order as the whole batch: the pack quantity and boxes of every PO it serves added up, so
+ * one filling and one packing activity plan the batch. Unshared, it is the job order itself.
+ */
+export function wholeBatchJob(job: JobOrder): JobOrder {
+  if (!isShared(job)) return job;
+  const parts = jobParts(job);
+  const packs = total(parts.map((part) => ({ quantity: part.packQuantity, uom: part.packUom })));
+  const boxes = total(parts.map((part) => ({ quantity: part.boxQuantity, uom: "boxes" })));
+  return { ...job, packQuantity: packs?.quantity, packUom: packs?.uom ?? job.packUom, boxQuantity: boxes?.quantity };
+}
+
+// A PO's planned part of the batch in a unit: its pack quantity, its boxes, or its share of the batch quantity.
+function partIn(part: JobPart, job: JobOrder, uom: string) {
+  const unit = uom.trim().toLowerCase();
+  if (sameUnit(part.packUom, uom)) return part.packQuantity;
+  if (BOX_UOMS.includes(unit)) return part.boxQuantity;
+  if (sameUnit(job.uom, uom)) return part.quantity;
+  return undefined;
+}
+/**
+ * What the batch made, split between its POs by what the job order planned for each: the PO due
+ * first gets its share, the next what is left, and the last PO everything over. The person who sets
+ * up the PO and its job orders decides the split; QA does not key it in.
+ */
+export function splitToOrders(job: JobOrder, orders: PurchaseOrder[], made: ProcessQuantity) {
+  const due = (orderId: string) => orders.find((order) => order.id === orderId)?.deliveryDate ?? "9999-12-31";
+  const parts = jobParts(job).map((part, index) => ({ part, index })).sort((a, b) => due(a.part.orderId).localeCompare(due(b.part.orderId)) || a.index - b.index).map(({ part }) => part);
+  const planned = parts.map((part) => partIn(part, job, made.uom));
+  // Without a planned figure for every PO in this unit, the first PO takes it all.
+  if (planned.some((value) => value === undefined)) return parts.map((part) => ({ orderId: part.orderId, quantity: part.first ? made.quantity : 0, uom: made.uom }));
+  let left = Math.max(0, made.quantity);
+  return parts.map((part, index) => {
+    const quantity = index === parts.length - 1 ? left : Math.min(planned[index]!, left);
+    left = Number((left - quantity).toPrecision(12));
+    return { orderId: part.orderId, quantity: Number(quantity.toPrecision(12)), uom: made.uom };
+  });
+}
 
 // POs with different FG codes share a batch only once QA has confirmed the formula is the same.
 export function needsFormulaCheck(job: JobOrder, orders: PurchaseOrder[]) {
@@ -159,15 +213,21 @@ export function sharesAfterYield(job: JobOrder, orders: PurchaseOrder[], made: n
 export function orderViewLines(lines: PlanLine[], jobs: JobOrder[], directory: CalendarDirectory): PlanLine[] {
   const shared = jobs.filter(isShared);
   if (!shared.length) return lines;
-  const extra = shared.flatMap((job) => lines.filter((line) => line.jobOrderId === job.id && line.productionOrderId === job.orderId && !isPerOrderLine(line, directory))
+  // Filling and packing planned for the whole batch count for every PO too.
+  const extra = shared.flatMap((job) => lines.filter((line) => line.jobOrderId === job.id && line.productionOrderId === job.orderId && (!isPerOrderLine(line, directory) || !splitPerOrder(job, lines, directory)))
     .flatMap((line) => (job.shares ?? []).map((share) => ({ ...line, productionOrderId: share.orderId }))));
   return [...lines, ...extra];
 }
 
-// What one PO's part of the batch finished as final output: its own filling and packing.
-export function finalOutputFor(job: JobOrder, orderId: string, lines: PlanLine[], transfers: { sourceLineId: string }[], directory: CalendarDirectory): ProcessQuantity[] {
+/**
+ * What one PO's part of the batch finished as final output: its own filling and packing (batches
+ * planned per PO), or its split of the whole batch's (see splitToOrders).
+ */
+export function finalOutputFor(job: JobOrder, orderId: string, lines: PlanLine[], transfers: { sourceLineId: string }[], directory: CalendarDirectory, orders: PurchaseOrder[] = []): ProcessQuantity[] {
   if (!isShared(job)) return finalOutput(job.id, lines, transfers);
-  return finalOutput(job.id, lines.filter((line) => line.jobOrderId === job.id && (line.productionOrderId === orderId && isPerOrderLine(line, directory))), transfers);
+  if (splitPerOrder(job, lines, directory)) return finalOutput(job.id, lines.filter((line) => line.jobOrderId === job.id && (line.productionOrderId === orderId && isPerOrderLine(line, directory))), transfers);
+  const whole = finalOutput(job.id, lines.filter((line) => line.jobOrderId === job.id && isPerOrderLine(line, directory)), transfers);
+  return whole.flatMap((made) => splitToOrders(job, orders, made).filter((item) => item.orderId === orderId).map(({ quantity, uom }) => ({ quantity, uom })));
 }
 
 // ---- Release by batch or by PO, and closing the PO ----

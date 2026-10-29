@@ -4,7 +4,7 @@ import { Copy, Maximize2, Minus, Plus, Square, X } from "lucide-react";
 import { useFloatingWindow } from "./useFloatingWindow";
 import { useDateCheck } from "./DateCheck";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
-import { isShared, jobForOrder, jobParts, perOrderSource, shortYield } from "@/lib/services/sharedJobs";
+import { isShared, jobForOrder, jobParts, perOrderSource, shortYield, wholeBatchJob } from "@/lib/services/sharedJobs";
 import { MachinePicker } from "./MachinePicker";
 import { bookedMachineIds } from "@/lib/services/machines";
 import { priorities, type Machine, type PlanLine, type Product, type ScheduleEntry } from "@/lib/domain/types";
@@ -124,11 +124,17 @@ export function JobPlanDialog({ workDays = workingCalendar(undefined), onOpenDay
     // No fixed route (format Other): one process, chosen in the row.
     const machineFor = (calendarId?: string) => { const options = machinesFor(calendarId); return options.length === 1 ? [options[0].id] : []; };
     if (!drafts.length) return [{ key: "single", label: "Process", calendarId: calendars[0]?.id, date: from, quantity: String(chosen.quantity), uom: chosen.uom, on: true, machineIds: machineFor(calendars[0]?.id) }];
-    // A batch shared with other POs is made once; its filling and packing are done for each PO.
+    // A batch shared with other POs is made once, filling and packing included: one activity each for
+    // the whole batch, with every PO's packs. Batches planned per PO before 29/10/2026 keep their rows.
+    const splitBefore = isShared(chosen) && lines.some((line) => line.jobOrderId === chosen.id && line.productionOrderId !== chosen.orderId && perOrderSource(settingsOf(line.calendarId ?? "").planned));
+    // POs packed in different units (bottles for one, blisters for the other) can't be added up: then
+    // filling and packing both stay per PO.
+    const perPo = isShared(chosen) && (splitBefore || drafts.some((draft) => !!draft.planned && perOrderSource(draft.planned) && !processQuantity(wholeBatchJob(chosen), draft.planned)));
     return drafts.flatMap((draft) => {
-      const parts = isShared(chosen) && draft.planned && perOrderSource(draft.planned) ? jobParts(chosen) : [undefined];
+      const perOrder = !!draft.planned && perOrderSource(draft.planned);
+      const parts = perOrder && perPo ? jobParts(chosen) : [undefined];
       return parts.map((part) => {
-        const [quantity, uom] = defaults(part ? jobForOrder(chosen, part.orderId) : chosen, draft.planned);
+        const [quantity, uom] = defaults(part ? jobForOrder(chosen, part.orderId) : perOrder ? wholeBatchJob(chosen) : chosen, draft.planned);
         const po = part ? orders.find((item) => item.id === part.orderId)?.poNumber ?? "PO" : "";
         return { key: part ? `${draft.key}:${part.orderId}` : draft.key, label: part ? `${draft.label} · ${po}` : draft.label, calendarId: draft.calendarId, date: draft.date, quantity, uom, on: false, machineIds: machineFor(draft.calendarId), planned: draft.planned, ...(part ? { orderId: part.orderId } : {}) };
       });
@@ -239,7 +245,8 @@ export function JobPlanDialog({ workDays = workingCalendar(undefined), onOpenDay
             <tbody>{rows.map((row, index) => <tr key={row.key} className={row.calendarId ? undefined : "route-missing"}>
               <td><input type="checkbox" aria-label={`Plan ${row.label}`} disabled={!row.calendarId || row.locked} checked={row.on} onChange={(event) => { const on = event.target.checked; setRows((current) => { const changed = current.map((item, position) => position === index ? { ...item, on } : item); return editing ? changed : reflow(changed, index, start, workDays); }); }} /></td>
               <td>{row.key === "single" ? <select aria-label="Process" value={row.calendarId ?? ""} onChange={(event) => update(index, { calendarId: event.target.value })}>{calendars.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-                : <>{row.calendarId ? nameOf(row.calendarId) : row.label}{row.orderId ? <small className="plan-row-po">for {orders.find((item) => item.id === row.orderId)?.poNumber ?? "PO"}</small> : null}
+                : <>{row.calendarId ? nameOf(row.calendarId) : row.label}{row.orderId ? <small className="plan-row-po">for {orders.find((item) => item.id === row.orderId)?.poNumber ?? "PO"}</small>
+                    : job && isShared(job) && row.calendarId && perOrderSource(settingsOf(row.calendarId).planned) ? <small className="plan-row-po">for {jobParts(job).map((part) => orders.find((item) => item.id === part.orderId)?.poNumber ?? "PO").join(", ")} (whole batch)</small> : null}
                   {row.orderId && short ? (() => { const share = short.shares.find((item) => item.orderId === row.orderId); const part = job ? jobParts(job).find((item) => item.orderId === row.orderId) : undefined;
                     return share && share.available < share.planned ? <small className="order-warning">Short yield: {share.available.toLocaleString()} of {share.planned.toLocaleString()} {job?.uom} for this PO{part?.packSize ? ` · about ${Math.floor(share.available / part.packSize).toLocaleString()} packs` : ""}</small> : null; })() : null}{!row.calendarId ? <small>Not set up in this unit (or filtered out)</small> : row.locked ? <small>Completed: date only</small> : row.lineId && !row.on ? <small>Will be removed</small> : null}</>}</td>
               <td>{row.calendarId ? <input type="date" aria-label={`${row.label} date`} disabled={!row.on} value={row.on || row.locked ? row.date : ""} title={row.on ? undefined : "Not planned"} onChange={(event) => {

@@ -4,7 +4,8 @@ import type { CalendarDirectory } from "../src/lib/domain/calendarAccess";
 import type { PlanLine } from "../src/lib/domain/types";
 import type { JobOrder } from "../src/lib/services/jobOrders";
 import type { PurchaseOrder } from "../src/lib/services/orders";
-import { closeOrder, closedSummary, finalOutputFor, jobForOrder, jobParts, needsFormulaCheck, orderedInJobs, orderViewLines, readyToClose, releasedToOrder, releaseToOrders, sharesAfterYield, sharesProblem } from "../src/lib/services/sharedJobs";
+import { closeOrder, closedSummary, finalOutputFor, jobForOrder, jobParts, needsFormulaCheck, orderedInJobs, orderViewLines, readyToClose, releasedToOrder, releaseToOrders, sharesAfterYield, sharesProblem, splitPerOrder, splitToOrders, wholeBatchJob } from "../src/lib/services/sharedJobs";
+import { checkTally } from "../src/lib/services/jobOrders";
 
 // Customer A's Vitamin C (FG-001, 30s bottles) and customer B's same formula (FG-002, 60s blisters).
 const po = (id: string, extra: Partial<PurchaseOrder> = {}): PurchaseOrder => ({ id, poNumber: id.toUpperCase(), productId: "fg-001", quantity: 2000, uom: "bottles", format: "Tablet", expectedDates: {}, createdAt: "2026-10-15T00:00:00.000Z", createdBy: "Planner", ...extra });
@@ -140,5 +141,35 @@ describe("short yield shown to planning", () => {
     // The bottles of a shared batch count by each PO's own pack quantity.
     expect(orderedInJobs(poA, [job]).total).toBe(2000);
     expect(orderedInJobs(poB, [job]).total).toBe(1000);
+  });
+});
+
+describe("a shared batch's filling and packing planned once, for the whole batch", () => {
+  // Both POs packed in blisters, as PWL005271 and PWL005177 (29/10/2026).
+  const sameUnit: JobOrder = { ...job, shares: [{ ...job.shares![0], packUom: "bottles" }] };
+  const whole = [line("fill", "c-fill", "po-a", { quantity: 3000, uom: "bottles" }), line("pack", "c-pack", "po-a", { quantity: 150, uom: "boxes" })];
+  it("adds up every PO's packs and boxes, but not packs in different units", () => {
+    expect(wholeBatchJob(sameUnit)).toMatchObject({ packQuantity: 3000, packUom: "bottles", boxQuantity: 150 });
+    expect(wholeBatchJob(job).packQuantity).toBeUndefined();
+    expect(wholeBatchJob(job).boxQuantity).toBe(150);
+  });
+  it("tells a batch planned per PO (before) from one planned whole", () => {
+    expect(splitPerOrder(sameUnit, whole, directory)).toBe(false);
+    expect(splitPerOrder(sameUnit, [...whole, line("fill-b", "c-fill", "po-b")], directory)).toBe(true);
+  });
+  it("counts the whole batch's filling and packing for every PO on the Orders tab", () => {
+    const view = orderViewLines(whole, [sameUnit], directory);
+    expect(view.filter((item) => item.productionOrderId === "po-b").map((item) => item.id)).toEqual(["fill", "pack"]);
+  });
+  it("splits what was packed between the POs by the job order: the PO due first gets its share, the last the rest", () => {
+    const done = whole.map((item) => item.id === "pack" ? { ...item, completedAt: "2026-10-28T09:00:00.000Z", yieldQuantity: 140, yieldUom: "boxes" } : item);
+    // po-b is due first (15/11): its 50 boxes; po-a takes the other 90.
+    expect(finalOutputFor(sameUnit, "po-b", done, [], directory, orders)).toEqual([{ quantity: 50, uom: "boxes" }]);
+    expect(finalOutputFor(sameUnit, "po-a", done, [], directory, orders)).toEqual([{ quantity: 90, uom: "boxes" }]);
+    expect(splitToOrders(sameUnit, orders, { quantity: 160, uom: "boxes" })).toEqual([{ orderId: "po-b", quantity: 50, uom: "boxes" }, { orderId: "po-a", quantity: 110, uom: "boxes" }]);
+  });
+  it("checks the whole batch's filling against every PO's packs added up", () => {
+    expect(checkTally(whole.map((item) => ({ ...item, productId: "fg-001" })), [sameUnit], directory)).toEqual([]);
+    expect(checkTally([{ ...whole[0], quantity: 2000 }], [sameUnit], directory)[0]?.message).toMatch(/Filling is planned for 2,000 bottles/);
   });
 });
