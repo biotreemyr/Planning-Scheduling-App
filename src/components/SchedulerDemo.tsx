@@ -44,7 +44,7 @@ import { priorities, type Customer } from "@/lib/domain/types";
 import { findMachineConflicts } from "@/lib/services/conflicts";
 import { formatYield, limitText, stepYieldWith, yieldWarnings, type YieldLimits } from "@/lib/services/yields";
 import { YieldLimitsProvider } from "./YieldLimitsContext";
-import { closeOrder, formulaPending, jobForOrder, orderedInJobs, overPlans, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
+import { closeOrder, formulaPending, jobForOrder, orderedInJobs, overPlans, perOrderSource, readyToClose, releaseToOrders, sharesProblem, wholeBatchJob, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
@@ -765,7 +765,10 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     // Each process plans with the job order figure set for it in Admin.
     const processRows = (calendarId: string, orderId?: string) => plan.rows.filter((row) => (row.on || row.lineId) && row.calendarId === calendarId && (row.orderId ?? job.orderId) === (orderId ?? job.orderId)).length;
     plan = { ...plan, rows: plan.rows.map((row) => {
-      const expected = processRows(row.calendarId, row.orderId) === 1 ? processQuantity(jobForOrder(job, row.orderId ?? job.orderId), calendarSettings(directory, row.calendarId).planned) : undefined;
+      // A shared batch's filling and packing for the whole batch plan with every PO's packs added up.
+      const planned = calendarSettings(directory, row.calendarId).planned;
+      const source = row.orderId ? jobForOrder(job, row.orderId) : perOrderSource(planned) ? wholeBatchJob(job) : job;
+      const expected = processRows(row.calendarId, row.orderId) === 1 ? processQuantity(source, planned) : undefined;
       return expected ? { ...row, quantity: expected.quantity, uom: expected.uom, batchSizeKg: expected.uom === "kg" ? expected.quantity : batchKilograms(expected.quantity, expected.uom) } : row;
     }) };
     const adding = plan.rows.filter((row) => row.on && !row.lineId);

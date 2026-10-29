@@ -655,8 +655,9 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
             {(() => { const short = shortYield(job, lines, orders, (calendarId) => calendarSettings(directory, calendarId).planned)?.shares.find((item) => item.orderId === order.id);
               return short && short.available < short.planned ? <small className="order-warning" title="The batch made less than planned: the PO due first keeps its share">Short yield: {short.available.toLocaleString()} {job.uom} for this PO</small> : null; })()}</td>
           <td>{packingNumber(view)}</td>
-          <td className="numeric">{measure(processQuantity(view, "filling"))}</td>
-          <td className="numeric">{measure(processQuantity(view, "packing"))}</td>
+          {(["filling", "packing"] as const).map((step) => { const value = processQuantity(view, step); const first = orders.find((item) => item.id === job.orderId)?.poNumber ?? "its first PO";
+            // A shared PO's packs are keyed in on the batch's first PO: say where.
+            return <td key={step} className="numeric">{value || own ? measure(value) : <span className="route-muted">Not keyed in<small>Key in on {first}: edit {job.number}, under Other POs</small></span>}</td>; })}
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
           <td><span className="job-actions">
             {actions.canEdit && own ? <button type="button" className="icon-button" title={`Edit ${job.number}`} aria-label={`Edit ${job.number}`} onClick={() => { setEditing(job.id); setShareDrafts((job.shares ?? []).map(shareDraft)); setErrors([]); setNotice(""); }}><Pencil size={15} /></button> : null}
@@ -758,7 +759,7 @@ function JobSharesEditor({ job, order, format, orders, products, drafts, onChang
   const differs = drafts.some((draft) => { const item = orders.find((entry) => entry.id === draft.orderId); return item && item.productId !== order.productId; });
   return <fieldset className="job-shares">
     <legend>Other POs made from this batch <span className="badge neutral">{drafts.length + 1} of {MAX_POS_PER_JOB} POs</span></legend>
-    <p className="route-muted">Dispensing to coating are done once for the batch; filling and packing are done for each PO with its own packing. {order.poNumber} keeps the rest of the batch: <strong>{firstShare.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {job.uom}</strong>.</p>
+    <p className="route-muted">The whole batch is made and planned once, filling and packing included. Key in each PO's own packs and boxes here: planning adds them up, and QA's release splits what was packed between the POs by them. {order.poNumber} keeps the rest of the batch: <strong>{firstShare.toLocaleString("en-MY", { maximumFractionDigits: 3 })} {job.uom}</strong>.</p>
     {drafts.map((draft, index) => {
       const chosen = orders.find((item) => item.id === draft.orderId);
       const packAuto = !draft.packQuantity.trim() ? fullPacks(Number(draft.quantity) > 0 ? Number(draft.quantity) : undefined, asNumber(draft.packSize)) : undefined;
