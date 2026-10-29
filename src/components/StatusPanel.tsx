@@ -1,7 +1,7 @@
 "use client";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, FileSpreadsheet, PackageCheck, Printer, X, XCircle } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, RotateCcw, FileSpreadsheet, PackageCheck, Printer, X, XCircle } from "lucide-react";
 import { PRINT_PERIODS, periodRange, type PrintPeriod } from "@/lib/services/printPeriods";
 import { statusWorkbook } from "@/lib/services/statusExcel";
 import { localDateKey } from "@/lib/services/calendarPrint";
@@ -33,7 +33,7 @@ const amount = (value: number) => value.toLocaleString("en-MY", { maximumFractio
  * output not yet passed; Pass moves it to Release. Release lists passed batches with the release
  * quantity (the final output, which can be changed); Release completes it. Only pending work shows.
  */
-export function StatusPanel({ jobOrders, orders, products, lines, transfers, directory, access, section: chosen, onSection, onTest, onRelease, onReject, onConfirmFormula, yieldLimits, onYieldLimits }: {
+export function StatusPanel({ jobOrders, orders, products, lines, transfers, directory, access, section: chosen, onSection, onTest, onUndoTest, onRelease, onReject, onConfirmFormula, yieldLimits, onYieldLimits }: {
   // QA's acceptable step and final yield ranges, set under QA/QC.
   yieldLimits: YieldLimits; onYieldLimits: (limits: YieldLimits) => string[];
   jobOrders: JobOrder[]; orders: PurchaseOrder[]; products: Product[]; lines: PlanLine[]; transfers: { sourceLineId: string }[]; directory: CalendarDirectory;
@@ -41,6 +41,8 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   // The section picked under QA/QC in the sidebar.
   section: StatusSection; onSection?: (section: StatusSection) => void;
   onTest: (jobId: string, result: TestResult) => string[];
+  // QC takes back a result recorded in error, with the reason, before any of the batch is released.
+  onUndoTest: (jobId: string, reason: string) => string[];
   // QA releases a batch to its POs: all at once, or one PO at a time, each reconciled.
   onRelease: (jobId: string, entries: ReleaseEntry[]) => string[];
   onReject: (jobId: string) => string[];
@@ -68,6 +70,10 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
   const [printRows, setPrintRows] = useState<string[]>([]);
   const [printCaption, setPrintCaption] = useState("");
   const printDialog = useRef<HTMLDialogElement>(null);
+  // Undoing a result asks for the reason first; Cancel, ✕ and Esc change nothing.
+  const [undoing, setUndoing] = useState<{ jobId: string; reason: string; error?: string } | null>(null);
+  const undoDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const box = undoDialog.current; if (!box) return; if (undoing && !box.open) box.showModal(); if (!undoing && box.open) box.close(); }, [undoing]);
   useEffect(() => { const box = printDialog.current; if (!box) return; if (printSetup && !box.open) box.showModal(); if (!printSetup && box.open) box.close(); }, [printSetup]);
   // The batch's final yield against QA's limits, and whether any process came out outside them,
   // so testing and release see it without opening the order. No limits set says so.
@@ -162,11 +168,15 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
     if (choice === "investigate") report(onTest(job.id, "Under investigation"), `${name} is under investigation. Pass or fail it when the result is known.`);
     if (choice === "release") setReleasing(job.id);
     if (choice === "close") setReleasing(null);
+    if (choice === "undo") setUndoing({ jobId: job.id, reason: "" });
     if (choice === "reject" && window.confirm(`Reject ${name}? It failed testing and will be closed as rejected.`)) report(onReject(job.id), `${name} rejected.`);
   };
+  // A result can be taken back until QA releases any of the batch (or rejects it).
+  const undoable = (job: JobOrder) => access.passTesting && !!testResult(job) && !job.releasedAt && !job.rejectedAt && !job.poReleases?.length;
+  const undoChoice = (job: JobOrder) => undoable(job) ? [{ value: "undo", label: "Undo result…" }] : [];
   const choices = (job: JobOrder): { value: string; label: string }[] => section === "testing"
-    ? access.passTesting ? [{ value: "pass", label: "Pass" }, { value: "fail", label: "Failed" }, ...(testResult(job) !== "Under investigation" ? [{ value: "investigate", label: "Under investigation" }] : [])] : []
-    : !access.release ? [] : testResult(job) === "Failed" ? [{ value: "reject", label: "Reject" }] : releasing === job.id ? [{ value: "close", label: "Close release" }] : [{ value: "release", label: "Release to POs…" }];
+    ? access.passTesting ? [{ value: "pass", label: "Pass" }, { value: "fail", label: "Failed" }, ...(testResult(job) !== "Under investigation" ? [{ value: "investigate", label: "Under investigation" }] : []), ...undoChoice(job)] : []
+    : [...(!access.release ? [] : testResult(job) === "Failed" ? [{ value: "reject", label: "Reject" }] : releasing === job.id ? [{ value: "close", label: "Close release" }] : [{ value: "release", label: "Release to POs…" }]), ...undoChoice(job)];
   const { rows: page, pager } = usePager(table, `${section}|${JSON.stringify(filters)}|${sort.key}|${sort.ascending}`, [50, 100]);
   const report = (errors: string[], text: string) => setMessage(errors.length ? { text: errors.join(" "), error: true } : { text, error: false });
   if (!access.viewTesting && !access.viewRelease) return null;
@@ -181,7 +191,7 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
       </div> : null}
       {canPrint ? <button type="button" className="calendar-button" aria-expanded={!!printSetup} title="Choose which batches to print or download in Excel" onClick={() => setPrintSetup({ statuses: [...statusOptions], period: "all", from: "", to: "" })}><Printer size={16} />Print {section} list</button> : null}
     </div>
-    <p className="orders-help">{section === "testing" ? "Finished batches, from production's final output, waiting for testing. Pass and Failed both send a batch to Release, where QA releases or rejects it. A batch under investigation stays here until it is passed or failed." : "Batches QC has finished with. Passed batches: the release quantity is the final output; change it if needed, then release. Failed batches: reject them."}</p>
+    <p className="orders-help">{section === "testing" ? "Finished batches, from production's final output, waiting for testing. Pass and Failed both send a batch to Release, where QA releases or rejects it. A batch under investigation stays here until it is passed or failed. A result recorded in error can be undone, with a reason, until the batch is released." : "Batches QC has finished with. Passed batches: the release quantity is the final output; change it if needed, then release. Failed batches: reject them. QC can undo a result recorded in error, with a reason, until the batch is released."}</p>
     {message ? <p role={message.error ? "alert" : "status"} className={message.error ? undefined : "calendar-notice"}>{message.text}</p> : null}
     {section === "release" && toConfirm.length ? <section className="formula-check" aria-labelledby="formula-check-title">
       <h3 id="formula-check-title">Same formula to confirm <span className="badge warning">{toConfirm.length}</span></h3>
@@ -229,6 +239,35 @@ export function StatusPanel({ jobOrders, orders, products, lines, transfers, dir
         <button type="button" className="primary-button" disabled={!toPrint.length} onClick={() => { printDialog.current?.close(); setPrintCaption(captionFor(printSetup)); setPrintRows(toPrint.map((job) => job.id)); setPrinting((value) => value + 1); setPrintSetup(null); }}><Printer size={16} />Print</button>
       </footer>
     </div> : null}
+    </dialog>
+    <dialog ref={undoDialog} className="activity-dialog print-dialog" aria-labelledby="status-undo-title" onClose={() => setUndoing(null)}>
+    {undoing ? (() => {
+      const job = jobOrders.find((item) => item.id === undoing.jobId);
+      if (!job) return null;
+      const result = testResult(job);
+      const confirm = () => {
+        const errors = onUndoTest(job.id, undoing.reason);
+        if (errors.length) { setUndoing({ ...undoing, error: errors.join(" ") }); return; }
+        setUndoing(null);
+        report([], `${packingNumber(job)}: result ${result} undone. The batch is back in Testing, awaiting testing.`);
+      };
+      return <div className="print-chooser">
+        <header className="print-chooser-head">
+          <div><h2 id="status-undo-title">Undo testing result</h2><p>{packingNumber(job)}{job.batchNumber ? ` · batch ${job.batchNumber}` : ""} · {job.number}</p></div>
+          <button type="button" className="icon-button" aria-label="Close" title="Close" onClick={() => setUndoing(null)}><X size={18} /></button>
+        </header>
+        <section className="print-chooser-step">
+          <p>Result <strong>{result}</strong>{job.testedAt ? `, recorded ${formatDateTime(job.testedAt)}` : ""}{job.testedBy ? ` by ${job.testedBy}` : ""}, will be taken back. The batch goes back to <strong>Awaiting testing</strong>. The result and your reason stay in the History.</p>
+          <label className="status-undo-reason">Reason<textarea rows={3} maxLength={300} autoFocus placeholder="e.g. Marked Passed by mistake; testing not finished" value={undoing.reason}
+            onChange={(event) => setUndoing({ ...undoing, reason: event.target.value, error: undefined })} /></label>
+          {undoing.error ? <p role="alert">{undoing.error}</p> : null}
+        </section>
+        <footer className="print-chooser-actions">
+          <button type="button" className="calendar-button" onClick={() => setUndoing(null)}>Cancel</button>
+          <button type="button" className="primary-button" disabled={undoing.reason.trim().length < 3} onClick={confirm}><RotateCcw size={16} />Undo result</button>
+        </footer>
+      </div>;
+    })() : null}
     </dialog>
     <div className="orders-table-scroll status-table-scroll" tabIndex={0} role="region" aria-label={`${section === "testing" ? "Testing" : "Release"} list`}>
       <table className="orders-table status-table">

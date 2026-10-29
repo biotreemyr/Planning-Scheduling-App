@@ -96,6 +96,16 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
       changes.push({ kind: "Job order", ...jobRefs(row), text: `PO ${po(share.orderId) ?? "-"} taken off batch ${str(row.number)}` });
     if (!old.formulaConfirmedAt && row.formulaConfirmedAt)
       changes.push({ kind: "Job order", ...jobRefs(row), text: `QA confirmed the POs sharing ${str(row.number)} are the same formula` });
+    // QC's testing result, a result taken back (with the reason), and QA's rejection. Older records hold testedAt alone: passed.
+    const resultOf = (value: Row) => str(value.testResult) || (value.testedAt ? "Passed" : "");
+    type Undo = { result: string; testedAt?: string; testedBy?: string; reason: string };
+    const undosOf = (value: Row) => (Array.isArray(value.testUndos) ? value.testUndos : []) as Undo[];
+    const batchName = `${str(row.number)}${row.batchNumber ? ` (batch ${str(row.batchNumber)})` : ""}`;
+    for (const undo of undosOf(row).slice(undosOf(old).length))
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `Testing result ${str(undo.result)} on ${batchName} undone${undo.testedBy ? ` (recorded by ${str(undo.testedBy)}${undo.testedAt ? ` on ${day(undo.testedAt)}` : ""})` : ""}; back to Awaiting testing (reason: ${str(undo.reason)})` });
+    if (resultOf(row) && resultOf(row) !== resultOf(old))
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `Testing result for ${batchName}: ${resultOf(old) ? `${resultOf(old)} → ` : ""}${resultOf(row)}` });
+    if (!old.rejectedAt && row.rejectedAt) changes.push({ kind: "Job order", ...jobRefs(row), text: `${batchName} rejected after failing testing` });
     type Release = { orderId: string; quantity: number; uom: string; otherUses?: { quantity: number; note: string }[] };
     const releasesOf = (value: Row) => (Array.isArray(value.poReleases) ? value.poReleases : []) as Release[];
     for (const release of releasesOf(row).filter((item) => !releasesOf(old).some((was) => was.orderId === item.orderId)))

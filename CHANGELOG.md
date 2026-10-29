@@ -8,6 +8,10 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Added
+- **QA/QC · Undo result**: QC can take back a testing result (Passed, Failed or Under investigation) recorded in error, until QA releases or rejects the batch. Choose **Undo result…** on the batch's row in Testing or Release and give the reason; the batch goes back to Awaiting testing.
+- **History** now lists testing results ("Testing result for JO-00003 (batch B2609005): Passed"), each result undone with who recorded it and the reason, and rejected batches.
+
 ## [1.14.1] - 2026-10-22
 
 ### Fixed

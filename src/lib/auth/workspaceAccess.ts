@@ -37,7 +37,7 @@ const LINE_RESULTS: string[] = ["completedAt", "yieldQuantity", "yieldUom", "wei
 // A job order's fields that only one right may set, each with the people who record them.
 const jobGroups = (can: WorkspaceCapabilities) => [
   { keys: ["batchNumber", "batchNumberBy", "batchNumberAt"], allowed: can.produce || can.editPlan, what: "enter batch numbers" },
-  { keys: ["testedAt", "testedBy", "testResult"], allowed: can.passTesting, what: "record testing results" },
+  { keys: ["testedAt", "testedBy", "testResult", "testUndos"], allowed: can.passTesting, what: "record testing results" },
   { keys: ["releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy", "poReleases"], allowed: can.release, what: "release or reject batches" },
   // QA confirms that POs with different FG codes sharing a batch are the same formula.
   { keys: ["formulaConfirmedBy", "formulaConfirmedAt"], allowed: can.release, what: "confirm a shared batch's formula", clearedByEdit: true }
@@ -114,6 +114,14 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
       if (group.clearedByEdit && group.keys.every((key) => (job as Record<string, unknown>)[key] === undefined)) need(can.editOrders || group.allowed, "edit job orders");
       else need(group.allowed, group.what);
     }
+    // A result is taken back only before release or rejection, with its reason kept: earlier undos stay as they were.
+    const undos = (value: typeof job) => value.testUndos ?? [];
+    const taken = undos(job).slice(undos(old).length);
+    if (!isDeepStrictEqual(undos(job).slice(0, undos(old).length), undos(old))) need(false, "change earlier undone testing results");
+    if (taken.length) {
+      if (taken.length > 1 || job.testResult !== undefined || job.testedAt !== undefined || !(old.testResult ?? old.testedAt) || !taken[0].reason?.trim()) need(false, "undo a testing result without its reason");
+      if (old.releasedAt || old.rejectedAt || old.poReleases?.length) need(false, "undo the testing result of a released or rejected batch");
+    } else if ((old.testResult ?? old.testedAt) && job.testResult === undefined && job.testedAt === undefined) need(false, "undo a testing result without its reason");
     const rest = keys.filter((key) => !JOB_GROUPED.has(key));
     if (rest.some((key) => !EDIT_STAMPS.includes(key)) || (rest.length && rest.length === keys.length)) need(can.editOrders, "edit job orders");
   }

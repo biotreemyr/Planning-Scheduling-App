@@ -988,6 +988,9 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .print-chooser-dates label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
 .print-chooser-dates input { font-size: 13px; }
 .print-chooser-range { margin: 0; font-size: 12px; color: var(--muted); }
+.print-chooser-step > p { margin: 0; font-size: 13px; }
+.status-undo-reason { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.status-undo-reason textarea { font: inherit; font-size: 13px; resize: vertical; }
 .print-chooser-summary { display: flex; align-items: center; gap: 14px; margin: 16px 22px 0; padding: 12px 16px; border-radius: 8px; background: var(--blue-soft); }
 .print-chooser-summary strong { font-size: 26px; line-height: 1; color: var(--blue); font-variant-numeric: tabular-nums; }
 .print-chooser-summary span { display: grid; gap: 2px; font-size: 13px; }

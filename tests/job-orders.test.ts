@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newWorkspace, parseWorkspace } from "../src/lib/domain/workspace";
 import { addSampleData } from "../src/lib/domain/sampleData";
-import { rejectBatch, recordTest, testResult, batchStatus, orderStatusSummary, passTesting, releaseBatch, releaseQueue, testingQueue, activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, lateWarnings, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
+import { rejectBatch, recordTest, undoTestResult, testResult, batchStatus, orderStatusSummary, passTesting, releaseBatch, releaseQueue, testingQueue, activityFacts, checkTally, defaultPackingNumber, packingNumber, createManualJobOrder, finalOutput, lateWarnings, findJobByNumber, missingQuantity, packsFor, processQuantity, updateJobOrder, validateBatchNumber, validateCustomer, type JobOrder } from "../src/lib/services/jobOrders";
 import { validateOrder } from "../src/lib/services/orders";
 import { reviewWorkspaceChange } from "../src/lib/auth/workspaceAccess";
 import { capabilitiesForDemoRole } from "../src/lib/auth/capabilities";
@@ -231,6 +231,30 @@ describe("job orders", () => {
     const next = structuredClone(state);
     next.data.jobOrders = next.data.jobOrders.map((item) => item.id === released.id ? released : item);
     expect(() => parseWorkspace(next)).not.toThrow();
+  });
+  it("undoes a result recorded in error, with the reason, until the batch is released or rejected", () => {
+    const job = state.data.jobOrders.find((item) => state.data.lines.some((line) => line.jobOrderId === item.id && line.activityType === "Packing" && line.completedAt))!;
+    const lines = state.data.lines;
+    const handed = lines.filter((line) => line.jobOrderId === job.id && line.completedAt && line.activityType !== "Packing").map((line) => ({ sourceLineId: line.id }));
+    expect(undoTestResult(job, "Mistake", "QC", today)).toMatchObject({ error: expect.stringContaining("no testing result") });
+    const passed = passTesting(job, lines, handed, "Padmini", today) as JobOrder;
+    expect(undoTestResult(passed, "  ", "QC", today)).toEqual({ error: "Give the reason for undoing the result." });
+    const later = new Date(2026, 9, 7, 11);
+    const undone = undoTestResult(passed, " Marked Passed by mistake ", "Angeline", later) as JobOrder;
+    expect([undone.testResult, undone.testedAt, undone.testedBy]).toEqual([undefined, undefined, undefined]);
+    expect(undone.testUndos).toEqual([{ result: "Passed", testedAt: today.toISOString(), testedBy: "Padmini", reason: "Marked Passed by mistake", undoneAt: later.toISOString(), undoneBy: "Angeline" }]);
+    expect(batchStatus(undone, lines, handed)).toBe("Awaiting testing");
+    expect([testingQueue([undone], lines, handed), releaseQueue([undone])]).toEqual([[undone], []]);
+    // It can be tested again, and a failed result undone too; earlier undos are kept.
+    const failed = recordTest(undone, "Failed", lines, handed, "QC", later) as JobOrder;
+    expect((undoTestResult(failed, "Wrong batch", "QC", later) as JobOrder).testUndos?.map((undo) => undo.result)).toEqual(["Passed", "Failed"]);
+    // Not once QA has released or rejected it.
+    expect(undoTestResult(releaseBatch(passed, 1, "boxes", "QA", today) as JobOrder, "Mistake", "QC", later)).toMatchObject({ error: expect.stringContaining("already released") });
+    expect(undoTestResult({ ...passed, poReleases: [{ orderId: passed.orderId, quantity: 1, uom: "boxes", releasedAt: today.toISOString(), releasedBy: "QA" }] }, "Mistake", "QC", later)).toMatchObject({ error: expect.stringContaining("already released") });
+    expect(undoTestResult(rejectBatch(failed, "QA", later) as JobOrder, "Mistake", "QC", later)).toMatchObject({ error: expect.stringContaining("already rejected") });
+    const next = structuredClone(state);
+    next.data.jobOrders = next.data.jobOrders.map((item) => item.id === undone.id ? undone : item);
+    expect(parseWorkspace(next).data.jobOrders.find((item) => item.id === undone.id)?.testUndos).toHaveLength(1);
   });
   it("records failed and under-investigation results: failed batches go to release to be rejected", () => {
     const job = state.data.jobOrders.find((item) => state.data.lines.some((line) => line.jobOrderId === item.id && line.activityType === "Packing" && line.completedAt))!;

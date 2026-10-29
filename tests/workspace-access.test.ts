@@ -125,6 +125,29 @@ describe("workspace change review", () => {
     const stamped = copy(); stamped.data.jobOrders[0].updatedBy = "Someone else";
     expect(reviewWorkspaceChange(base, stamped, role("testing.edit")).denied).toEqual(["edit job orders"]);
   });
+  it("lets QC undo a testing result only with its reason, and only before release", () => {
+    const qc = role("testing.edit");
+    const passed = copy();
+    Object.assign(passed.data.jobOrders[0], { testedAt: "2026-10-08T10:00:00.000Z", testedBy: "QC", testResult: "Passed" });
+    const undo = { result: "Passed" as const, testedAt: "2026-10-08T10:00:00.000Z", testedBy: "QC", reason: "Marked by mistake", undoneAt: "2026-10-08T11:00:00.000Z", undoneBy: "QC" };
+    const undone = structuredClone(passed);
+    const job = undone.data.jobOrders[0];
+    delete job.testedAt; delete job.testedBy; delete job.testResult;
+    const bare = structuredClone(undone);
+    job.testUndos = [undo];
+    expect(reviewWorkspaceChange(passed, undone, qc).allowed).toBe(true);
+    expect(reviewWorkspaceChange(passed, undone, planner).denied).toEqual(["record testing results"]);
+    // Clearing the result without the undo record, or with an empty reason, is refused.
+    expect(reviewWorkspaceChange(passed, bare, qc).denied).toEqual(["undo a testing result without its reason"]);
+    const blank = structuredClone(undone); blank.data.jobOrders[0].testUndos = [{ ...undo, reason: " " }];
+    expect(reviewWorkspaceChange(passed, blank, qc).denied).toEqual(["undo a testing result without its reason"]);
+    // Not once any of the batch is released, and earlier undos cannot be rewritten.
+    const released = structuredClone(passed); Object.assign(released.data.jobOrders[0], { releasedAt: "2026-10-09T10:00:00.000Z", releasedBy: "QA" });
+    const releasedUndone = structuredClone(undone); Object.assign(releasedUndone.data.jobOrders[0], { releasedAt: "2026-10-09T10:00:00.000Z", releasedBy: "QA" });
+    expect(reviewWorkspaceChange(released, releasedUndone, qc).denied).toContain("undo the testing result of a released or rejected batch");
+    const rewritten = structuredClone(undone); rewritten.data.jobOrders[0].testUndos = [{ ...undo, reason: "Something else" }];
+    expect(reviewWorkspaceChange(undone, rewritten, qc).denied).toContain("change earlier undone testing results");
+  });
   it("lets an order editor clear a formula confirmation but not set one", () => {
     const before = copy();
     Object.assign(before.data.jobOrders[0], { formulaConfirmedBy: "QA", formulaConfirmedAt: "2026-10-09T10:00:00.000Z" });
