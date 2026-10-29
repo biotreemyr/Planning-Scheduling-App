@@ -660,7 +660,7 @@ function JobOrders({ orders, order, product, products, format, jobOrders, transf
             return <td key={step} className="numeric">{value || own ? measure(value) : <span className="route-muted">Not keyed in<small>Key in on {first}: edit {job.number}, under Other POs</small></span>}</td>; })}
           <td>{job.batchNumber ? <strong>{job.batchNumber}</strong> : <span className="route-muted">Keyed in on the Planner Board</span>}</td>
           <td><span className="job-actions">
-            {actions.canEdit && own ? <button type="button" className="icon-button" title={`Edit ${job.number}`} aria-label={`Edit ${job.number}`} onClick={() => { setEditing(job.id); setShareDrafts((job.shares ?? []).map(shareDraft)); setErrors([]); setNotice(""); }}><Pencil size={15} /></button> : null}
+            {actions.canEdit && own ? <button type="button" className="icon-button" title={`Edit ${job.number}`} aria-label={`Edit ${job.number}`} onClick={() => { setEditing(job.id); setShareDrafts((job.shares ?? []).map((share) => shareDraft(share, job))); setErrors([]); setNotice(""); }}><Pencil size={15} /></button> : null}
             {!own ? <small className="route-muted">Edit on {orders.find((item) => item.id === job.orderId)?.poNumber ?? "its first PO"}</small> : null}
             {!planned.length && actions.canEdit && own ? <button type="button" className="icon-button danger" title={`Remove ${job.number}`} aria-label={`Remove ${job.number}`} onClick={() => report(actions.onDelete(job.id), `${job.number} removed.`)}><Trash2 size={15} /></button> : null}
           </span></td>
@@ -732,8 +732,11 @@ function ReadyToClose({ orders, jobOrders, onClose }: { orders: PurchaseOrder[];
 
 // A shared batch's other POs, as keyed in: each PO's share of the batch and its own packing.
 type ShareDraft = { key: string; orderId: string; quantity: string; packSize: string; packQuantity: string; packUom: string; boxQuantity: string; packingNumber: string };
-const shareDraft = (share?: JobShare): ShareDraft => ({ key: crypto.randomUUID(), orderId: share?.orderId ?? "", quantity: shown(share?.quantity), packSize: shown(share?.packSize),
-  packQuantity: shown(share?.packQuantity), packUom: share?.packUom ?? "bottles", boxQuantity: shown(share?.boxQuantity), packingNumber: share?.packingNumber ?? "" });
+// A shared PO starts with the batch's units per pack and pack type (blisters of 10, say), as the main row has them.
+// "blisters" → "blister", "boxes" → "box": one pack, for "tablets per blister".
+const one = (uom: string) => uom.replace(/(x|ch|sh)es$/i, "$1").replace(/s$/i, "");
+const shareDraft = (share?: JobShare, job?: JobOrder): ShareDraft => ({ key: crypto.randomUUID(), orderId: share?.orderId ?? "", quantity: shown(share?.quantity), packSize: shown(share?.packSize ?? job?.packSize),
+  packQuantity: shown(share?.packQuantity), packUom: share?.packUom ?? job?.packUom ?? "bottles", boxQuantity: shown(share?.boxQuantity), packingNumber: share?.packingNumber ?? "" });
 function readShares(drafts: ShareDraft[]): JobShare[] {
   return drafts.filter((draft) => draft.orderId).map((draft) => {
     const quantity = Number(draft.quantity), packSize = asNumber(draft.packSize);
@@ -770,15 +773,19 @@ function JobSharesEditor({ job, order, format, orders, products, drafts, onChang
             <option key={item.id} value={item.id}>{poLabel(item, orders)} · {productOf(item)?.sku ?? ""} {productOf(item)?.name ?? ""} · {item.customerName ?? ""}</option>)}
         </select>{chosen && chosen.productId !== order.productId ? <small className="order-warning">Different FG code: QA must confirm it is the same formula before planning</small> : null}</label>
         <label>Share of batch ({job.uom})<input type="number" min="0" step="any" required value={draft.quantity} onChange={(event) => update(draft.key, { quantity: event.target.value })} /></label>
-        <label>{job.uom} per pack<input type="number" min="0" step="any" value={draft.packSize} placeholder="e.g. 30" onChange={(event) => update(draft.key, { packSize: event.target.value })} /></label>
-        <label>Packs<span className="job-share-pair"><input type="number" min="0" step="any" value={draft.packQuantity} placeholder={packAuto ? String(packAuto) : ""} onChange={(event) => update(draft.key, { packQuantity: event.target.value })} />
-          <select aria-label="Pack type" value={draft.packUom} onChange={(event) => update(draft.key, { packUom: event.target.value })}>{FILL_UOMS.map((name) => <option key={name}>{name}</option>)}</select></span></label>
-        <label>Boxes<input type="number" min="0" step="any" value={draft.boxQuantity} onChange={(event) => update(draft.key, { boxQuantity: event.target.value })} /></label>
+        {/* Worded as the main row: "Pack quantity · Filling: 1,773 blisters of 10 tablets per blister". */}
+        <fieldset className="job-measure job-pack job-share-pack"><legend title="This PO's pack quantity, for Filling">Pack quantity<span> · Filling</span></legend>
+          <input type="number" min="0" step="any" aria-label="Pack quantity" value={draft.packQuantity} placeholder={packAuto ? String(packAuto) : ""} onChange={(event) => update(draft.key, { packQuantity: event.target.value })} />
+          <select aria-label="Pack quantity UOM" value={draft.packUom} onChange={(event) => update(draft.key, { packUom: event.target.value })}>{FILL_UOMS.map((name) => <option key={name}>{name}</option>)}</select>
+          <label className="job-pack-size">of<input type="number" min="0" step="any" aria-label={`${job.uom} per ${one(draft.packUom)}`} placeholder="e.g. 10" value={draft.packSize} onChange={(event) => update(draft.key, { packSize: event.target.value })} />{job.uom} per {one(draft.packUom)}</label>
+          {packAuto !== undefined ? <small className="job-auto-note" title="Worked out; type over it to change">{Number(draft.quantity).toLocaleString()} ÷ {draft.packSize}</small> : null}</fieldset>
+        <fieldset className="job-measure"><legend title="This PO's total pack quantity, for Packing">Total packs<span> · Packing</span></legend>
+          <input type="number" min="0" step="any" aria-label="Total pack quantity in boxes" value={draft.boxQuantity} onChange={(event) => update(draft.key, { boxQuantity: event.target.value })} /><span className="job-measure-unit">boxes</span></fieldset>
         <label>Packing JO no.<input maxLength={60} value={draft.packingNumber} placeholder={`${packingNumber(job)}-${index + 2}`} onChange={(event) => update(draft.key, { packingNumber: event.target.value })} /></label>
         <button type="button" className="icon-button danger" title="Take this PO off the batch" aria-label={`Remove shared PO ${index + 2}`} onClick={() => onChange(drafts.filter((other) => other.key !== draft.key))}><Trash2 size={15} /></button>
       </div>;
     })}
-    {drafts.length + 1 < MAX_POS_PER_JOB ? <button type="button" className="calendar-button" disabled={!choices.length} onClick={() => onChange([...drafts, shareDraft()])}><Plus size={16} />Add another PO to this batch</button> : null}
+    {drafts.length + 1 < MAX_POS_PER_JOB ? <button type="button" className="calendar-button" disabled={!choices.length} onClick={() => onChange([...drafts, shareDraft(undefined, job)])}><Plus size={16} />Add another PO to this batch</button> : null}
     {!choices.length ? <small className="route-muted">No other open {format.toLowerCase()} PO items to share this batch with.</small> : null}
     {differs ? <p className="route-muted">POs with different FG codes share this batch: QA confirms they are the same formula under QA/QC before it can be planned.</p> : null}
   </fieldset>;
@@ -826,7 +833,6 @@ function JobOrderFields({ job, order, format, countSteps, factors, countUom, def
   const set = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
   const type = (key: FigureKey, value: string) => { set(key, value); setAuto((current) => ({ ...current, [key]: !value.trim() })); };
   const note = (on: boolean, text: string) => on ? <small className="job-auto-note" title="Worked out; type over it to change">{text}</small> : null;
-  const one = (uom: string) => uom.replace(/(x|ch|sh)es$/i, "$1").replace(/s$/i, "");
   const over = (perPack: number | undefined, packs: string) => units && perPack && asNumber(packs) ? leftOver(units, perPack, Number(packs)) : 0;
   return <>
     <fieldset className="job-measure job-number"><legend>Job order no.</legend><input name="number" required maxLength={60} autoComplete="off" aria-label="Job order no." placeholder="e.g. JO0010" defaultValue={job?.number} /></fieldset>

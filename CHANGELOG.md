@@ -8,6 +8,9 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+### Changed
+- **Orders · job order · Other POs made from this batch**: each other PO's packs now read like the main row: "Pack quantity · Filling: 1,773 blisters of 10 tablets per blister", and "Total packs · Packing … boxes". The tablets per blister and the pack type start as the batch's, so the packs are worked out from the PO's share without typing ("Auto · 17,730 ÷ 10").
+
 ## [1.15.0] - 2026-10-29
 
 ### Added
