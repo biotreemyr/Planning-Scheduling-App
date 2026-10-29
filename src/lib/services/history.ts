@@ -96,10 +96,24 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
       changes.push({ kind: "Job order", ...jobRefs(row), text: `PO ${po(share.orderId) ?? "-"} taken off batch ${str(row.number)}` });
     if (!old.formulaConfirmedAt && row.formulaConfirmedAt)
       changes.push({ kind: "Job order", ...jobRefs(row), text: `QA confirmed the POs sharing ${str(row.number)} are the same formula` });
+    // QC's testing result, a result taken back (with the reason), and QA's rejection. Older records hold testedAt alone: passed.
+    const resultOf = (value: Row) => str(value.testResult) || (value.testedAt ? "Passed" : "");
+    type Undo = { result: string; testedAt?: string; testedBy?: string; reason: string };
+    const undosOf = (value: Row) => (Array.isArray(value.testUndos) ? value.testUndos : []) as Undo[];
+    const batchName = `${str(row.number)}${row.batchNumber ? ` (batch ${str(row.batchNumber)})` : ""}`;
+    for (const undo of undosOf(row).slice(undosOf(old).length))
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `Testing result ${str(undo.result)} on ${batchName} undone${undo.testedBy ? ` (recorded by ${str(undo.testedBy)}${undo.testedAt ? ` on ${day(undo.testedAt)}` : ""})` : ""}; back to Awaiting testing (reason: ${str(undo.reason)})` });
+    if (resultOf(row) && resultOf(row) !== resultOf(old))
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `Testing result for ${batchName}: ${resultOf(old) ? `${resultOf(old)} → ` : ""}${resultOf(row)}` });
+    if (!old.rejectedAt && row.rejectedAt) changes.push({ kind: "Job order", ...jobRefs(row), text: `${batchName} rejected after failing testing` });
     type Release = { orderId: string; quantity: number; uom: string; otherUses?: { quantity: number; note: string }[] };
     const releasesOf = (value: Row) => (Array.isArray(value.poReleases) ? value.poReleases : []) as Release[];
     for (const release of releasesOf(row).filter((item) => !releasesOf(old).some((was) => was.orderId === item.orderId)))
       changes.push({ kind: "Job order", ...jobRefs(row), text: `${str(row.number)} released to PO ${po(release.orderId) ?? "-"}: ${num(release.quantity)} ${str(release.uom)}${release.otherUses?.length ? `; also ${release.otherUses.map((use) => `${num(use.quantity)} ${str(use.note)}`).join(", ")}` : ""}` });
+    type ReleaseUndo = Release & { releasedBy?: string; releasedAt?: string; reason: string };
+    const releaseUndosOf = (value: Row) => (Array.isArray(value.releaseUndos) ? value.releaseUndos : []) as ReleaseUndo[];
+    for (const undo of releaseUndosOf(row).slice(releaseUndosOf(old).length))
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `Release of ${batchName} to PO ${po(undo.orderId) ?? "-"} undone: ${num(undo.quantity)} ${str(undo.uom)}${undo.releasedBy ? ` (released by ${str(undo.releasedBy)}${undo.releasedAt ? ` on ${day(undo.releasedAt)}` : ""})` : ""}; waiting for release again (reason: ${str(undo.reason)})` });
   }
 
   const lineDiff = diff(list(before, "lines"), list(after, "lines"));

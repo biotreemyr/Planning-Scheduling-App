@@ -28,6 +28,27 @@ describe("transaction history", () => {
       "Dispensing · Folic Acid 400mcg Tablets: moved 19/10/2026 → 20/10/2026"
     ]);
   });
+  it("records testing results, a result undone with its reason, and rejection", () => {
+    const withJob = structuredClone(base);
+    withJob.data.jobOrders.push({ id: "job-t", number: "JO0051", orderId: order.id, sequence: 1, quantity: 300000, uom: "tablets", batchNumber: "B2609005", createdAt: "2026-10-07T00:00:00Z", createdBy: "Aida" });
+    const passed = structuredClone(withJob);
+    Object.assign(passed.data.jobOrders.at(-1)!, { testResult: "Passed", testedAt: "2026-10-29T01:55:32.000Z", testedBy: "Padmini" });
+    expect(describeChanges(withJob, passed)).toEqual([{ kind: "Job order", po: "PO-2610-142", job: "JO0051", batch: "B2609005", product: "Folic Acid 400mcg Tablets", text: "Testing result for JO0051 (batch B2609005): Passed" }]);
+    const undone = structuredClone(withJob);
+    undone.data.jobOrders.at(-1)!.testUndos = [{ result: "Passed", testedAt: "2026-10-29T01:55:32.000Z", testedBy: "Padmini", reason: "Marked Passed by mistake", undoneAt: "2026-10-29T03:00:00.000Z", undoneBy: "Angeline" }];
+    expect(describeChanges(passed, undone).map((change) => change.text)).toEqual(["Testing result Passed on JO0051 (batch B2609005) undone (recorded by Padmini on 29/10/2026); back to Awaiting testing (reason: Marked Passed by mistake)"]);
+    const failed = structuredClone(undone);
+    Object.assign(failed.data.jobOrders.at(-1)!, { testResult: "Under investigation", testedAt: "2026-10-30T01:00:00.000Z", testedBy: "QC" });
+    const rejected = structuredClone(failed);
+    Object.assign(rejected.data.jobOrders.at(-1)!, { testResult: "Failed", rejectedAt: "2026-10-31T01:00:00.000Z", rejectedBy: "QA" });
+    expect(describeChanges(failed, rejected).map((change) => change.text)).toEqual(["Testing result for JO0051 (batch B2609005): Under investigation → Failed", "JO0051 (batch B2609005) rejected after failing testing"]);
+    const released = structuredClone(passed);
+    const release = { orderId: order.id, quantity: 120, uom: "boxes", releasedAt: "2026-10-30T02:00:00.000Z", releasedBy: "QA" };
+    released.data.jobOrders.at(-1)!.poReleases = [release];
+    const unreleased = structuredClone(passed);
+    unreleased.data.jobOrders.at(-1)!.releaseUndos = [{ ...release, reason: "COA not signed", undoneAt: "2026-10-30T03:00:00.000Z", undoneBy: "QA" }];
+    expect(describeChanges(released, unreleased).map((change) => change.text)).toEqual(["Release of JO0051 (batch B2609005) to PO PO-2610-142 undone: 120 boxes (released by QA on 30/10/2026); waiting for release again (reason: COA not signed)"]);
+  });
   it("lists versions newest first with who and when, skipping saves that changed nothing", () => {
     const next = structuredClone(base);
     next.data.orders = next.data.orders.map((item) => item.id === order.id ? { ...item, quantity: 700000 } : item);

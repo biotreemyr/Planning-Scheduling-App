@@ -1,7 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
-import { jobForOrder, jobsServing, orderedInJobs, overOrderedText, overPlanAllowed, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
+import { jobForOrder, jobsServing, orderedInJobs, overOrderedText, overPlanAllowed, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease, type ReleaseUndo } from "./sharedJobs";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
 import { lineEnd } from "./scheduling";
@@ -32,6 +32,8 @@ export type JobOrder = {
   // Status: QC's testing result (Passed, Failed or Under investigation) with when and by whom it was
   // last recorded, and when (and how much of it) QA released. Older records hold testedAt alone: passed.
   testedAt?: string; testedBy?: string; testResult?: TestResult;
+  // Results QC took back before release (recorded in error), each with why, by whom and when.
+  testUndos?: TestUndo[];
   releaseQuantity?: number; releaseUom?: string; releasedAt?: string; releasedBy?: string;
   // A batch that failed testing goes to Release too, where QA rejects it.
   rejectedAt?: string; rejectedBy?: string;
@@ -42,6 +44,8 @@ export type JobOrder = {
   formulaConfirmedBy?: string; formulaConfirmedAt?: string;
   // QA's release to each PO, by batch or one PO at a time, with what else the output went to.
   poReleases?: PoRelease[];
+  // Releases QA took back before planning closed the PO, each with why, by whom and when.
+  releaseUndos?: ReleaseUndo[];
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;
@@ -291,6 +295,7 @@ export function activityFacts(line: PlanLine, jobs: JobOrder[], productUom = "")
 export type TestResult = "Passed" | "Failed" | "Under investigation";
 export const TEST_RESULTS: TestResult[] = ["Passed", "Failed", "Under investigation"];
 export const testResult = (job: Pick<JobOrder, "testResult" | "testedAt">): TestResult | undefined => job.testResult ?? (job.testedAt ? "Passed" : undefined);
+export type TestUndo = { result: TestResult; testedAt?: string; testedBy?: string; reason: string; undoneAt: string; undoneBy: string };
 export type BatchStatus = "In production" | "Awaiting testing" | "Under investigation" | "Failed testing" | "Awaiting release" | "Released" | "Rejected";
 // A job order is finished once it has final output; it then waits for testing, then for release.
 // A failed batch goes to Release for QA to reject; one under investigation waits for QC's final result.
@@ -329,6 +334,21 @@ export function recordTest(job: JobOrder, result: TestResult, lines: PlanLine[],
   if (current === result) return { error: `${job.number} is already under investigation.` };
   if (!finalOutput(job.id, lines, transfers).length) return { error: `${job.number} has no final output to test yet.` };
   return { ...job, testResult: result, testedAt: at.toISOString(), testedBy: by };
+}
+// Taking back a result recorded in error, with the reason: only before QA releases or rejects any of
+// the batch. The batch goes back to Awaiting testing; the result taken back is kept with the reason.
+export function undoTestResult(job: JobOrder, reason: string, by: string, at: Date): JobOrder | { error: string } {
+  const result = testResult(job);
+  if (!result) return { error: `${job.number} has no testing result to undo.` };
+  if (job.rejectedAt) return { error: `${job.number} is already rejected, so its result cannot be undone.` };
+  if (job.releasedAt || job.poReleases?.length) return { error: `${job.number} is already released, so its result cannot be undone.` };
+  const why = reason.trim();
+  if (why.length < 3) return { error: "Give the reason for undoing the result." };
+  if (why.length > 300) return { error: "Keep the reason to 300 characters." };
+  if ((job.testUndos?.length ?? 0) >= 20) return { error: `${job.number} has had its result undone too many times. Ask an administrator.` };
+  const { testResult: _result, testedAt, testedBy, ...rest } = job;
+  const undo: TestUndo = { result, ...(testedAt ? { testedAt } : {}), ...(testedBy ? { testedBy } : {}), reason: why, undoneAt: at.toISOString(), undoneBy: by };
+  return { ...rest, testUndos: [...(job.testUndos ?? []), undo] };
 }
 // Passing testing (kept for callers that only pass).
 export const passTesting = (job: JobOrder, lines: PlanLine[], transfers: { sourceLineId: string }[], by: string, at: Date) => recordTest(job, "Passed", lines, transfers, by, at);
