@@ -8,11 +8,16 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
-### Changed
-- **Production Planning: a job order shared by several POs** now plans Filling and Packing once, for the whole batch, like the other processes. The row says which POs it is for ("for PWL005271, PWL005177"), and its quantity is every PO's packs or boxes added up. QA's release then fills in each PO's quantity from what was packed, split by the job order's per-PO figures, earliest delivery first. Batches already planned per PO, and POs packed in different units (bottles and blisters), keep one row per PO.
+## [1.15.0] - 2026-10-29
 
 ### Added
 - **Reports · Overview**: Reports now opens on an Overview of the unit's production for a month, quarter or year: key figures (activities planned and completed, late activities, overdue POs, open and released batches, stages outside QA's yield limits, machine use, overtime days) and charts of activities by week and by process, yield by process against QA's limits, machine use, POs due by status, open batches by status and working, off and overtime days. Late activities are listed under the charts, newest first. The existing reports are now under **Actuals & WIP** and **Schedule load** beneath Reports in the menu.
+
+### Changed
+- **Production Planning: a job order shared by several POs** now plans Filling and Packing once, for the whole batch, like the other processes. The row says which POs it is for ("for PWL005271, PWL005177"), and its quantity is every PO's packs or boxes added up. QA's release then fills in each PO's quantity from what was packed, split by the job order's per-PO figures, earliest delivery first. Batches already planned per PO, and POs packed in different units (bottles and blisters), keep one row per PO.
+
+### Fixed
+- **Work keyed in late in the day was lost**: a page left open from the morning didn't know about other people's saves since, so its evening save was refused and the entry was gone the next day. Open pages now check every minute, and whenever they come back into view, for newer saves. With nothing being keyed in, the page refreshes itself to the newest data. Otherwise it says who saved and when (e.g. "NOR AZMAN SAHAD saved newer data at 29/10/2026 17:36"), with a **Refresh** button. A save that is still refused says plainly that it was not saved.
 
 ## [1.14.1] - 2026-10-22
 

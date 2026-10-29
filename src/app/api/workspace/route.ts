@@ -38,6 +38,19 @@ async function coreAccess(request: NextRequest): Promise<{ actor: SaveActor; rev
     restore: (stored, received) => restoreHidden(stored, received, can) };
 }
 
+// Open pages ask this every minute, and when they come back into view: a newer revision means
+// someone else has saved since the page was loaded, so the page refreshes before anyone keys in.
+export async function GET(request: NextRequest) {
+  let mode: "demo" | "core";
+  try { mode = getAuthMode(); } catch { return response({ error: "Scheduler configuration is invalid." }, 503); }
+  if (mode === "core") {
+    try { await requireAnyPermission(boardPermissions); } catch (error) {
+      return response({ error: "Your Bio Tree session has ended. Sign in again from the dashboard." }, error instanceof AccessError && error.code === "forbidden" ? 403 : 401);
+    }
+  } else if (!localPersistenceAllowed(request.headers.get("host"), process.env)) return response({ error: "Local pilot only." }, 403);
+  try { return response(await workspaceRepository(db).revision()); } catch { return response({ error: "The scheduling database could not be reached." }, 503); }
+}
+
 export async function PUT(request: NextRequest) {
   let access: { actor?: SaveActor; review?: ReviewChange; restore?: RestoreHidden };
   let mode: "demo" | "core";
