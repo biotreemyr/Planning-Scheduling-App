@@ -16,6 +16,15 @@ export type ReviewChange = (before: WorkspaceSnapshot, after: WorkspaceSnapshot)
 export type RestoreHidden = (stored: WorkspaceSnapshot, received: WorkspaceSnapshot) => WorkspaceSnapshot;
 export function workspaceRepository(db: Database, workspaceId = "local-pilot") {
   return {
+    // The saved revision, and who saved it and when, for open pages to check whether someone else has
+    // saved since (and to name them, so they can be asked about it).
+    async revision(): Promise<{ revision: number; by?: string; at?: string }> {
+      const [row] = await db.select({ revision: schedulerWorkspace.revision }).from(schedulerWorkspace).where(eq(schedulerWorkspace.id, workspaceId));
+      if (!row) return { revision: 0 };
+      const [event] = await db.select({ by: schedulerAuditEvent.actorName, at: schedulerAuditEvent.createdAt }).from(schedulerAuditEvent)
+        .where(and(eq(schedulerAuditEvent.workspaceId, workspaceId), eq(schedulerAuditEvent.revision, row.revision))).limit(1);
+      return { revision: row.revision, ...(event?.by ? { by: event.by } : {}), ...(event?.at ? { at: new Date(event.at).toISOString() } : {}) };
+    },
     async load(): Promise<WorkspaceEnvelope> {
       await db.insert(schedulerWorkspace).values({ id: workspaceId, snapshot: newWorkspace() }).onConflictDoNothing();
       const [row] = await db.select().from(schedulerWorkspace).where(eq(schedulerWorkspace.id, workspaceId));
