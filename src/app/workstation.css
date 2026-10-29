@@ -1122,3 +1122,71 @@ small.who { display: block; margin-top: 2px; color: var(--muted); font-size: 11p
 .plan-off-notes li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
 .plan-off-notes .plan-open-day { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .plan-off-notes .plan-open-day input { min-width: 240px; }
+
+/* --- Reports → Overview: tiles and charts, drawn as the Stability Study overview draws them. --- */
+.reports-overview .overview-filters { padding-bottom: 10px; }
+.reports-overview .overview-filters label { flex: 0 1 160px; }
+.overview-scope { margin: 0 0 10px auto; font-size: 12px; color: var(--muted); }
+.overview-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 0 0 12px; }
+.overview-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; margin: 0 0 14px; }
+.overview-charts > .viz-yield { grid-column: span 2; }
+.viz-tile { background: #fcfcfb; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.viz-tile p { margin: 0; }
+.viz-tile-label { font-size: 12px; color: #52514e; display: flex; align-items: center; gap: 6px; }
+.viz-tile-value { font-size: 26px; font-weight: 700; color: #0b0b0b; line-height: 1.2; margin-top: 2px !important; font-variant-numeric: tabular-nums; }
+.viz-tile-note { font-size: 11px; color: #6b6a66; }
+.viz-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+.viz-card { margin: 0; background: #fcfcfb; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.viz-card figcaption { font-size: 13px; font-weight: 600; color: #0b0b0b; margin-bottom: 6px; }
+.viz-card svg { width: 100%; height: auto; display: block; }
+.viz-grid { stroke: #e6e6e1; stroke-width: 1; }
+.viz-baseline { stroke: #b9b8b2; stroke-width: 1; }
+.viz-axis { font-size: 11px; fill: #52514e; }
+.viz-value { font-size: 11px; fill: #0b0b0b; font-weight: 600; }
+.viz-centre { font-size: 26px; font-weight: 700; fill: #0b0b0b; }
+.viz-card svg g:hover path, .viz-card svg circle:hover { filter: brightness(0.92); }
+.viz-empty { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.viz-rows { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
+.viz-rows li { display: grid; grid-template-columns: 140px 1fr 44px; align-items: center; gap: 8px; font-size: 13px; color: #0b0b0b; }
+.viz-row-label { color: #52514e; overflow-wrap: anywhere; }
+.viz-row-track { height: 12px; background: #eeeeea; border-radius: 4px; overflow: hidden; }
+.viz-row-bar { display: block; height: 100%; border-radius: 0 4px 4px 0; min-width: 0; }
+.viz-row-value { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.viz-donut { display: flex; align-items: center; gap: 14px; }
+.viz-donut svg { width: 150px; flex: 0 0 150px; }
+.viz-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; flex: 1; min-width: 0; }
+.viz-legend li { display: grid; grid-template-columns: 12px 1fr auto 40px; align-items: center; gap: 8px; color: #0b0b0b; }
+.viz-legend small { color: #52514e; text-align: right; font-variant-numeric: tabular-nums; }
+.viz-legend strong { font-variant-numeric: tabular-nums; }
+.viz-swatch { width: 12px; height: 12px; border-radius: 3px; }
+.viz-legend-inline { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: -2px 0 6px; }
+.viz-legend-inline li { display: flex; align-items: center; gap: 6px; }
+/* Yield against QA's limits: band, range line and average dot on one % scale per process. */
+.viz-yield-rows { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 10px; }
+.viz-yield-rows li, .viz-scale { display: grid; grid-template-columns: 170px 1fr 110px; align-items: center; gap: 10px; font-size: 13px; }
+.viz-yield-rows .viz-row-label small, .viz-yield-value small { display: block; font-size: 11px; color: #6b6a66; }
+.viz-yield-track { position: relative; height: 18px; background: #f3f3f0; border-radius: 4px; }
+.viz-yield-band { position: absolute; top: 0; bottom: 0; background: #dcefdc; border-radius: 4px; }
+.viz-yield-hundred { position: absolute; top: -2px; bottom: -2px; width: 1px; background: #b9b8b2; }
+.viz-yield-range { position: absolute; top: 8px; height: 2px; background: #52514e; }
+.viz-yield-dot { position: absolute; top: 4px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; box-shadow: 0 0 0 2px #fcfcfb; }
+.viz-yield-value strong { font-variant-numeric: tabular-nums; }
+.viz-swatch-band { background: #dcefdc; }
+.viz-swatch-range { height: 2px; background: #52514e; border-radius: 0; }
+.viz-swatch-dot { width: 10px; height: 10px; border-radius: 50%; background: #52514e; }
+.viz-scale { margin: 4px 0 0; font-size: 11px; color: #6b6a66; }
+.viz-scale span:nth-child(1) { grid-column: 2; justify-self: start; grid-row: 1; }
+.viz-scale span:nth-child(2) { grid-column: 2; justify-self: center; grid-row: 1; }
+.viz-scale span:nth-child(3) { grid-column: 2; justify-self: end; grid-row: 1; }
+.overview-late .late-table td small { display: block; color: var(--muted); font-size: 12px; }
+.late-table th[data-col="number"], .late-table td[data-col="number"] { width: 3ch; }
+.late-table td[data-col="product"] { min-width: 180px; max-width: 300px; }
+.late-table td[data-col="remarks"] { min-width: 200px; }
+.late-table .numeric { text-align: right; }
+@media (max-width: 760px) {
+  .overview-charts { grid-template-columns: 1fr; }
+  .overview-charts > .viz-yield { grid-column: auto; }
+  .viz-donut { flex-direction: column; align-items: stretch; }
+  .viz-donut svg { margin: 0 auto; }
+  .viz-yield-rows li, .viz-scale { grid-template-columns: 110px 1fr 70px; }
+}

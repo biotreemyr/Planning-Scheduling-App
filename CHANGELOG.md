@@ -9,6 +9,7 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 ## [Unreleased]
 
 ### Added
+- **Reports · Overview**: Reports now opens on an Overview of the unit's production for a month, quarter or year: key figures (activities planned and completed, late activities, overdue POs, open and released batches, stages outside QA's yield limits, machine use, overtime days) and charts of activities by week and by process, yield by process against QA's limits, machine use, POs due by status, open batches by status and working, off and overtime days. Late activities are listed under the charts, newest first. The existing reports are now under **Actuals & WIP** and **Schedule load** beneath Reports in the menu.
 - **QA/QC · Undo result**: QC can take back a testing result (Passed, Failed or Under investigation) recorded in error, until QA releases or rejects the batch. Choose **Undo result…** on the batch's row in Testing or Release and give the reason; the batch goes back to Awaiting testing.
 - **QA/QC · Undo release**: QA can take back a release clicked in error, one PO at a time, until planning closes that PO. Released batches now stay in the Release list, marked **Released**, until then. Choose **Undo release…** on the batch's row and give the reason; the batch waits for release to that PO again.
 - **History** now lists testing results ("Testing result for JO-00003 (batch B2609005): Passed"), each result or release undone with who recorded it and the reason, and rejected batches.
