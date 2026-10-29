@@ -1,7 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
-import { jobForOrder, jobsServing, orderedInJobs, overOrderedText, overPlanAllowed, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
+import { isShared, jobForOrder, jobsServing, orderedInJobs, overOrderedText, overPlanAllowed, perOrderSource, releaseFor, splitPerOrder, wholeBatchJob, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
 import { lineEnd } from "./scheduling";
@@ -220,14 +220,17 @@ const amount = (value: number) => Number(value.toPrecision(12)).toLocaleString("
 export function checkTally(lines: PlanLine[], jobs: JobOrder[], directory: CalendarDirectory): FlowWarning[] {
   // Each process plans with the job order figure set for it in Admin.
   return jobs.flatMap((job) => {
-    // A shared batch's filling and packing are checked per PO, against that PO's own packing.
-    const perPo = (calendarId: string) => !!job.shares?.length && perOrderSource(calendarSettings(directory, calendarId).planned);
+    // A shared batch's filling and packing are checked per PO when they were planned per PO (before
+    // 29/10/2026), else against the whole batch's packs.
+    const split = splitPerOrder(job, lines, directory);
+    const perPo = (calendarId: string) => split && perOrderSource(calendarSettings(directory, calendarId).planned);
+    const whole = (calendarId: string) => !split && isShared(job) && perOrderSource(calendarSettings(directory, calendarId).planned);
     const byProcess = new Map<string, PlanLine[]>();
     for (const line of linesForJob(job.id, lines)) if (line.calendarId) { const key = perPo(line.calendarId) ? `${line.calendarId}|${line.productionOrderId ?? job.orderId}` : line.calendarId; byProcess.set(key, [...byProcess.get(key) ?? [], line]); }
     return [...byProcess].flatMap(([key, items]) => {
       const [calendarId, orderId] = key.split("|");
       const source = calendarSettings(directory, calendarId).planned;
-      const expected = processQuantity(orderId ? jobForOrder(job, orderId) : job, source);
+      const expected = processQuantity(orderId ? jobForOrder(job, orderId) : whole(calendarId) ? wholeBatchJob(job) : job, source);
       if (!expected) return [];
       const planned = items.reduce((sum, line) => sum + (line.uom === expected.uom ? line.quantity : 0), 0);
       const otherUnit = items.some((line) => line.uom !== expected.uom);
