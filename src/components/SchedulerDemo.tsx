@@ -43,7 +43,7 @@ import { priorities, type Customer } from "@/lib/domain/types";
 import { findMachineConflicts } from "@/lib/services/conflicts";
 import { formatYield, limitText, stepYieldWith, yieldWarnings, type YieldLimits } from "@/lib/services/yields";
 import { YieldLimitsProvider } from "./YieldLimitsContext";
-import { closeOrder, formulaPending, jobForOrder, orderedInJobs, overPlans, readyToClose, releaseToOrders, sharesProblem, type ReleaseEntry } from "@/lib/services/sharedJobs";
+import { closeOrder, formulaPending, jobForOrder, orderedInJobs, overPlans, readyToClose, releaseToOrders, sharesProblem, undoRelease, type ReleaseEntry } from "@/lib/services/sharedJobs";
 import { bookActivityMachines, bookedMachineIds, machineLabel, sameMachines, withMasterEquipment } from "@/lib/services/machines";
 import type { EquipmentCatalog } from "@/lib/services/masterData";
 import { getScheduleReport } from "@/lib/services/reports";
@@ -938,6 +938,16 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
     setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
     return [];
   }
+  // QA takes back a release to one PO clicked in error, with the reason, until planning closes the PO.
+  function undoReleaseJob(id: string, orderId: string, reason: string) {
+    if (!caps.release) return ["Your access does not include releasing batches."];
+    const job = data.jobOrders.find((item) => item.id === id);
+    if (!job) return ["This job order no longer exists."];
+    const result = undoRelease(job, orderId, reason, data.orders, member.name, new Date());
+    if ("error" in result) return [result.error];
+    setData((current) => ({ ...current, jobOrders: current.jobOrders.map((item) => item.id === id ? result : item) }));
+    return [];
+  }
   // QA sets the acceptable yield ranges.
   function saveYieldLimits(next: YieldLimits) {
     if (!caps.release) return ["Only QA can change the yield limits."];
@@ -1087,7 +1097,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       </> : <section className="admin-access"><h2>Administrator access required</h2>{identity ? <p>Your Bio Tree role does not include scheduler master data. Ask your Bio Tree administrator if you need it.</p> : <><p>The current user is a {member.role}.</p><button type="button" className="primary-button" onClick={() => { const admin = directory.people.find((person) => person.role === "admin"); if (admin) { setMemberId(admin.id); setProcessSelection(null); } }}>Open administrator preview</button></>}</section> : null}
       {activeTab === "status" && (caps.viewTesting || caps.viewRelease) ? <StatusPanel jobOrders={data.jobOrders} orders={data.orders} products={products} lines={data.lines} transfers={data.transfers} directory={directory} onConfirmFormula={confirmFormula} yieldLimits={yieldLimits} onYieldLimits={saveYieldLimits}
         access={{ viewTesting: caps.viewTesting, passTesting: caps.passTesting, printTesting: caps.printTesting, viewRelease: caps.viewRelease, release: caps.release, printRelease: caps.printRelease }}
-        section={statusSection} onSection={setStatusSection} onTest={testJob} onUndoTest={undoTest} onRelease={releaseJob} onReject={rejectJob} /> : null}
+        section={statusSection} onSection={setStatusSection} onTest={testJob} onUndoTest={undoTest} onRelease={releaseJob} onUndoRelease={undoReleaseJob} onReject={rejectJob} /> : null}
       {activeTab === "orders" && caps.viewOrders ? <OrdersPanel orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, overPlan: overPlanFor, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
       {activeTab === "trials" && caps.viewOrders ? <OrdersPanel nonProduction orders={data.orders} customers={data.customers} jobOrders={data.jobOrders} transfers={data.transfers} jobActions={{ canCreate: canCreateOrders, canEdit: canEditOrders, overPlan: overPlanFor, onCreate: addJobOrder, onUpdate: editJobOrder, onDelete: deleteJobOrder }} lines={data.lines} products={products} catalog={catalog} directory={directory} visibleCalendarIds={allowedCalendars.map((item) => item.id)} creatable={canCreateOrders} editable={canEditOrders} printable={caps.printOrders} userName={member.name} onSave={saveOrder} onAdd={addOrders} onDelete={deleteOrder} onClose={closePo} flow={flow} /> : null}
       {activeTab === "audit" && caps.auditTrail ? <HistoryPanel refreshKey={activeTab} canDownload={caps.printAuditTrail} /> : null}

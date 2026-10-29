@@ -18,6 +18,8 @@ export type JobShare = { orderId: string; quantity: number; packQuantity?: numbe
 export type OtherUse = { quantity: number; note: string };
 // QA's release of one PO's part of the batch, reconciled: what went to the PO and what else.
 export type PoRelease = { orderId: string; quantity: number; uom: string; otherUses?: OtherUse[]; releasedAt: string; releasedBy: string };
+// A release QA took back (clicked in error), with why, by whom and when.
+export type ReleaseUndo = PoRelease & { reason: string; undoneAt: string; undoneBy: string };
 // Uses offered when reconciling; anything else can be typed.
 export const OTHER_USES = ["Retention sample", "QC testing", "Stability study", "Customer sample", "R&D", "Rejected / destroyed"];
 
@@ -210,6 +212,26 @@ export function releaseToOrders(job: JobOrder, entries: ReleaseEntry[], orders: 
   return { ...job, poReleases, releasedAt: at.toISOString(), releasedBy: by,
     ...(units.size === 1 ? { releaseQuantity: Number(poReleases.reduce((sum, item) => sum + item.quantity, 0).toPrecision(12)), releaseUom: poReleases[0].uom } : {}) };
 }
+
+// Taking back a release to one PO clicked in error, with the reason, while planning has not closed
+// that PO. The batch waits for release to that PO again; the release taken back is kept with the reason.
+export function undoRelease(job: JobOrder, orderId: string, reason: string, orders: PurchaseOrder[], by: string, at: Date): JobOrder | { error: string } {
+  const release = releaseFor(job, orderId);
+  const order = orders.find((item) => item.id === orderId);
+  if (!release) return { error: `${job.number} is not released to ${order?.poNumber ?? "that PO"}.` };
+  if (order?.closedAt) return { error: `${order.poNumber} is closed, so this release cannot be undone.` };
+  const why = reason.trim();
+  if (why.length < 3) return { error: "Give the reason for undoing the release." };
+  if (why.length > 300) return { error: "Keep the reason to 300 characters." };
+  if ((job.releaseUndos?.length ?? 0) >= 20) return { error: `${job.number} has had releases undone too many times. Ask an administrator.` };
+  // The batch is no longer released whole, so its whole-batch release goes too.
+  const { releasedAt: _at, releasedBy: _by, releaseQuantity: _quantity, releaseUom: _uom, poReleases, ...rest } = job;
+  const left = (poReleases ?? []).filter((item) => item.orderId !== orderId);
+  return { ...rest, ...(left.length ? { poReleases: left } : {}), releaseUndos: [...(job.releaseUndos ?? []), { ...release, reason: why, undoneAt: at.toISOString(), undoneBy: by }] };
+}
+// Batches released to a PO that planning has not closed yet: QA can still undo those releases.
+export const undoableReleases = (job: JobOrder, orders: PurchaseOrder[]) =>
+  jobParts(job).map((part) => releaseFor(job, part.orderId)).filter((release): release is PoRelease => !!release && !orders.find((order) => order.id === release.orderId)?.closedAt);
 
 // Released to the PO across all its batches, per unit.
 export function releasedToOrder(orderId: string, jobs: JobOrder[]) {

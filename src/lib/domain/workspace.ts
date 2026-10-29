@@ -70,6 +70,8 @@ export const workspaceSchema = z.object({
       formulaConfirmedBy: text.optional(), formulaConfirmedAt: timestamp.optional(),
       poReleases: z.array(z.object({ orderId: id, quantity: number.nonnegative(), uom: name, otherUses: z.array(z.object({ quantity: number.positive(), note: z.string().trim().min(1).max(200) })).max(20).optional(),
         releasedAt: timestamp, releasedBy: text })).max(5).optional(),
+      releaseUndos: z.array(z.object({ orderId: id, quantity: number.nonnegative(), uom: name, otherUses: z.array(z.object({ quantity: number.positive(), note: z.string().trim().min(1).max(200) })).max(20).optional(),
+        releasedAt: timestamp, releasedBy: text, reason: z.string().trim().min(3).max(300), undoneAt: timestamp, undoneBy: text })).max(20).optional(),
       testedAt: timestamp.optional(), testedBy: text.optional(), testResult: z.enum(["Passed", "Failed", "Under investigation"]).optional(),
       testUndos: z.array(z.object({ result: z.enum(["Passed", "Failed", "Under investigation"]), testedAt: timestamp.optional(), testedBy: text.optional(),
         reason: z.string().trim().min(3).max(300), undoneAt: timestamp, undoneBy: text })).max(20).optional(),

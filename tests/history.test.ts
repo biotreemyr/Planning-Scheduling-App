@@ -42,6 +42,12 @@ describe("transaction history", () => {
     const rejected = structuredClone(failed);
     Object.assign(rejected.data.jobOrders.at(-1)!, { testResult: "Failed", rejectedAt: "2026-10-31T01:00:00.000Z", rejectedBy: "QA" });
     expect(describeChanges(failed, rejected).map((change) => change.text)).toEqual(["Testing result for JO0051 (batch B2609005): Under investigation → Failed", "JO0051 (batch B2609005) rejected after failing testing"]);
+    const released = structuredClone(passed);
+    const release = { orderId: order.id, quantity: 120, uom: "boxes", releasedAt: "2026-10-30T02:00:00.000Z", releasedBy: "QA" };
+    released.data.jobOrders.at(-1)!.poReleases = [release];
+    const unreleased = structuredClone(passed);
+    unreleased.data.jobOrders.at(-1)!.releaseUndos = [{ ...release, reason: "COA not signed", undoneAt: "2026-10-30T03:00:00.000Z", undoneBy: "QA" }];
+    expect(describeChanges(released, unreleased).map((change) => change.text)).toEqual(["Release of JO0051 (batch B2609005) to PO PO-2610-142 undone: 120 boxes (released by QA on 30/10/2026); waiting for release again (reason: COA not signed)"]);
   });
   it("lists versions newest first with who and when, skipping saves that changed nothing", () => {
     const next = structuredClone(base);

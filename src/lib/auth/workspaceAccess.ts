@@ -5,7 +5,7 @@ import type { Customer, Product } from "@/lib/domain/types";
 import { customerFor, productFor, type MasterLists } from "@/lib/services/masterData";
 import type { WorkspaceCapabilities } from "./capabilities";
 import { bookingMoved } from "@/lib/services/planChanges";
-import { orderedInJobs, overPlanAllowed } from "@/lib/services/sharedJobs";
+import { jobParts, orderedInJobs, overPlanAllowed, releaseFor } from "@/lib/services/sharedJobs";
 
 type Keyed = { id: string };
 function diff<T extends Keyed>(before: T[], after: T[]) {
@@ -38,7 +38,7 @@ const LINE_RESULTS: string[] = ["completedAt", "yieldQuantity", "yieldUom", "wei
 const jobGroups = (can: WorkspaceCapabilities) => [
   { keys: ["batchNumber", "batchNumberBy", "batchNumberAt"], allowed: can.produce || can.editPlan, what: "enter batch numbers" },
   { keys: ["testedAt", "testedBy", "testResult", "testUndos"], allowed: can.passTesting, what: "record testing results" },
-  { keys: ["releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy", "poReleases"], allowed: can.release, what: "release or reject batches" },
+  { keys: ["releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy", "poReleases", "releaseUndos"], allowed: can.release, what: "release or reject batches" },
   // QA confirms that POs with different FG codes sharing a batch are the same formula.
   { keys: ["formulaConfirmedBy", "formulaConfirmedAt"], allowed: can.release, what: "confirm a shared batch's formula", clearedByEdit: true }
 ];
@@ -122,6 +122,19 @@ export function reviewWorkspaceChange(before: WorkspaceSnapshot, after: Workspac
       if (taken.length > 1 || job.testResult !== undefined || job.testedAt !== undefined || !(old.testResult ?? old.testedAt) || !taken[0].reason?.trim()) need(false, "undo a testing result without its reason");
       if (old.releasedAt || old.rejectedAt || old.poReleases?.length) need(false, "undo the testing result of a released or rejected batch");
     } else if ((old.testResult ?? old.testedAt) && job.testResult === undefined && job.testedAt === undefined) need(false, "undo a testing result without its reason");
+    // A release is taken back one PO at a time, with its reason kept, only while that PO is open.
+    const releaseUndos = (value: typeof job) => value.releaseUndos ?? [];
+    const takenBack = releaseUndos(job).slice(releaseUndos(old).length);
+    if (!isDeepStrictEqual(releaseUndos(job).slice(0, releaseUndos(old).length), releaseUndos(old))) need(false, "change earlier undone releases");
+    const releasedTo = (value: typeof job) => jobParts(value).filter((part) => releaseFor(value, part.orderId)).map((part) => part.orderId);
+    const dropped = releasedTo(old).filter((orderId) => !releasedTo(job).includes(orderId));
+    if (takenBack.length || dropped.length) {
+      // The undo keeps the release exactly as it was, with the reason.
+      const { reason, undoneAt: _at, undoneBy: _by, ...was } = takenBack[0] ?? { reason: "" };
+      if (takenBack.length !== 1 || dropped.length !== 1 || !reason.trim() || !isDeepStrictEqual(was, releaseFor(old, dropped[0])))
+        need(false, "undo a release without its reason");
+      if (before.data.orders.find((order) => order.id === dropped[0])?.closedAt) need(false, "undo a release to a closed PO");
+    }
     const rest = keys.filter((key) => !JOB_GROUPED.has(key));
     if (rest.some((key) => !EDIT_STAMPS.includes(key)) || (rest.length && rest.length === keys.length)) need(can.editOrders, "edit job orders");
   }

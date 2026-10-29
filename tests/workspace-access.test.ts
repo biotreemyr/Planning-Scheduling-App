@@ -148,6 +148,28 @@ describe("workspace change review", () => {
     const rewritten = structuredClone(undone); rewritten.data.jobOrders[0].testUndos = [{ ...undo, reason: "Something else" }];
     expect(reviewWorkspaceChange(undone, rewritten, qc).denied).toContain("change earlier undone testing results");
   });
+  it("lets QA undo a release only with its reason, and only while the PO is open", () => {
+    const qa = role("release.edit");
+    const before = copy();
+    const job = before.data.jobOrders[0];
+    const release = { orderId: job.orderId, quantity: 10, uom: "boxes", releasedAt: "2026-10-09T10:00:00.000Z", releasedBy: "QA" };
+    Object.assign(job, { testedAt: "2026-10-08T10:00:00.000Z", testedBy: "QC", testResult: "Passed", poReleases: [release], releasedAt: release.releasedAt, releasedBy: "QA", releaseQuantity: 10, releaseUom: "boxes" });
+    const undone = structuredClone(before);
+    const after = undone.data.jobOrders[0];
+    for (const key of ["poReleases", "releasedAt", "releasedBy", "releaseQuantity", "releaseUom"] as const) delete after[key];
+    const bare = structuredClone(undone);
+    after.releaseUndos = [{ ...release, reason: "Released by mistake", undoneAt: "2026-10-09T11:00:00.000Z", undoneBy: "QA" }];
+    expect(reviewWorkspaceChange(before, undone, qa).allowed).toBe(true);
+    expect(reviewWorkspaceChange(before, undone, role("testing.edit")).denied).toEqual(["release or reject batches"]);
+    expect(reviewWorkspaceChange(before, bare, qa).denied).toEqual(["undo a release without its reason"]);
+    const altered = structuredClone(undone); altered.data.jobOrders[0].releaseUndos![0].quantity = 9;
+    expect(reviewWorkspaceChange(before, altered, qa).denied).toEqual(["undo a release without its reason"]);
+    const closed = structuredClone(before); Object.assign(closed.data.orders.find((order) => order.id === job.orderId)!, { closedAt: "2026-10-10T00:00:00.000Z", closedBy: "Planner", closedQuantity: 10, closedUom: "boxes" });
+    const closedUndone = structuredClone(undone); Object.assign(closedUndone.data.orders.find((order) => order.id === job.orderId)!, closed.data.orders.find((order) => order.id === job.orderId)!);
+    expect(reviewWorkspaceChange(closed, closedUndone, qa).denied).toContain("undo a release to a closed PO");
+    const rewritten = structuredClone(undone); rewritten.data.jobOrders[0].releaseUndos![0].reason = "Something else";
+    expect(reviewWorkspaceChange(undone, rewritten, qa).denied).toContain("change earlier undone releases");
+  });
   it("lets an order editor clear a formula confirmation but not set one", () => {
     const before = copy();
     Object.assign(before.data.jobOrders[0], { formulaConfirmedBy: "QA", formulaConfirmedAt: "2026-10-09T10:00:00.000Z" });

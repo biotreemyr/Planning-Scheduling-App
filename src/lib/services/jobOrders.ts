@@ -1,7 +1,7 @@
 import type { CalendarDirectory } from "@/lib/domain/calendarAccess";
 import type { Customer, PlanLine, Product } from "@/lib/domain/types";
 import type { PurchaseOrder } from "./orders";
-import { jobForOrder, jobsServing, orderedInJobs, overOrderedText, overPlanAllowed, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease } from "./sharedJobs";
+import { jobForOrder, jobsServing, orderedInJobs, overOrderedText, overPlanAllowed, perOrderSource, releaseFor, releasedToOrder, type JobShare, type PoRelease, type ReleaseUndo } from "./sharedJobs";
 import { ROUTES, inferFormat, stepLabel, stepOf, type FlowWarning, type ProductFormat, type RouteStepName } from "./processRules";
 import { calendarProcessName, calendarSettings, type PlannedSource } from "./processSetup";
 import { lineEnd } from "./scheduling";
@@ -44,6 +44,8 @@ export type JobOrder = {
   formulaConfirmedBy?: string; formulaConfirmedAt?: string;
   // QA's release to each PO, by batch or one PO at a time, with what else the output went to.
   poReleases?: PoRelease[];
+  // Releases QA took back before planning closed the PO, each with why, by whom and when.
+  releaseUndos?: ReleaseUndo[];
   // Keyed in by production; shown on every process activity of the job.
   batchNumber?: string;
   batchNumberBy?: string; batchNumberAt?: string;

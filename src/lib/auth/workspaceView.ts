@@ -23,7 +23,7 @@ import type { WorkspaceCapabilities } from "./capabilities";
 export const ORDER_HIDDEN = ["customerId", "soNumber", "receivedDate", "notes", "closedQuantity", "closedUom", "closedAt", "closedBy", "closeNote"] as const;
 export const ORDER_CUSTOMER = ["customerName"] as const;
 export const JOB_HIDDEN = ["notes"] as const;
-export const JOB_QUALITY = ["testedAt", "testedBy", "testResult", "testUndos", "releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy", "poReleases", "formulaConfirmedBy", "formulaConfirmedAt"] as const;
+export const JOB_QUALITY = ["testedAt", "testedBy", "testResult", "testUndos", "releaseQuantity", "releaseUom", "releasedAt", "releasedBy", "rejectedAt", "rejectedBy", "poReleases", "releaseUndos", "formulaConfirmedBy", "formulaConfirmedAt"] as const;
 
 type Hidden = { customers: boolean; order: string[]; job: string[] };
 function hiddenFor(can: WorkspaceCapabilities): Hidden {

@@ -110,6 +110,10 @@ export function describeChanges(before: Snapshot, after: Snapshot): HistoryChang
     const releasesOf = (value: Row) => (Array.isArray(value.poReleases) ? value.poReleases : []) as Release[];
     for (const release of releasesOf(row).filter((item) => !releasesOf(old).some((was) => was.orderId === item.orderId)))
       changes.push({ kind: "Job order", ...jobRefs(row), text: `${str(row.number)} released to PO ${po(release.orderId) ?? "-"}: ${num(release.quantity)} ${str(release.uom)}${release.otherUses?.length ? `; also ${release.otherUses.map((use) => `${num(use.quantity)} ${str(use.note)}`).join(", ")}` : ""}` });
+    type ReleaseUndo = Release & { releasedBy?: string; releasedAt?: string; reason: string };
+    const releaseUndosOf = (value: Row) => (Array.isArray(value.releaseUndos) ? value.releaseUndos : []) as ReleaseUndo[];
+    for (const undo of releaseUndosOf(row).slice(releaseUndosOf(old).length))
+      changes.push({ kind: "Job order", ...jobRefs(row), text: `Release of ${batchName} to PO ${po(undo.orderId) ?? "-"} undone: ${num(undo.quantity)} ${str(undo.uom)}${undo.releasedBy ? ` (released by ${str(undo.releasedBy)}${undo.releasedAt ? ` on ${day(undo.releasedAt)}` : ""})` : ""}; waiting for release again (reason: ${str(undo.reason)})` });
   }
 
   const lineDiff = diff(list(before, "lines"), list(after, "lines"));

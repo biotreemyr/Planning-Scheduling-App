@@ -4,7 +4,7 @@ import type { CalendarDirectory } from "../src/lib/domain/calendarAccess";
 import type { PlanLine } from "../src/lib/domain/types";
 import type { JobOrder } from "../src/lib/services/jobOrders";
 import type { PurchaseOrder } from "../src/lib/services/orders";
-import { closeOrder, closedSummary, finalOutputFor, jobForOrder, jobParts, needsFormulaCheck, orderedInJobs, orderViewLines, readyToClose, releasedToOrder, releaseToOrders, sharesAfterYield, sharesProblem } from "../src/lib/services/sharedJobs";
+import { closeOrder, closedSummary, finalOutputFor, jobForOrder, jobParts, needsFormulaCheck, orderedInJobs, orderViewLines, readyToClose, releasedToOrder, releaseToOrders, sharesAfterYield, sharesProblem, undoableReleases, undoRelease } from "../src/lib/services/sharedJobs";
 
 // Customer A's Vitamin C (FG-001, 30s bottles) and customer B's same formula (FG-002, 60s blisters).
 const po = (id: string, extra: Partial<PurchaseOrder> = {}): PurchaseOrder => ({ id, poNumber: id.toUpperCase(), productId: "fg-001", quantity: 2000, uom: "bottles", format: "Tablet", expectedDates: {}, createdAt: "2026-10-15T00:00:00.000Z", createdBy: "Planner", ...extra });
@@ -82,6 +82,27 @@ describe("release and closing", () => {
     expect(releaseToOrders(tested, [{ orderId: "po-a", quantity: 1990, uom: "bottles", otherUses: [{ quantity: 10, note: " " }] }], orders, "QA", at)).toEqual({ error: "PO-A: say what the 10 bottles went to." });
     const all = releaseToOrders(tested, [{ orderId: "po-a", quantity: 2000, uom: "bottles" }, { orderId: "po-b", quantity: 1000, uom: "blisters" }], orders, "QA", at) as JobOrder;
     expect(all.releasedAt).toBe(at.toISOString());
+  });
+
+  it("undoes a release to one PO, with the reason, until planning closes that PO", () => {
+    const all = releaseToOrders(tested, [{ orderId: "po-a", quantity: 2000, uom: "bottles", otherUses: [{ quantity: 6, note: "Retention sample" }] }, { orderId: "po-b", quantity: 1000, uom: "blisters" }], orders, "QA", at) as JobOrder;
+    const later = new Date("2026-10-24T09:00:00.000Z");
+    expect(undoRelease(all, "po-a", " ", orders, "QA", later)).toEqual({ error: "Give the reason for undoing the release." });
+    expect(undoRelease(tested, "po-a", "Mistake", orders, "QA", later)).toEqual({ error: "JO0010 is not released to PO-A." });
+    const undone = undoRelease(all, "po-a", " Released by mistake ", orders, "Angeline", later) as JobOrder;
+    // The batch is no longer released whole; PO-B keeps its release, PO-A waits for release again.
+    expect([undone.releasedAt, undone.releaseQuantity, undone.poReleases?.map((item) => item.orderId)]).toEqual([undefined, undefined, ["po-b"]]);
+    expect(undone.releaseUndos).toEqual([{ ...all.poReleases![0], reason: "Released by mistake", undoneAt: later.toISOString(), undoneBy: "Angeline" }]);
+    expect(undoableReleases(undone, orders).map((item) => item.orderId)).toEqual(["po-b"]);
+    expect(releaseToOrders(undone, [{ orderId: "po-a", quantity: 1994, uom: "bottles" }], orders, "QA", later)).toMatchObject({ releasedAt: later.toISOString(), poReleases: [{ orderId: "po-b" }, { orderId: "po-a", quantity: 1994 }] });
+    // Not once planning has closed the PO.
+    const closed = [{ ...poA, closedAt: later.toISOString() }, poB];
+    expect(undoRelease(all, "po-a", "Mistake", closed, "QA", later)).toEqual({ error: "PO-A is closed, so this release cannot be undone." });
+    expect(undoableReleases(all, closed).map((item) => item.orderId)).toEqual(["po-b"]);
+    // A batch released whole before releases were kept per PO.
+    const legacy: JobOrder = { ...tested, shares: undefined, releasedAt: at.toISOString(), releasedBy: "QA", releaseQuantity: 2000, releaseUom: "bottles" };
+    const legacyUndone = undoRelease(legacy, "po-a", "Mistake", orders, "QA", later) as JobOrder;
+    expect([legacyUndone.releasedAt, legacyUndone.poReleases, legacyUndone.releaseUndos?.[0].quantity]).toEqual([undefined, undefined, 2000]);
   });
 
   it("is ready for planning to close once every batch is released to the PO, closing with a reason when it differs", () => {
