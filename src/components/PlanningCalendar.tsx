@@ -25,7 +25,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&"
 
 const dateKey = (value: { getFullYear(): number; getMonth(): number; getDate(): number }) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
-export default function PlanningCalendar({ workDays = workingCalendar(undefined), onOpenDay, processSettings = {}, canPrint = true, orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", planLines, products, initialDate, onPlanJob, onMove, onResize, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
+export default function PlanningCalendar({ workDays = workingCalendar(undefined), onOpenDay, processSettings = {}, canPrint = true, orders = [], jobOrders = [], allLines, editJobRequest, warnings, processNames, planningView = "calendar", calendarView, onCalendarView, planLines, products, initialDate, onPlanJob, onMove, onResize, canPlan = true, canCreate = canPlan, demo = true, onSelect, calendarTitle = "Production calendar", allPrintLines = planLines, entries = [], machines = [], calendars = [] }: {
   processNames: Record<string, string>;
   processSettings?: Record<string, ProcessSettings>;
   // The unit's working days: off days are greyed and labelled, and planning skips them.
@@ -39,6 +39,9 @@ export default function PlanningCalendar({ workDays = workingCalendar(undefined)
   // Process-flow warnings by activity id, marked with ⚠ on the calendar and list.
   warnings?: Map<string, string[]>;
   planningView?: "calendar" | "list";
+  // Month, Week or Day, remembered per person; a phone always starts on Day.
+  calendarView?: View;
+  onCalendarView?: (view: View) => void;
   calendars?: UnitCalendar[];
   calendarTitle?: string; allPrintLines?: PlanLine[]; entries?: ScheduleEntry[]; machines?: Machine[];
   planLines: PlanLine[]; products: Product[]; initialDate: string;
@@ -87,7 +90,8 @@ export default function PlanningCalendar({ workDays = workingCalendar(undefined)
   const calendar = useRef<Calendar | null>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [view, setView] = useState<View>("month");
+  const [view, setView] = useState<View>(calendarView ?? "month");
+  useEffect(() => { if (calendarView && !window.matchMedia("(max-width: 760px)").matches) setView(calendarView); }, [calendarView]);
   const displayView = planningView === "list" ? "month" : view;
   const printName = planningView === "list" ? "list" : "calendar";
   const [date, setDate] = useState(initialDate);
@@ -226,7 +230,7 @@ export default function PlanningCalendar({ workDays = workingCalendar(undefined)
         {canCreate ? <button className="primary-button" type="button" disabled={!ready || !products.length} onClick={() => openCreate(date)}><Plus size={17} />Production Planning</button> : null}
         <input aria-label="Calendar date" type="date" value={date} onChange={(event) => { if (event.target.value) setDate(event.target.value); }} />
         {planningView === "calendar" ? <div className="view-switch" aria-label="Calendar period">
-          {(["month", "week", "day"] as const).map((item) => <button type="button" key={item} aria-pressed={view === item} onClick={() => setView(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
+          {(["month", "week", "day"] as const).map((item) => <button type="button" key={item} aria-pressed={view === item} onClick={() => { setView(item); onCalendarView?.(item); }}>{item[0].toUpperCase() + item.slice(1)}</button>)}
         </div> : null}
       </div>
     </div>
