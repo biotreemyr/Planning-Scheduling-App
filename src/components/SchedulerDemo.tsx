@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, CalendarDays, CheckCircle2, ClipboardList, FileText, FlaskConical, Sparkles, LayoutGrid, Users, History } from "lucide-react";
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { UnitCalendar } from "@/lib/domain/calendarAccess";
 import { StatusBadge } from "@/components/StatusBadge";
 import PlanningCalendar from "@/components/PlanningCalendar";
@@ -27,6 +27,7 @@ import { batchRoute, isNonProduction, validateOrder, type PurchaseOrder } from "
 import { awaitingReceipt, correctsRecord, validateCompletion, validateCorrection, withoutProgress, type CompletionInput, type Progress, type CorrectionInput, type WipTransfer } from "@/lib/services/productionFlow";
 import { localDateKey } from "@/lib/services/calendarPrint";
 import { dayStatus, shortDay, workingCalendar, type HolidayList, type SpecialDay, type WorkingCalendar } from "@/lib/services/workingDays";
+import { readLastView, saveLastView, type LastView } from "@/lib/services/lastView";
 import { OffDaysButton } from "./OffDaysDialog";
 import { ProductionActuals, type ActualInput } from "@/components/ProductionActuals";
 import { ReportsOverview } from "@/components/ReportsOverview";
@@ -62,6 +63,7 @@ type ReportSection = "overview" | "actuals" | "load";
 const REPORT_SECTIONS: { id: ReportSection; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "actuals", label: "Actuals & WIP" }, { id: "load", label: "Schedule load" }];
 type Tab = "planner" | "orders" | "trials" | "status" | "master" | "reports" | "audit" | "news";
 type PlanningView = "calendar" | "list";
+type CalendarView = "month" | "week" | "day";
 
 const tabs: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: "planner", label: "Planner Board", icon: CalendarDays },
@@ -194,6 +196,8 @@ function PlannerBoard({
   onSelect,
   planningView,
   onPlanningView,
+  calendarView,
+  onCalendarView,
   offDays
 }: {
   processNames: Record<string, string>;
@@ -223,6 +227,9 @@ function PlannerBoard({
   onSelect: (id: string) => void;
   planningView: PlanningView;
   onPlanningView: (view: PlanningView) => void;
+  // Month, Week or Day on the Calendar, remembered per person.
+  calendarView: CalendarView;
+  onCalendarView: (view: CalendarView) => void;
   // The unit's working days, and opening or closing a day (planners, production managers, Admin).
   offDays: { unitName: string; calendar: WorkingCalendar; holidays: HolidayList; canEdit: boolean; onAdd: (date: string, kind: SpecialDay["kind"], reason: string) => string; onRemove: (id: string) => string };
 }) {
@@ -260,7 +267,7 @@ function PlannerBoard({
         </div>
         <FlowBanner warnings={flow.filter((warning) => warning.lineIds.some((id) => planLines.some((line) => line.id === id)))} onOpen={onSelect} />
         {visibleLines.length === 0 && planLines.length > 0 ? <p role="status" className="empty-state">No plan lines match these filters.</p> : null}
-        <PlanningCalendar canPrint={canPrint} processNames={processNames} processSettings={processSettings} planningView={planningView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} workDays={offDays.calendar} onOpenDay={offDays.canEdit ? (date, reason) => offDays.onAdd(date, "working", reason) : undefined} onMove={onMoveLine} onResize={onResizeLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
+        <PlanningCalendar canPrint={canPrint} processNames={processNames} processSettings={processSettings} planningView={planningView} calendarView={calendarView} onCalendarView={onCalendarView} calendars={calendars} calendarTitle={calendarTitle} allPrintLines={planLines} entries={entries} machines={machines} canPlan={canPlan} canCreate={canCreate} demo={demo} onSelect={onSelect} planLines={visibleLines} products={products} orders={orders} jobOrders={jobOrders} warnings={warningsByLine(flow)} initialDate={initialDate} workDays={offDays.calendar} onOpenDay={offDays.canEdit ? (date, reason) => offDays.onAdd(date, "working", reason) : undefined} onMove={onMoveLine} onResize={onResizeLine} allLines={allLines} editJobRequest={planRequest} onPlanJob={(plan, mode) => {
           const result = onJobPlan(plan, mode);
           if ("message" in result) { setQuery(""); setPriorityFilter(""); setStatusFilter(""); }
           return result;
@@ -417,6 +424,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   // Signed-in Core users start on the plan; the local demo starts on Admin to set up units.
   const [activeTab, setActiveTab] = useState<Tab>(identity ? "planner" : "master");
   const [planningView, setPlanningView] = useState<PlanningView>("calendar");
+  const [calendarView, setCalendarView] = useState<CalendarView>("month");
   const [adminSection, setAdminSection] = useState("Setup");
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
   // Which QA/QC section is open: Testing or Release.
@@ -428,6 +436,29 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
   const [activityUpdating, setActivityUpdating] = useState(false);
   const [activityNotice, setActivityNotice] = useState("");
   const openActivity = (id: string, update = false) => { setSelectedActivity(id); setActivityUpdating(update); setActivityNotice(""); };
+  // Each person reopens where they last were (page, Calendar or List, Month/Week/Day, QA/QC and
+  // Reports section). A page or section they may no longer open is skipped.
+  const tabAllowed = (tab: string | undefined): tab is Tab => tabs.some((item) => item.id === tab)
+    && (tab !== "reports" || caps.reports) && (tab !== "audit" || caps.auditTrail) && (tab !== "master" || !identity || canManage)
+    && ((tab !== "orders" && tab !== "trials") || caps.viewOrders) && (tab !== "status" || caps.viewTesting || caps.viewRelease);
+  const statusAllowed = (section: string | undefined): section is StatusSection => section === "testing" ? caps.viewTesting : (section === "release" || section === "yield") && caps.viewRelease;
+  const reportAllowed = (section: string | undefined): section is ReportSection => REPORT_SECTIONS.some((item) => item.id === section);
+  // Saving waits until the saved view is back in place, so the first render's defaults never overwrite it.
+  const [restoredFor, setRestoredFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (restoredFor === member.id) saveLastView(member.id, { tab: activeTab, planningView, calendarView, statusSection, reportSection });
+  }, [restoredFor, member.id, activeTab, planningView, calendarView, statusSection, reportSection]);
+  useEffect(() => {
+    const saved: LastView = readLastView(member.id);
+    if (tabAllowed(saved.tab)) setActiveTab(saved.tab);
+    if (saved.planningView) setPlanningView(saved.planningView);
+    if (saved.calendarView) setCalendarView(saved.calendarView);
+    if (statusAllowed(saved.statusSection)) setStatusSection(saved.statusSection);
+    if (reportAllowed(saved.reportSection)) setReportSection(saved.reportSection);
+    setRestoredFor(member.id);
+    // Restore once per person; the checks read this render's permissions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [member.id]);
   const checkDates = useDateCheck();
   // "Edit job order planning" from the activity panel reopens the plan form for that job order.
   const [jobEdit, setJobEdit] = useState<{ jobId: string; nonce: number } | null>(null);
@@ -1074,7 +1105,7 @@ function TeamWorkspace({ initial, writeToken, identity, catalog, equipment, rele
       {!unit && activeTab !== "master" && activeTab !== "news" ? <section><p>{canManage ? "Add a unit to create its calendar." : "No unit assigned. Contact your administrator."}</p>{canManage ? <button type="button" className="primary-button" onClick={() => { setActiveTab("master"); setAdminSection("Configuration"); }}>Manage units</button> : null}</section> : null}
       {unit && !unitCalendars.length && activeTab === "planner" ? <p role="status">{directory.calendars.some((item) => item.unitId === unit.id) ? "No process access assigned for this unit. Configure access in Setup." : "No processes configured for this unit yet."}</p> : null}
       {planNotice && activeTab === "planner" && !selectedActivity ? <p role="status" className="calendar-notice plan-save-notice">{planNotice}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setPlanNotice("")}>×</button></p> : null}
-      {unit && activeTab === "planner" ? <PlannerBoard offDays={{ unitName: unit.name, calendar: workDays, holidays, canEdit: caps.editPlan, onAdd: addSpecialDay, onRemove: removeSpecialDay }} planningView={planningView} onPlanningView={setPlanningView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canMoveDates && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
+      {unit && activeTab === "planner" ? <PlannerBoard offDays={{ unitName: unit.name, calendar: workDays, holidays, canEdit: caps.editPlan, onAdd: addSpecialDay, onRemove: removeSpecialDay }} planningView={planningView} onPlanningView={setPlanningView} calendarView={calendarView} onCalendarView={setCalendarView} processNames={processNames} processSettings={Object.fromEntries(visibleCalendars.map((item) => [item.id, calendarSettings(directory, item.id)]))} key={`${unit.id}-${memberId}`} calendars={visibleCalendars} filterControls={filterControls} calendarTitle={calendarTitle} entries={entries} machines={calendarMachines} canPlan={canMoveDates && visibleCalendars.length > 0} canCreate={canCreate && visibleCalendars.length > 0} demo={!identity} onSelect={(id: string) => openActivity(id, canProduce)} planLines={planLines} products={products} orders={data.orders} jobOrders={data.jobOrders.filter((job) => inStream(job.orderId))} allLines={data.lines} canPrint={caps.printPlan} flow={flow}
         onMoveLine={moveLine} onResizeLine={resizeLine}
         onJobPlan={planJobRoute} editJobRequest={jobEdit} /> : null}
       {activeTab === "planner" && selectedLine ? <ActivityWorkspace directory={directory} allLines={data.lines} key={`${selectedLine.jobOrderId ?? selectedLine.id}-${memberId}`} onEditJobPlanning={canPlan && selectedLine.jobOrderId ? () => { setJobEdit({ jobId: selectedLine.jobOrderId!, nonce: Date.now() }); setSelectedActivity(null); } : undefined} line={selectedLine} product={products.find((item) => item.id === selectedLine.productId)} onClose={() => setSelectedActivity(null)}
