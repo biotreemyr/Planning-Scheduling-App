@@ -8,6 +8,8 @@ Format, rules and an example: [VERSIONING.md, Writing a CHANGELOG entry](VERSION
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-10-30
+
 ### Added
 - **The app reopens where you left it**: each person comes back to the page they last used, e.g. the Planner Board in List view, with the same Calendar period (Month, Week or Day) and the same QA/QC and Reports section. It is remembered per person in that browser, so nobody else's view changes. A page you no longer have access to is skipped.
 
